@@ -49,6 +49,7 @@ export const CLIENT_GENERATIVE_UI_HINT = [
   "- 出版级矢量图表（render_editorial_diagram）：当呈现系统架构分层拓扑、服务调用时序、流程业务状态机、技术选型四象限决策矩阵或项目演进里程碑时，鼓励优先调用生成出版级矢量图表，代替原始简陋的 Mermaid 文本；",
   "- 结构化富交互卡片（show_interactive_card）：当向用户提供方案对比决策(cardType='decision')、任务排查或门禁清单('checklist')、核心性能与指标看板('metrics')或表单填报('form')时直接渲染。调用时 data 必须携带非空内容（如 decision 必须含 options: [{ id, label, description, recommended }]，严禁传空数据）；若向用户征询执行方案确认或授权决策，请调用 cardType='decision' 提供明确的选择支；真正的高危文件修改与终端命令在执行时宿主底层安全机制会自动拦截并弹出系统权限气泡；",
   "- 人机协同交互表单（prompt_form）与动态组件沙箱原型（render_react_sandbox）；",
+  "- 选项确认与技术路线决策：若需用户在多个方案间做出技术选型或回答选择题，请优先调用 show_interactive_card(cardType='decision') 或在正文中以清晰的 Markdown 编号方案呈现，供用户直观选择；切勿调用内部已被禁用的问询/表单工具（如 question 工具）；",
   "- 专业技能按需调取：查图表规范调用 get_studio_skill({name:\"diagram-design\"})，查交互卡片规范传 name:\"generative-ui\"；name 必填，不确定时先调用 list_studio_skills 获取标识。",
   "（注：以上工具均为可选的体验增强手段，请在符合对话场景时自然适度地运用。）",
 ].join("\n");
@@ -865,11 +866,21 @@ export class UniversalAgentConnection {
 
       let effectivePrompt = prompt;
       const compatibilityContext = this.resources.compatibilityText(sessionId);
-      if (compatibilityContext && Array.isArray(prompt)) {
-        effectivePrompt = [
-          { type: "text", text: compatibilityContext },
-          ...prompt,
-        ];
+      const isOpencode = this.profile.id === "opencode";
+      const opencodeCompatibility = (isOpencode && turnCount === 0)
+        ? "【OpenCode 交互指引】：在当前通用客户端环境下，切勿调用内部 `question` 工具（该工具无法通过外部协议弹窗）。若需向用户征询技术路线、确认需求或做选择题，请直接在正文中以清晰的 Markdown 编号方案列出选项（如 方案 A、方案 B、方案 C）或调用 `show_interactive_card(cardType='decision')` 决策卡，供用户直接点击交互。"
+        : null;
+
+      const prefixBlocks: Array<{ type: "text"; text: string }> = [];
+      if (compatibilityContext) {
+        prefixBlocks.push({ type: "text", text: compatibilityContext });
+      }
+      if (opencodeCompatibility) {
+        prefixBlocks.push({ type: "text", text: opencodeCompatibility });
+      }
+
+      if (prefixBlocks.length > 0 && Array.isArray(prompt)) {
+        effectivePrompt = [...prefixBlocks, ...prompt];
       }
 
       const res = await conn.agent.request(acp.methods.agent.session.prompt, {
