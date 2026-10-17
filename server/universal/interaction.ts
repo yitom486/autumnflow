@@ -1,3 +1,4 @@
+import type { RequestPermissionResponse } from "@agentclientprotocol/sdk";
 import type { PendingElicitation, PendingPermission } from "./types";
 
 export type SseBroadcaster = (sessionId: string, evt: Record<string, unknown>) => void;
@@ -103,7 +104,7 @@ export class InteractionManager {
     }
   }
 
-  handlePermissionRequest(params: { sessionId: string; toolCall: unknown; options: unknown }): Promise<unknown> {
+  handlePermissionRequest(params: { sessionId: string; toolCall: unknown; options: unknown }): Promise<RequestPermissionResponse> {
     const permissionId = `perm-${Date.now()}-${this.permSeq++}`;
     console.log(`[UniversalACP:${this.agentId}] permission request ${permissionId} session=${params.sessionId}`);
     
@@ -117,7 +118,7 @@ export class InteractionManager {
       options: params.options,
     });
 
-    return new Promise<unknown>((resolve, reject) => {
+    return new Promise<RequestPermissionResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pendingPermissions.has(permissionId)) {
           this.pendingPermissions.delete(permissionId);
@@ -146,16 +147,38 @@ export class InteractionManager {
     });
   }
 
-  normalizePermissionOutcome(outcome: unknown): unknown {
+  normalizePermissionOutcome(outcome: unknown): RequestPermissionResponse {
     if (outcome && typeof outcome === "object") {
       const o = outcome as Record<string, unknown>;
+      // Case 1: Already fully conforming RequestPermissionResponse with nested outcome
+      if (o.outcome && typeof o.outcome === "object") {
+        const nested = o.outcome as Record<string, unknown>;
+        if (nested.outcome === "selected" && typeof nested.optionId === "string") {
+          return { outcome: { outcome: "selected", optionId: nested.optionId } };
+        }
+        if (nested.outcome === "cancelled") {
+          return { outcome: { outcome: "cancelled" } };
+        }
+      }
+      // Case 2: Flat outcome object { outcome: "selected" | "cancelled", optionId?: string }
       if (o.outcome === "selected" || o.outcome === "cancelled") {
-        if (o.outcome === "selected") return { outcome: { outcome: "selected", optionId: o.optionId } };
+        if (o.outcome === "selected" && typeof o.optionId === "string") {
+          return { outcome: { outcome: "selected", optionId: o.optionId } };
+        }
         return { outcome: { outcome: "cancelled" } };
       }
-      if (typeof o.optionId === "string") return { outcome: { outcome: "selected", optionId: o.optionId } };
+      // Case 3: Flat object with optionId
+      if (typeof o.optionId === "string") {
+        return { outcome: { outcome: "selected", optionId: o.optionId } };
+      }
     }
-    if (typeof outcome === "string") return { outcome: { outcome: "selected", optionId: outcome } };
+    // Case 4: Plain string (optionId or explicit cancel)
+    if (typeof outcome === "string") {
+      if (outcome === "cancelled" || outcome === "reject" || outcome === "deny") {
+        return { outcome: { outcome: "cancelled" } };
+      }
+      return { outcome: { outcome: "selected", optionId: outcome } };
+    }
     return { outcome: { outcome: "cancelled" } };
   }
 
