@@ -13,6 +13,7 @@ import {
   DiagramType,
   AccentColor,
 } from "./EditorialDiagramCard";
+import { HelpCircle, SlidersHorizontal, ListChecks, BarChart3 } from "lucide-react";
 import type { GenerativeCardAction } from "@/lib/present-result";
 
 export type { GenerativeCardAction };
@@ -489,16 +490,66 @@ export const AcpGenerativeToolCard: React.FC<{
     const title = args.title || "方案对比与决策";
     const cardType = args.cardType || args.kind || "decision";
     const description = args.description;
-    const data = args.data && typeof args.data === "object" ? args.data : args;
+
+    // 健壮拆包：支持 data 为对象、数组、或嵌套 JSON 字符串
+    let rawData = args.data !== undefined ? args.data : args;
+    if (typeof rawData === "string") {
+      rawData = safeEvalObject(rawData) ?? rawData;
+    }
+    const data: Record<string, any> =
+      rawData && typeof rawData === "object" && !Array.isArray(rawData) ? rawData : {};
 
     if (cardType === "decision") {
-      const options = Array.isArray(data.options)
-        ? data.options
-        : Array.isArray(args.options)
-          ? args.options
-          : [];
+      let candidateOptions: any[] = [];
+      if (Array.isArray(rawData)) candidateOptions = rawData;
+      else if (Array.isArray(data.options)) candidateOptions = data.options;
+      else if (Array.isArray(data.choices)) candidateOptions = data.choices;
+      else if (Array.isArray(data.items)) candidateOptions = data.items;
+      else if (Array.isArray(data.solutions)) candidateOptions = data.solutions;
+      else if (Array.isArray(data.plans)) candidateOptions = data.plans;
+      else if (Array.isArray(data.candidates)) candidateOptions = data.candidates;
+      else if (Array.isArray(args.options)) candidateOptions = args.options;
+      else if (Array.isArray(args.choices)) candidateOptions = args.choices;
+      else if (Array.isArray(args.items)) candidateOptions = args.items;
+
+      const options = candidateOptions
+        .map((opt, idx) => {
+          if (!opt) return null;
+          if (typeof opt === "string") {
+            return { id: `opt-${idx + 1}`, label: opt };
+          }
+          if (typeof opt === "object") {
+            const id = String(opt.id ?? opt.key ?? opt.value ?? `opt-${idx + 1}`);
+            const label = String(opt.label ?? opt.title ?? opt.name ?? opt.text ?? id);
+            const desc = opt.description ?? opt.desc ?? opt.detail ?? opt.summary;
+            const badge = opt.badge ?? opt.tag;
+            const recommended = Boolean(opt.recommended ?? opt.isRecommended ?? opt.is_recommended);
+            return { id, label, description: desc, badge, recommended };
+          }
+          return null;
+        })
+        .filter(Boolean) as Array<{
+          id: string;
+          label: string;
+          description?: string;
+          badge?: string;
+          recommended?: boolean;
+        }>;
+
       if (options.length === 0 && isPending) {
         return <GenerativeSkeleton title={title} hint="正在生成方案决策卡片…" />;
+      }
+      if (options.length === 0) {
+        return (
+          <div className="my-2.5 rounded-xl border border-border bg-card/70 p-4 text-xs text-foreground max-w-xl">
+            <div className="flex items-center gap-2 font-medium mb-1">
+              <HelpCircle className="w-4 h-4 text-primary shrink-0" />
+              <span>{title}</span>
+            </div>
+            {description && <p className="text-muted-foreground mb-2 leading-relaxed">{description}</p>}
+            <p className="text-muted-foreground/70 italic text-[11px]">（智能体暂未下发具体的选项列表数据）</p>
+          </div>
+        );
       }
       return (
         <div className="my-2.5">
@@ -521,13 +572,53 @@ export const AcpGenerativeToolCard: React.FC<{
       );
     }
     if (cardType === "checklist") {
-      const items = Array.isArray(data.items)
-        ? data.items
-        : Array.isArray(args.items)
-          ? args.items
-          : [];
+      let candidateItems: any[] = [];
+      if (Array.isArray(rawData)) candidateItems = rawData;
+      else if (Array.isArray(data.items)) candidateItems = data.items;
+      else if (Array.isArray(data.tasks)) candidateItems = data.tasks;
+      else if (Array.isArray(data.steps)) candidateItems = data.steps;
+      else if (Array.isArray(data.checklist)) candidateItems = data.checklist;
+      else if (Array.isArray(args.items)) candidateItems = args.items;
+
+      const items = candidateItems
+        .map((it, idx) => {
+          if (!it) return null;
+          if (typeof it === "string") return { id: `item-${idx + 1}`, title: it, checked: false };
+          if (typeof it === "object") {
+            const id = String(it.id ?? it.key ?? `item-${idx + 1}`);
+            const itemTitle = String(it.title ?? it.label ?? it.name ?? it.text ?? id);
+            return {
+              id,
+              title: itemTitle,
+              description: it.description ?? it.desc,
+              checked: Boolean(it.checked ?? it.completed ?? it.done),
+              tag: it.tag ?? it.badge,
+            };
+          }
+          return null;
+        })
+        .filter(Boolean) as Array<{
+          id: string;
+          title: string;
+          description?: string;
+          checked?: boolean;
+          tag?: string;
+        }>;
+
       if (items.length === 0 && isPending) {
         return <GenerativeSkeleton title={title} hint="正在生成检查清单…" />;
+      }
+      if (items.length === 0) {
+        return (
+          <div className="my-2.5 rounded-xl border border-border bg-card/70 p-4 text-xs text-foreground max-w-xl">
+            <div className="flex items-center gap-2 font-medium mb-1">
+              <ListChecks className="w-4 h-4 text-primary shrink-0" />
+              <span>{title}</span>
+            </div>
+            {description && <p className="text-muted-foreground mb-2 leading-relaxed">{description}</p>}
+            <p className="text-muted-foreground/70 italic text-[11px]">（暂无检查清单项）</p>
+          </div>
+        );
       }
       return (
         <div className="my-2.5">
@@ -536,13 +627,46 @@ export const AcpGenerativeToolCard: React.FC<{
       );
     }
     if (cardType === "metrics") {
-      const metrics = Array.isArray(data.metrics)
-        ? data.metrics
-        : Array.isArray(args.metrics)
-          ? args.metrics
-          : [];
+      let candidateMetrics: any[] = [];
+      if (Array.isArray(rawData)) candidateMetrics = rawData;
+      else if (Array.isArray(data.metrics)) candidateMetrics = data.metrics;
+      else if (Array.isArray(data.stats)) candidateMetrics = data.stats;
+      else if (Array.isArray(data.items)) candidateMetrics = data.items;
+      else if (Array.isArray(args.metrics)) candidateMetrics = args.metrics;
+
+      const metrics = candidateMetrics
+        .map((m, idx) => {
+          if (!m || typeof m !== "object") return null;
+          return {
+            label: String(m.label ?? m.name ?? m.title ?? `指标 ${idx + 1}`),
+            value: String(m.value ?? m.val ?? "--"),
+            change: m.change ?? m.delta,
+            status: m.status,
+            description: m.description ?? m.desc,
+          };
+        })
+        .filter(Boolean) as Array<{
+          label: string;
+          value: string;
+          change?: string;
+          status?: "good" | "bad" | "neutral";
+          description?: string;
+        }>;
+
       if (metrics.length === 0 && isPending) {
         return <GenerativeSkeleton title={title} hint="正在生成指标看板…" />;
+      }
+      if (metrics.length === 0) {
+        return (
+          <div className="my-2.5 rounded-xl border border-border bg-card/70 p-4 text-xs text-foreground max-w-xl">
+            <div className="flex items-center gap-2 font-medium mb-1">
+              <BarChart3 className="w-4 h-4 text-primary shrink-0" />
+              <span>{title}</span>
+            </div>
+            {description && <p className="text-muted-foreground mb-2 leading-relaxed">{description}</p>}
+            <p className="text-muted-foreground/70 italic text-[11px]">（暂无统计指标数据）</p>
+          </div>
+        );
       }
       return (
         <div className="my-2.5">
@@ -551,13 +675,60 @@ export const AcpGenerativeToolCard: React.FC<{
       );
     }
     if (cardType === "form") {
-      const fields = Array.isArray(data.fields)
-        ? data.fields
-        : Array.isArray(args.fields)
-          ? args.fields
-          : [];
+      let candidateFields: any[] = [];
+      if (Array.isArray(rawData)) candidateFields = rawData;
+      else if (Array.isArray(data.fields)) candidateFields = data.fields;
+      else if (Array.isArray(data.inputs)) candidateFields = data.inputs;
+      else if (Array.isArray(data.items)) candidateFields = data.items;
+      else if (Array.isArray(data.questions)) candidateFields = data.questions;
+      else if (Array.isArray(args.fields)) candidateFields = args.fields;
+      else if (Array.isArray(args.inputs)) candidateFields = args.inputs;
+
+      const fields = candidateFields
+        .map((f, idx) => {
+          if (!f) return null;
+          if (typeof f === "string") {
+            return { id: `field-${idx + 1}`, label: f, type: "text" };
+          }
+          if (typeof f === "object") {
+            const id = String(f.id ?? f.name ?? f.key ?? `field-${idx + 1}`);
+            const label = String(f.label ?? f.title ?? f.name ?? id);
+            return {
+              id,
+              label,
+              type: f.type || "text",
+              placeholder: f.placeholder,
+              options: Array.isArray(f.options) ? f.options.map(String) : undefined,
+              defaultValue: f.defaultValue ?? f.default,
+              required: Boolean(f.required),
+            };
+          }
+          return null;
+        })
+        .filter(Boolean) as Array<{
+          id: string;
+          label: string;
+          type?: string;
+          placeholder?: string;
+          options?: string[];
+          defaultValue?: any;
+          required?: boolean;
+        }>;
+
       if (fields.length === 0 && isPending) {
         return <GenerativeSkeleton title={title} hint="正在构建交互表单…" />;
+      }
+      if (fields.length === 0) {
+        return (
+          <div className="my-2.5 rounded-xl border border-border bg-card/70 p-4 text-xs text-foreground max-w-xl">
+            <div className="flex items-center gap-2 font-medium mb-1">
+              <SlidersHorizontal className="w-4 h-4 text-primary shrink-0" />
+              <span>{title}</span>
+            </div>
+            {description && <p className="text-muted-foreground mb-2 leading-relaxed">{description}</p>}
+            <p className="text-muted-foreground/70 italic text-[11px]">（智能体暂未提供表单字段定义）</p>
+          </div>
+        );
       }
       return (
         <div className="my-2.5">
@@ -627,13 +798,67 @@ export const AcpGenerativeToolCard: React.FC<{
   }
 
   if (normName === "prompt_form") {
-    const fields = Array.isArray(args.fields)
-      ? args.fields
-      : Array.isArray(args.data?.fields)
-        ? args.data.fields
-        : [];
+    let rawFields = args.fields ?? args.data?.fields ?? args.data;
+    if (typeof rawFields === "string") {
+      rawFields = safeEvalObject(rawFields) ?? rawFields;
+    }
+    let candidateFields: any[] = [];
+    if (Array.isArray(rawFields)) candidateFields = rawFields;
+    else if (rawFields && typeof rawFields === "object") {
+      candidateFields = Array.isArray(rawFields.fields)
+        ? rawFields.fields
+        : Array.isArray(rawFields.inputs)
+          ? rawFields.inputs
+          : Array.isArray(rawFields.items)
+            ? rawFields.items
+            : [];
+    }
+
+    const fields = candidateFields
+      .map((f, idx) => {
+        if (!f) return null;
+        if (typeof f === "string") {
+          return { id: `field-${idx + 1}`, label: f, type: "text" };
+        }
+        if (typeof f === "object") {
+          const id = String(f.id ?? f.name ?? f.key ?? `field-${idx + 1}`);
+          const label = String(f.label ?? f.title ?? f.name ?? id);
+          return {
+            id,
+            label,
+            type: f.type || "text",
+            placeholder: f.placeholder,
+            options: Array.isArray(f.options) ? f.options.map(String) : undefined,
+            defaultValue: f.defaultValue ?? f.default,
+            required: Boolean(f.required),
+          };
+        }
+        return null;
+      })
+      .filter(Boolean) as Array<{
+        id: string;
+        label: string;
+        type?: string;
+        placeholder?: string;
+        options?: string[];
+        defaultValue?: any;
+        required?: boolean;
+      }>;
+
     if (fields.length === 0 && isPending) {
       return <GenerativeSkeleton title={args.title || "配置填报"} hint="正在准备人机表单…" kind="form" />;
+    }
+    if (fields.length === 0) {
+      return (
+        <div className="my-2.5 rounded-xl border border-border bg-card/70 p-4 text-xs text-foreground max-w-xl">
+          <div className="flex items-center gap-2 font-medium mb-1">
+            <SlidersHorizontal className="w-4 h-4 text-primary shrink-0" />
+            <span>{args.title || "配置填报"}</span>
+          </div>
+          {args.description && <p className="text-muted-foreground mb-2 leading-relaxed">{args.description}</p>}
+          <p className="text-muted-foreground/70 italic text-[11px]">（智能体暂未提供表单字段定义）</p>
+        </div>
+      );
     }
     return (
       <div className="my-2.5">

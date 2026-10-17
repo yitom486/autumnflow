@@ -81,7 +81,7 @@ export function createMcpUiServer(): McpServer {
     "show_interactive_card",
     {
       description:
-        "【富交互卡片 - 推荐】当向用户提供方案对比与决策(decision)、任务排查或门禁核对清单(checklist)、系统核心性能或监控指标看板(metrics)或信息汇总时，鼓励优先调用本工具直接渲染富交互卡片，呈现清晰直观的结构化视觉交互。",
+        "【富交互卡片 - 推荐】当向用户提供方案对比与决策(decision)、任务排查或门禁核对清单(checklist)、系统核心性能或监控指标看板(metrics)或配置填报(form)时，鼓励优先调用本工具直接渲染富交互卡片，呈现清晰直观的结构化视觉交互。",
       inputSchema: {
         title: z.string().describe("卡片展示标题"),
         cardType: z
@@ -89,12 +89,31 @@ export function createMcpUiServer(): McpServer {
           .describe("卡片种类：decision(方案决策)、metrics(关键指标与对比)、checklist(步骤勾选清单)、form(通用表单)"),
         description: z.string().optional().describe("卡片简要说明或辅助文案"),
         data: z
-          .record(z.string(), z.unknown())
-          .describe("卡片对应数据结构（例如 options 选项列表、items 清单数组、metrics 统计指标对象）"),
+          .union([z.record(z.string(), z.unknown()), z.array(z.unknown()), z.string()])
+          .describe(
+            "卡片核心数据结构。规范格式（严禁留空）：\n" +
+            "- decision: { options: [{ id: 'opt1', label: '方案名', description: '说明', recommended: true, badge: '推荐' }] }\n" +
+            "- checklist: { items: [{ id: 't1', title: '任务标题', checked: false, description: '说明' }] }\n" +
+            "- metrics: { metrics: [{ label: '指标名', value: '100ms', change: '+5%', status: 'good' }] }\n" +
+            "- form: { fields: [{ id: 'action', label: '操作名称', type: 'text', placeholder: '请输入' }] }"
+          ),
       },
     },
     async ({ title, cardType, description, data }) => {
-      const canonical = JSON.stringify({ title, cardType, data });
+      let normalizedData: any = data;
+      if (typeof normalizedData === "string") {
+        try {
+          normalizedData = JSON.parse(normalizedData);
+        } catch {}
+      }
+      if (Array.isArray(normalizedData)) {
+        if (cardType === "decision") normalizedData = { options: normalizedData };
+        else if (cardType === "form") normalizedData = { fields: normalizedData };
+        else if (cardType === "metrics") normalizedData = { metrics: normalizedData };
+        else if (cardType === "checklist") normalizedData = { items: normalizedData };
+      }
+
+      const canonical = JSON.stringify({ title, cardType, data: normalizedData });
       const id = presentResultId(cardType as PresentResultKind, canonical);
       const presentPayload = {
         schemaVersion: PRESENT_SCHEMA_VERSION,
@@ -103,7 +122,7 @@ export function createMcpUiServer(): McpServer {
         cardType,
         title,
         description,
-        data,
+        data: normalizedData,
       };
       return {
         content: [

@@ -705,5 +705,41 @@ describe("Generative UI - Front-End Component Integration Tests", () => {
 
     expect(container.textContent).toContain("OAuth 鉴权时序流程");
     expect(container.querySelector("svg")).not.toBeNull();
+
+    // 4. Decision card with array data directly (no nested data.options object)
+    const arrayDataDecisionTool = {
+      id: "tc-test-array-decision",
+      name: "show_interactive_card",
+      rawInput: {
+        title: "操作确认决策",
+        cardType: "decision",
+        data: [
+          { id: "approve", label: "批准执行", recommended: true },
+          { id: "reject", label: "取消并退出" },
+        ],
+      },
+    };
+    await act(async () => {
+      root.render(<AcpGenerativeToolCard tool={arrayDataDecisionTool} />);
+    });
+    expect(container.textContent).toContain("操作确认决策");
+    expect(container.textContent).toContain("批准执行");
+    expect(container.textContent).toContain("取消并退出");
+
+    // 5. Empty data fallback renders friendly fallback notice instead of a blank box
+    const emptyDecisionTool = {
+      id: "tc-test-empty-decision",
+      name: "show_interactive_card",
+      rawInput: {
+        title: "无选项的卡片",
+        cardType: "decision",
+        data: {},
+      },
+    };
+    await act(async () => {
+      root.render(<AcpGenerativeToolCard tool={emptyDecisionTool} />);
+    });
+    expect(container.textContent).toContain("无选项的卡片");
+    expect(container.textContent).toContain("暂未下发具体的选项列表数据");
   });
 });
