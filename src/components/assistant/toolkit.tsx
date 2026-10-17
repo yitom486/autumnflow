@@ -589,20 +589,16 @@ export const AcpGenerativeToolCard: React.FC<{
             const itemTitle = String(it.title ?? it.label ?? it.name ?? it.text ?? id);
             return {
               id,
-              title: itemTitle,
-              description: it.description ?? it.desc,
+              label: itemTitle,
               checked: Boolean(it.checked ?? it.completed ?? it.done),
-              tag: it.tag ?? it.badge,
             };
           }
           return null;
         })
         .filter(Boolean) as Array<{
           id: string;
-          title: string;
-          description?: string;
+          label: string;
           checked?: boolean;
-          tag?: string;
         }>;
 
       if (items.length === 0 && isPending) {

@@ -349,7 +349,7 @@ export const EditorPane: React.FC<{ cwd: string | null }> = ({ cwd }) => {
               draggable={t.kind === "file"}
               onDragStart={(e) => {
                 if (t.kind !== "file") return;
-                const refs = [{ path: t.path, isDirectory: false }];
+                const refs: import("@/lib/composer-drop").DragRef[] = [{ path: t.path, kind: "file" }];
                 setActiveDragRefs(refs);
                 e.dataTransfer.setData(ACP_PATH_MIME, encodeDragRefs(refs));
                 e.dataTransfer.setData("text/plain", `@${t.path}`);

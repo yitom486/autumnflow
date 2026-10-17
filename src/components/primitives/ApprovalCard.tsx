@@ -13,10 +13,19 @@ import GlideMenu from "@/components/primitives/GlideMenu";
  * Single-choice answers auto-advance; multi-select waits.
  * ───────────────────────────────────────────────────────── */
 
+export type ApprovalOptionItem =
+  | string
+  | {
+      label: string;
+      description?: string;
+      value?: string;
+    };
+
 export type ApprovalQuestion = {
   q: string;
+  description?: string;
   type: "radio" | "check";
-  options: string[];
+  options: ApprovalOptionItem[];
 };
 
 export type ApprovalLabels = {
@@ -183,15 +192,20 @@ export default function ApprovalCard({
 
   if (totalQuestions === 0) return null;
 
+  const answersRef = useRef(answers);
+  answersRef.current = answers;
+  const customRef = useRef(custom);
+  customRef.current = custom;
+
   const goTo = (next: number) => {
     if (advanceTimer.current) clearTimeout(advanceTimer.current);
     setQi(Math.min(Math.max(next, 0), totalQuestions - 1));
   };
 
-  const send = () => {
+  const send = (overrideAnswers?: Record<number, number[]>, overrideCustom?: Record<number, string>) => {
     if (advanceTimer.current) clearTimeout(advanceTimer.current);
     setSent(true);
-    onSubmitted?.(answers, custom);
+    onSubmitted?.(overrideAnswers ?? answersRef.current, overrideCustom ?? customRef.current);
   };
 
   const advance = () => {
@@ -201,6 +215,7 @@ export default function ApprovalCard({
 
   const toggle = (index: number) => {
     const type = questions[qi]?.type || "radio";
+    let nextAnswers: Record<number, number[]> = {};
     setAnswers((current) => {
       const picked = current[qi] ?? [];
       const next = type === "radio"
@@ -209,13 +224,19 @@ export default function ApprovalCard({
           ? picked.filter((item) => item !== index)
           : [...picked, index];
       onAnswerChange?.(qi, next);
-      return { ...current, [qi]: next };
+      nextAnswers = { ...current, [qi]: next };
+      answersRef.current = nextAnswers;
+      return nextAnswers;
     });
     if (type === "radio") {
-      setCustom((current) => ({ ...current, [qi]: "" }));
+      setCustom((current) => {
+        const nextCustom = { ...current, [qi]: "" };
+        customRef.current = nextCustom;
+        return nextCustom;
+      });
       if (advanceTimer.current) clearTimeout(advanceTimer.current);
       advanceTimer.current = setTimeout(() => {
-        if (last) send();
+        if (last) send(nextAnswers);
         else setQi((current) => Math.min(totalQuestions - 1, current + 1));
       }, 480);
     }
@@ -308,22 +329,30 @@ export default function ApprovalCard({
                     aria-hidden={active ? undefined : true}
                     style={questionStyle}
                   >
-                    <div className="pr-7 text-[13.5px] font-semibold text-ink leading-snug">{question.q}</div>
+                    <div className="pr-7">
+                      <div className="text-[13.5px] font-semibold text-ink leading-snug">{question.q}</div>
+                      {question.description && (
+                        <div className="text-[12px] text-ink-2 mt-1 leading-normal">{question.description}</div>
+                      )}
+                    </div>
                     <GlideMenu className="mt-2.5 flex flex-col gap-1" highlightClassName="inset-x-0 rounded-control bg-hover">
                       {question.options.map((option, i) => {
                         const on = picked.includes(i);
+                        const optLabel = typeof option === "string" ? option : option.label || option.value || "";
+                        const optDesc = typeof option === "object" && option ? option.description : undefined;
+                        const optKey = typeof option === "string" ? `${i}-${option}` : `${i}-${option.value || option.label}`;
                         return (
                           <button
-                            key={option}
+                            key={optKey}
                             type="button"
                             data-menu-row
                             aria-pressed={on}
                             tabIndex={active ? 0 : -1}
                             onClick={() => { if (active) toggle(i); }}
-                            className="relative z-10 flex items-center gap-2 rounded-control px-2 py-1.5 text-left transition-colors duration-100 cursor-pointer"
+                            className="relative z-10 flex items-start gap-2.5 rounded-control px-2.5 py-2 text-left transition-colors duration-100 cursor-pointer"
                           >
                             <span
-                              className={`flex size-4 shrink-0 items-center justify-center transition-colors duration-200
+                              className={`flex size-4 shrink-0 mt-0.5 items-center justify-center transition-colors duration-200
                                 ${question.type === "radio" ? "rounded-full" : "rounded-[5px]"}
                                 ${on ? "bg-ink text-canvas" : "shadow-[inset_0_0_0_1.5px_var(--line-strong)] text-transparent"}`}
                             >
@@ -333,9 +362,16 @@ export default function ApprovalCard({
                                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round"><path d="M20 6L9 17l-5-5" /></svg>
                               )}
                             </span>
-                            <span className={`text-[12.5px] leading-snug transition-colors duration-200 ${on ? "text-ink font-medium" : "text-ink-2"}`}>
-                              {option}
-                            </span>
+                            <div className="flex flex-col min-w-0 flex-1">
+                              <span className={`text-[12.5px] leading-snug transition-colors duration-200 ${on ? "text-ink font-medium" : "text-ink-2"}`}>
+                                {optLabel}
+                              </span>
+                              {optDesc && (
+                                <span className="text-[11.5px] leading-normal text-ink-3 mt-0.5">
+                                  {optDesc}
+                                </span>
+                              )}
+                            </div>
                           </button>
                         );
                       })}
