@@ -63,7 +63,7 @@ sessionsRouter.post("/:agentId/session/:action", jsonBody(sessionBody), async (c
       });
       return json({ ok: true, result: studioSessions.get(agentId, sessionId) });
     }
-    if (body.sessionId && studioSessions.get(agentId, body.sessionId)?.kind === "subagent" && action !== "view-child" && action !== "commands") {
+    if (body.sessionId && studioSessions.get(agentId, body.sessionId)?.kind === "subagent" && action !== "view-child" && action !== "commands" && !(action === "cancel" && conn.canCancelSession(body.sessionId))) {
       throw new Error("子智能体会话为只读查看，请返回主会话操作");
     }
     // Connect on demand; a real connect failure resurfaces from the RPC below.

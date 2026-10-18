@@ -34,9 +34,9 @@ export interface AgentStatus {
   connected: boolean;
   pid?: number | null;
   protocolVersion?: number | null;
-  agentInfo?: { name?: string; title?: string; version?: string } | null;
-  agentCapabilities?: Record<string, unknown> | null;
-  authMethods?: Array<{ id: string; name?: string; description?: string; type?: string }> | null;
+  agentInfo?: import("@agentclientprotocol/sdk").Implementation | null;
+  agentCapabilities?: import("@agentclientprotocol/sdk").AgentCapabilities | null;
+  authMethods?: import("@agentclientprotocol/sdk").AuthMethod[] | null;
   /** `initialize._meta.authStatus` passthrough (e.g. codex), null when unknown. */
   authStatus?: unknown;
   /** `initialize._meta` passthrough, null when unknown. */
@@ -74,20 +74,15 @@ export interface PendingPermission {
   permissionId: string;
   agentId: string;
   sessionId: string;
-  toolCall: unknown;
-  options: unknown;
+  toolCall: import("@agentclientprotocol/sdk").RequestPermissionRequest["toolCall"];
+  options: import("@agentclientprotocol/sdk").PermissionOption[];
   createdAt: number;
   resolve: (outcome: unknown) => void;
   reject: (err: Error) => void;
 }
 
-export interface PendingElicitation {
-  elicitationId: string;
-  agentId: string;
-  sessionId: string;
-  message: string;
-  schema: unknown;
+export type PendingElicitation = import("../../shared/elicitation").ElicitationItem & {
   createdAt: number;
-  resolve: (result: unknown) => void;
+  resolve: (result: import("@agentclientprotocol/sdk").CreateElicitationResponse) => void;
   reject: (err: Error) => void;
 }

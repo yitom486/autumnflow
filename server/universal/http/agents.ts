@@ -5,12 +5,31 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
+import type { TerminalOutputRequest } from "@agentclientprotocol/sdk";
+import { sdkValue } from "../acp-sdk";
 import { universalRegistry } from "../registry";
 import { anyBody, gatewayError, json, jsonBody, optStr } from "./shared";
 import { probeLiveAgyQuota } from "../runtimes/agy-quota";
 import { studioSessions } from "../session-index";
 
 export const agentsRouter = new Hono();
+
+agentsRouter.get("/:agentId/terminal/:terminalId", (c) => {
+  try {
+    const params = sdkValue<TerminalOutputRequest>("TerminalOutputRequest", { terminalId: c.req.param("terminalId"), sessionId: c.req.query("sessionId") });
+    const result = universalRegistry.connFor(c.req.param("agentId")).terminalDisplayOutput(params);
+    return json({ ok: true, result });
+  } catch (err) { return gatewayError(err); }
+});
+
+agentsRouter.post("/:agentId/authenticate/terminal/:ptyId/finish", async (c) => {
+  try { await universalRegistry.connFor(c.req.param("agentId")).finishTerminalAuth(c.req.param("ptyId")); return json({ ok: true }); }
+  catch (err) { return gatewayError(err); }
+});
+agentsRouter.delete("/:agentId/authenticate/terminal/:ptyId", (c) => {
+  try { universalRegistry.connFor(c.req.param("agentId")).cancelTerminalAuth(c.req.param("ptyId")); return json({ ok: true }); }
+  catch (err) { return gatewayError(err); }
+});
 
 agentsRouter.get("/", () => {
   const profiles = universalRegistry.listProfiles();

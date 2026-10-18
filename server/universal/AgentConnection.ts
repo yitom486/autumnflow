@@ -2,6 +2,9 @@ import { type ChildProcess } from "node:child_process";
 import { Readable, Writable } from "node:stream";
 import * as fs from "node:fs";
 import * as acp from "@agentclientprotocol/sdk";
+import { clientCapabilities, requestAgent, sdkRequest, sdkValue, requireAgentCapability } from "./acp-sdk";
+import { applyArtifactUpdate } from "../../shared/acp-session-state";
+import { TerminalAuthentication } from "./terminal-auth";
 import {
   QuotaCache,
   type AcpAgentQuota,
@@ -49,7 +52,7 @@ export const CLIENT_GENERATIVE_UI_HINT = [
   "- 出版级矢量图表（render_editorial_diagram）：当呈现系统架构分层拓扑、服务调用时序、流程业务状态机、技术选型四象限决策矩阵或项目演进里程碑时，鼓励优先调用生成出版级矢量图表，代替原始简陋的 Mermaid 文本；",
   "- 结构化富交互卡片（show_interactive_card）：当向用户提供方案对比决策(cardType='decision')、任务排查或门禁清单('checklist')、核心性能与指标看板('metrics')或表单填报('form')时直接渲染。调用时 data 必须携带非空内容（如 decision 必须含 options: [{ id, label, description, recommended }]，严禁传空数据）；若向用户征询执行方案确认或授权决策，请调用 cardType='decision' 提供明确的选择支；真正的高危文件修改与终端命令在执行时宿主底层安全机制会自动拦截并弹出系统权限气泡；",
   "- 人机协同交互表单（prompt_form）与动态组件沙箱原型（render_react_sandbox）；",
-  "- 选项确认与技术路线决策：若需用户在多个方案间做出技术选型或回答选择题，请优先调用 show_interactive_card(cardType='decision') 或在正文中以清晰的 Markdown 编号方案呈现，供用户直观选择；切勿调用内部已被禁用的问询/表单工具（如 question 工具）；",
+  "- 选项确认与技术路线决策：优先通过已协商支持的 ACP elicitation 表单向用户提问，并等待用户提交答案。运行时未提供该协议通道时，使用 show_interactive_card(cardType='decision') 或正文编号选项；不要反复调用运行时明确不支持的提问工具；",
   "- 专业技能按需调取：查图表规范调用 get_studio_skill({name:\"diagram-design\"})，查交互卡片规范传 name:\"generative-ui\"；name 必填，不确定时先调用 list_studio_skills 获取标识。",
   "（注：以上工具均为可选的体验增强手段，请在符合对话场景时自然适度地运用。）",
 ].join("\n");
@@ -75,10 +78,13 @@ export class UniversalAgentConnection {
   private sessionCommands = new Map<string, unknown[]>();
   private childParents = new Map<string, string>();
   private childUpdates = new Map<string, unknown[]>();
+  private childStates = new Map<string, acp.SubagentUpdate>();
 
   private interaction: InteractionManager;
   private fsGuard: FsGuard;
   private terminals = new AcpTerminalManager();
+  private terminalOwners = new Map<string, string>();
+  private releasedTerminals = new Map<string, { sessionId: string; output: acp.TerminalOutputResponse }>();
 
   /**
    * Per-session prompt mutex: ACP session/prompt is strictly serial per
@@ -91,9 +97,11 @@ export class UniversalAgentConnection {
   private quotaCache = new QuotaCache();
   private lastQuota: AcpAgentQuota | null = null;
   private resources = new StudioAgentResources(CLIENT_GENERATIVE_UI_HINT);
+  private terminalAuth: TerminalAuthentication;
 
   constructor(profile: AgentProfile) {
     this.profile = profile;
+    this.terminalAuth = new TerminalAuthentication(profile);
     this.interaction = new InteractionManager(profile.id, (sid, evt) => this.broadcast(sid, evt));
     this.fsGuard = new FsGuard(profile.id, (sid, kind, detail) => this.emitActivity(sid, kind, detail));
     // Initial best-effort probe based on profile
@@ -138,18 +146,10 @@ export class UniversalAgentConnection {
   }
 
   status() {
-    const init = this.initResult as unknown as {
-      protocolVersion?: number;
-      agentInfo?: unknown;
-      agentCapabilities?: Record<string, unknown> | null;
-      authMethods?: unknown;
-      _meta?: Record<string, unknown> | null;
-    } | null;
+    const init = this.initResult;
     // codex puts authStatus under agentCapabilities._meta, others (if any)
     // under top-level _meta — check both.
-    const capsMeta = (init?.agentCapabilities as Record<string, unknown> | null | undefined)?._meta as
-      | Record<string, unknown>
-      | undefined;
+    const capsMeta = init?.agentCapabilities?._meta;
     return {
       id: this.profile.id,
       connected: this.connected,
@@ -160,7 +160,7 @@ export class UniversalAgentConnection {
       authMethods: init?.authMethods ?? null,
       // Raw `_meta` from initialize (e.g. codex steering/goal/jetbrains), plus
       // a convenience alias so clients don't need to dig into `_meta`.
-      authStatus: (init?._meta as Record<string, unknown> | undefined)?.authStatus ?? capsMeta?.authStatus ?? null,
+      authStatus: init?._meta?.authStatus ?? capsMeta?.authStatus ?? null,
       meta: init?._meta ?? null,
       quota: this.lastQuota,
       resources: this.resources.report(),
@@ -337,49 +337,41 @@ export class UniversalAgentConnection {
     const self = this;
     const app = acp
       .client({ name: "acp-studio-universal" })
-      .onRequest(acp.methods.client.session.requestPermission, async (ctx: unknown) => {
-        const params = (ctx as { params: { sessionId: string; toolCall: unknown; options: unknown } }).params;
-        return (await self.interaction.handlePermissionRequest(params)) as never;
+      .onRequest(acp.methods.client.session.requestPermission, ctx => self.interaction.handlePermissionRequest(ctx.params, ctx.signal))
+      .onRequest(acp.methods.client.fs.readTextFile, ctx => self.fsGuard.handleReadFile(ctx.params))
+      .onRequest(acp.methods.client.fs.writeTextFile, ctx => self.fsGuard.handleWriteFile(ctx.params))
+      .onRequest(acp.methods.client.terminal.create, ctx => self.handleTerminalCreate(ctx.params))
+      .onRequest(acp.methods.client.terminal.output, ctx => {
+        self.requireTerminalOwner(ctx.params);
+        return self.terminals.getOutput(ctx.params.terminalId);
       })
-      .onRequest(acp.methods.client.fs.readTextFile, async (ctx: unknown) => {
-        const params = (ctx as { params: { sessionId?: string; path: string; line?: number; limit?: number } }).params;
-        return (await self.fsGuard.handleReadFile(params)) as never;
-      })
-      .onRequest(acp.methods.client.fs.writeTextFile, async (ctx: unknown) => {
-        const params = (ctx as { params: { sessionId?: string; path: string; content: string } }).params;
-        return (await self.fsGuard.handleWriteFile(params)) as never;
-      })
-      .onRequest(acp.methods.client.terminal.create, async (ctx: unknown) => {
-        const params = (ctx as { params: Record<string, unknown> }).params;
-        return (await self.handleTerminalCreate(params)) as never;
-      })
-      .onRequest(acp.methods.client.terminal.output, async (ctx: unknown) => {
-        const params = (ctx as { params: { terminalId: string } }).params;
-        return self.terminals.getOutput(params.terminalId) as never;
-      })
-      .onRequest(acp.methods.client.terminal.release, async (ctx: unknown) => {
-        const params = (ctx as { params: { sessionId?: string; terminalId: string } }).params;
+      .onRequest(acp.methods.client.terminal.release, ctx => {
+        const params = ctx.params;
+        self.requireTerminalOwner(params);
+        self.releasedTerminals.set(params.terminalId, { sessionId: params.sessionId, output: self.terminals.getOutput(params.terminalId) });
+        self.terminalOwners.delete(params.terminalId);
         self.emitActivity(params.sessionId || "", "terminal_release", { terminalId: params.terminalId });
-        return self.terminals.release(params.terminalId) as never;
+        return self.terminals.release(params.terminalId);
       })
-      .onRequest(acp.methods.client.terminal.waitForExit, async (ctx: unknown) => {
-        const params = (ctx as { params: { sessionId?: string; terminalId: string } }).params;
-        return (await self.terminals.waitForExit(params.terminalId)) as never;
+      .onRequest(acp.methods.client.terminal.waitForExit, ctx => {
+        self.requireTerminalOwner(ctx.params);
+        return self.terminals.waitForExit(ctx.params.terminalId);
       })
-      .onRequest(acp.methods.client.terminal.kill, async (ctx: unknown) => {
-        const params = (ctx as { params: { sessionId?: string; terminalId: string } }).params;
+      .onRequest(acp.methods.client.terminal.kill, ctx => {
+        const params = ctx.params;
+        self.requireTerminalOwner(params);
         self.emitActivity(params.sessionId || "", "terminal_kill", { terminalId: params.terminalId });
-        return self.terminals.kill(params.terminalId) as never;
+        return self.terminals.kill(params.terminalId);
       })
-      .onRequest(acp.methods.client.elicitation.create, async (ctx: unknown) => {
-        const params = (ctx as { params: Record<string, unknown> }).params;
-        if (!params.sessionId && self.promptLocks.size === 1) {
-          params.sessionId = [...self.promptLocks][0];
+      .onRequest(acp.methods.client.elicitation.create, ctx => self.interaction.handleElicitation(ctx.params, ctx.signal))
+      .onNotification(acp.methods.client.session.update, async ctx => {
+        const params = ctx.params;
+        if (params.update.sessionUpdate === "subagent_update") {
+          const previous = self.childStates.get(params.update.sessionId);
+          const entries = applyArtifactUpdate(previous ? [{ kind: "subagent", value: previous }] : [], params.update);
+          const state = entries[0];
+          if (state?.kind === "subagent") self.childStates.set(state.value.sessionId, state.value);
         }
-        return (await self.interaction.handleElicitation(params)) as never;
-      })
-      .onNotification(acp.methods.client.session.update, async (ctx: unknown) => {
-        const params = (ctx as { params: { sessionId: string; update: Record<string, unknown> } }).params;
         const association = childAssociation(params.sessionId, params.update);
         if (association) {
           studioSessions.linkChild(self.profile.id, association.parentSessionId, association.sessionId, association.title);
@@ -410,7 +402,7 @@ export class UniversalAgentConnection {
             // 确保用户界面实时展示子任务的工具调用卡片与思考过程，避免“静默等待”
             const updateType = params.update.sessionUpdate;
             if (updateType === "tool_call" || updateType === "tool_call_update") {
-              const u = params.update as Record<string, unknown>;
+              const u = params.update;
               const origTitle = typeof u.title === "string" ? u.title : "";
               const prefixedTitle = origTitle ? `[${childTitle}] ${origTitle}` : `[${childTitle}] 工具调用`;
               self.broadcast(parentSessionId, {
@@ -453,30 +445,22 @@ export class UniversalAgentConnection {
           quota: self.lastQuota,
         });
       })
-      .onNotification(acp.methods.client.elicitation.complete, async () => {
-        // URL elicitation completed out-of-band; surface as activity so UI can refresh
-      });
+      .onNotification(acp.methods.client.elicitation.complete, ctx => self.interaction.completeElicitation(ctx.params));
 
     this.conn = app.connect(stream);
 
     // initialize handshake with full client capabilities (ACP v1)
     try {
-      const res = await this.conn.agent.request(acp.methods.agent.initialize, {
+      const res = await requestAgent(this.conn, acp.methods.agent.initialize, {
         protocolVersion: acp.PROTOCOL_VERSION,
-        clientCapabilities: {
-          fs: { readTextFile: true, writeTextFile: true },
-          terminal: true,
-          auth: { terminal: true },
-          elicitation: { form: {}, url: {} },
-          // advertise boolean config options + session lang support where SDK allows passthrough
-          session: { configOptions: { boolean: {} } },
-        },
+        clientCapabilities: { ...clientCapabilities, auth: { terminal: this.terminalAuth.available(resolved) } },
         clientInfo: { name: "acp-studio-universal", title: "ACP Studio Universal", version: "1.0.0" },
-      } as unknown as never);
-      this.initResult = res as unknown as acp.InitializeResponse;
+      });
+      if (res.protocolVersion !== acp.PROTOCOL_VERSION) throw new Error(`Unsupported ACP protocol version: ${res.protocolVersion}`);
+      this.initResult = res;
       this.resources.handshake(this.initResult.agentInfo?.version || "");
       console.log(
-        `[UniversalACP:${this.profile.id}] initialize ok protocol=${(this.initResult as unknown as { protocolVersion?: number }).protocolVersion}`
+        `[UniversalACP:${this.profile.id}] initialize ok protocol=${this.initResult.protocolVersion}`
       );
       this.probeQuotaBackground();
     } catch (err) {
@@ -489,7 +473,7 @@ export class UniversalAgentConnection {
     }
   }
 
-  private handleTerminalCreate(params: Record<string, unknown>): Promise<unknown> {
+  private handleTerminalCreate(params: acp.CreateTerminalRequest): Promise<acp.CreateTerminalResponse> {
     const command = String(params.command || "");
     if (!command) throw new Error("terminal/create: command is required");
     const sessionCwd = this.fsGuard.getSessionCwd(String(params.sessionId || ""));
@@ -506,20 +490,39 @@ export class UniversalAgentConnection {
     }
     const sessionId = String(params.sessionId || "");
     this.emitActivity(sessionId, "terminal_create", { command, args: params.args, cwd });
-    return Promise.resolve(
-      this.terminals.create({
+    const terminal = this.terminals.create({
         command,
-        args: Array.isArray(params.args) ? (params.args as unknown[]).map(String) : [],
+        args: params.args ?? [],
         cwd,
         workspaceRoot: sessionCwd || cwd,
-        env: params.env as any,
+        env: params.env ?? undefined,
         outputByteLimit: typeof params.outputByteLimit === "number" ? params.outputByteLimit : undefined,
         sessionId,
-      })
-    );
+      });
+    this.terminalOwners.set(terminal.terminalId, sessionId);
+    return Promise.resolve(terminal);
+  }
+
+  private requireTerminalOwner(params: acp.TerminalOutputRequest): void {
+    if (this.terminalOwners.get(params.terminalId) !== params.sessionId) throw acp.RequestError.invalidParams(undefined, "Unknown terminal in this session");
+  }
+
+  terminalDisplayOutput(params: acp.TerminalOutputRequest): acp.TerminalOutputResponse {
+    const released = this.releasedTerminals.get(params.terminalId);
+    if (released?.sessionId === params.sessionId) return released.output;
+    this.requireTerminalOwner(params);
+    return this.terminals.getOutput(params.terminalId);
   }
 
   async disconnect(): Promise<void> {
+    this.terminalAuth.dispose();
+    this.interaction.rejectAllOnExit(null, null);
+    this.childStates.clear();
+    this.childParents.clear();
+    this.childUpdates.clear();
+    this.sessionCommands.clear();
+    this.terminalOwners.clear();
+    this.releasedTerminals.clear();
     const proc = this.proc || this.stoppingProc;
     this.stoppingProc = proc;
     this.proc = null;
@@ -552,12 +555,26 @@ export class UniversalAgentConnection {
 
   async authenticate(methodId: string, extra?: Record<string, unknown>): Promise<unknown> {
     const conn = this.ensureConn();
-    return conn.agent.request(acp.methods.agent.authenticate, { methodId, ...(extra || {}) } as unknown as never);
+    const method = this.initResult?.authMethods?.find(candidate => candidate.id === methodId);
+    if (!method) throw acp.RequestError.invalidParams(undefined, "Authentication method was not advertised by this agent");
+    if ("type" in method && method.type === "terminal") {
+      const descriptor = sdkValue<acp.AuthMethodTerminal>("AuthMethodTerminal", method);
+      return { terminal: this.terminalAuth.start(whichCommand(this.profile.command) || this.profile.command, descriptor) };
+    }
+    return requestAgent(conn, acp.methods.agent.authenticate, sdkRequest(acp.methods.agent.authenticate, { ...extra, methodId }));
   }
+
+  async finishTerminalAuth(id: string): Promise<void> {
+    this.terminalAuth.finish(id);
+    await this.disconnect();
+    await this.connect();
+  }
+  cancelTerminalAuth(id: string): void { this.terminalAuth.cancel(id); }
 
   async logout(): Promise<unknown> {
     const conn = this.ensureConn();
-    return conn.agent.request(acp.methods.agent.logout, {} as unknown as never);
+    requireAgentCapability("auth.logout", this.initResult?.agentCapabilities?.auth?.logout);
+    return requestAgent(conn, acp.methods.agent.logout, {});
   }
 
   /**
@@ -566,25 +583,31 @@ export class UniversalAgentConnection {
    */
   private enrichSessionPayload<T extends { cwd?: unknown; mcpServers?: unknown; additionalDirectories?: unknown }>(args: T): {
     cwd: string;
-    mcpServers: unknown[];
+    mcpServers: acp.McpServer[];
     additionalDirectories: string[];
     roots: string[];
     resourceMeta?: Record<string, unknown>;
   } {
     const cwd = typeof args.cwd === "string" && args.cwd ? args.cwd : (this.profile.defaultCwd || process.cwd());
-    const additionalDirectories: string[] = Array.isArray(args.additionalDirectories)
-      ? [...(args.additionalDirectories as string[])]
-      : [];
+    const additionalDirectories = Array.isArray(args.additionalDirectories) ? args.additionalDirectories.map(directory => {
+      if (typeof directory !== "string") throw acp.RequestError.invalidParams(undefined, "Additional directory must be a path string");
+      return directory;
+    }) : [];
+    if (additionalDirectories.length) requireAgentCapability("session.additionalDirectories", this.initResult?.agentCapabilities?.sessionCapabilities?.additionalDirectories);
     const roots = this.fsGuard.sessionRootsFor(cwd, additionalDirectories);
-    const mcpServers = Array.isArray(args.mcpServers) ? [...(args.mcpServers as unknown[])] : [];
+    const mcpServers = Array.isArray(args.mcpServers) ? args.mcpServers.map(server => sdkValue<acp.McpServer>("McpServer", server)) : [];
     for (const configured of this.resources.configuredMcpServers()) {
-      if (!mcpServers.some((server: any) => server?.name === (configured as any).name)) mcpServers.push(configured);
+      const server = sdkValue<acp.McpServer>("McpServer", configured);
+      if (!mcpServers.some(existing => existing.name === server.name)) mcpServers.push(server);
     }
     const mcpInfo = getMcpUiServerInfo();
-    const agentCaps = (this.initResult as any)?.agentCapabilities?.mcpCapabilities;
-    if (mcpInfo && (agentCaps?.http || !agentCaps || agentCaps?.sse)) {
+    const agentCaps = this.initResult?.agentCapabilities?.mcpCapabilities;
+    for (const server of mcpServers) {
+      if ("type" in server) requireAgentCapability(`mcp.${server.type}`, agentCaps?.[server.type]);
+    }
+    if (mcpInfo && agentCaps?.http) {
       const alreadyHas = mcpServers.some(
-        (s: any) => s && (s.name === mcpInfo.name || s.url === mcpInfo.url)
+        s => s.name === mcpInfo.name || ("url" in s && s.url === mcpInfo.url)
       );
       if (!alreadyHas) {
         mcpServers.push({
@@ -601,13 +624,13 @@ export class UniversalAgentConnection {
   async newSession(args: { cwd?: string; mcpServers?: unknown[]; additionalDirectories?: string[] }): Promise<unknown> {
     const conn = this.ensureConn();
     const { cwd, mcpServers, additionalDirectories, roots, resourceMeta } = this.enrichSessionPayload(args);
-    const result = await conn.agent.request(acp.methods.agent.session.new, {
+    const result = await requestAgent(conn, acp.methods.agent.session.new, {
       cwd,
-      mcpServers: mcpServers as never[],
+      mcpServers,
       ...(resourceMeta ? { _meta: resourceMeta } : {}),
       ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
-    } as unknown as never);
-    const newSid = (result as { sessionId?: unknown } | null)?.sessionId;
+    });
+    const newSid = result.sessionId;
     if (typeof newSid === "string") {
       studioSessions.remember(this.profile.id, newSid, "created", { cwd });
       this.sessionTurnCounts.set(newSid, 0);
@@ -619,14 +642,15 @@ export class UniversalAgentConnection {
 
   async loadSession(args: Record<string, unknown>): Promise<{ result: unknown; replayed: unknown[] }> {
     const conn = this.ensureConn();
-    const sessionId = String((args as { sessionId?: string }).sessionId || "");
+    requireAgentCapability("loadSession", this.initResult?.agentCapabilities?.loadSession);
+    const sessionId = typeof args.sessionId === "string" ? args.sessionId : "";
     const { cwd, mcpServers, additionalDirectories, roots, resourceMeta } = this.enrichSessionPayload(args);
     const payload = {
       ...args,
       sessionId,
       cwd,
       mcpServers,
-      ...(resourceMeta ? { _meta: { ...(args._meta as object ?? {}), ...resourceMeta } } : {}),
+      ...(resourceMeta ? { _meta: { ...this.requestMeta(args._meta), ...resourceMeta } } : {}),
       ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
     };
     // session/load replays history via session/update notifications before
@@ -636,7 +660,7 @@ export class UniversalAgentConnection {
       if ((evt as { type?: string }).type === "update") replayed.push((evt as { update?: unknown }).update);
     }) : () => undefined;
     try {
-      const result = await conn.agent.request(acp.methods.agent.session.load, payload as unknown as never);
+      const result = await requestAgent(conn, acp.methods.agent.session.load, sdkRequest(acp.methods.agent.session.load, payload));
       if (sessionId) {
         this.sessionTurnCounts.set(sessionId, 0);
         this.resources.rememberSession(sessionId, result);
@@ -660,16 +684,17 @@ export class UniversalAgentConnection {
   /** UNSTABLE session/fork (advertised via sessionCapabilities.fork, e.g. codex). */
   async forkSession(args: Record<string, unknown>): Promise<unknown> {
     const conn = this.ensureConn();
+    requireAgentCapability("session.fork", this.initResult?.agentCapabilities?.sessionCapabilities?.fork);
     const { cwd, mcpServers, additionalDirectories, roots, resourceMeta } = this.enrichSessionPayload(args);
     const payload = {
       ...args,
       cwd,
       mcpServers,
-      ...(resourceMeta ? { _meta: { ...(args._meta as object ?? {}), ...resourceMeta } } : {}),
+      ...(resourceMeta ? { _meta: { ...this.requestMeta(args._meta), ...resourceMeta } } : {}),
       ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
     };
-    const result = await conn.agent.request(acp.methods.agent.session.fork, payload as unknown as never);
-    const newSid = (result as { sessionId?: unknown } | null)?.sessionId;
+    const result = await requestAgent(conn, acp.methods.agent.session.fork, sdkRequest(acp.methods.agent.session.fork, payload));
+    const newSid = result.sessionId;
     if (typeof newSid === "string") {
       studioSessions.remember(this.profile.id, newSid, "created", { cwd });
       this.sessionTurnCounts.set(newSid, 0);
@@ -682,11 +707,10 @@ export class UniversalAgentConnection {
   /** UNSTABLE providers/* (advertised via providers capability, e.g. codex). */
   async providersRpc(action: "list" | "set" | "disable", body: Record<string, unknown>): Promise<unknown> {
     const conn = this.ensureConn();
-    const method =
-      action === "list" ? acp.methods.agent.providers.list
-      : action === "set" ? acp.methods.agent.providers.set
-      : acp.methods.agent.providers.disable;
-    return conn.agent.request(method, body as unknown as never);
+    requireAgentCapability("providers", this.initResult?.agentCapabilities?.providers);
+    if (action === "list") return requestAgent(conn, acp.methods.agent.providers.list, sdkRequest(acp.methods.agent.providers.list, body));
+    if (action === "set") return requestAgent(conn, acp.methods.agent.providers.set, sdkRequest(acp.methods.agent.providers.set, body));
+    return requestAgent(conn, acp.methods.agent.providers.disable, sdkRequest(acp.methods.agent.providers.disable, body));
   }
 
   /**
@@ -695,21 +719,27 @@ export class UniversalAgentConnection {
    */
   async rawRequest(method: string, params: Record<string, unknown>): Promise<unknown> {
     const conn = this.ensureConn();
-    return conn.agent.request(method as never, params as never);
+    // Vendor legacy method, explicitly separated from the standard SDK surface.
+    if (!method.startsWith("_") && !(method === "session/set_model" && ["antigravity-stdio", "agy"].includes(this.profile.id))) {
+      throw acp.RequestError.methodNotFound("Unnegotiated vendor method");
+    }
+    return conn.agent.request<unknown, Record<string, unknown>>(method, params);
   }
 
   async resumeSession(args: Record<string, unknown>): Promise<unknown> {
     const conn = this.ensureConn();
+    requireAgentCapability("session.resume", this.initResult?.agentCapabilities?.sessionCapabilities?.resume);
     const { cwd, mcpServers, additionalDirectories, roots, resourceMeta } = this.enrichSessionPayload(args);
     const payload = {
       ...args,
       cwd,
       mcpServers,
-      ...(resourceMeta ? { _meta: { ...(args._meta as object ?? {}), ...resourceMeta } } : {}),
+      ...(resourceMeta ? { _meta: { ...this.requestMeta(args._meta), ...resourceMeta } } : {}),
       ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
     };
-    const result = await conn.agent.request(acp.methods.agent.session.resume, payload as unknown as never);
-    const sid = String(args.sessionId || (result as { sessionId?: unknown } | null)?.sessionId || "");
+    const request = sdkRequest(acp.methods.agent.session.resume, payload);
+    const result = await requestAgent(conn, acp.methods.agent.session.resume, request);
+    const sid = request.sessionId;
     if (sid) {
       this.sessionTurnCounts.set(sid, 0);
       this.resources.rememberSession(sid, result);
@@ -720,7 +750,8 @@ export class UniversalAgentConnection {
 
   async listSessions(args: Record<string, unknown> = {}): Promise<unknown> {
     const conn = this.ensureConn();
-    const result = await conn.agent.request(acp.methods.agent.session.list, args as unknown as never);
+    requireAgentCapability("session.list", this.initResult?.agentCapabilities?.sessionCapabilities?.list);
+    const result = await requestAgent(conn, acp.methods.agent.session.list, sdkRequest(acp.methods.agent.session.list, args));
     for (const row of result.sessions || []) {
       const association = childAssociation("", row);
       if (association) {
@@ -753,11 +784,12 @@ export class UniversalAgentConnection {
 
   async deleteSession(args: Record<string, unknown>): Promise<unknown> {
     const conn = this.ensureConn();
-    const sid = String((args as { sessionId?: string }).sessionId || "");
+    const sid = typeof args.sessionId === "string" ? args.sessionId : "";
     if (sid) {
       this.sessionTurnCounts.delete(sid);
     }
-    const result = await conn.agent.request(acp.methods.agent.session.delete, args as unknown as never);
+    requireAgentCapability("session.delete", this.initResult?.agentCapabilities?.sessionCapabilities?.delete);
+    const result = await requestAgent(conn, acp.methods.agent.session.delete, sdkRequest(acp.methods.agent.session.delete, args));
     studioSessions.forget(this.profile.id, sid);
     this.resources.forgetSession(sid);
     return result;
@@ -765,25 +797,25 @@ export class UniversalAgentConnection {
 
   async closeSession(args: Record<string, unknown>): Promise<unknown> {
     const conn = this.ensureConn();
-    const sid = String((args as { sessionId?: string }).sessionId || "");
+    const sid = typeof args.sessionId === "string" ? args.sessionId : "";
     if (sid) {
       this.sessionTurnCounts.delete(sid);
     }
-    const caps = (this.initResult as unknown as { agentCapabilities?: { sessionCapabilities?: { close?: unknown } } })?.agentCapabilities;
+    const caps = this.initResult?.agentCapabilities;
     if (!caps?.sessionCapabilities?.close) {
       // Best-effort: drop local sinks even if agent has no close
       if (sid) this.sessionSinks.delete(sid);
       this.resources.forgetSession(sid);
       return {};
     }
-    const result = await conn.agent.request(acp.methods.agent.session.close, args as unknown as never);
+    const result = await requestAgent(conn, acp.methods.agent.session.close, sdkRequest(acp.methods.agent.session.close, args));
     this.resources.forgetSession(sid);
     return result;
   }
 
   async setMode(args: Record<string, unknown>): Promise<unknown> {
     const conn = this.ensureConn();
-    return conn.agent.request(acp.methods.agent.session.setMode, args as unknown as never);
+    return requestAgent(conn, acp.methods.agent.session.setMode, sdkRequest(acp.methods.agent.session.setMode, args));
   }
 
   async setConfigOption(args: Record<string, unknown>): Promise<unknown> {
@@ -802,17 +834,19 @@ export class UniversalAgentConnection {
     if (!sessionId || !configId) {
       throw new Error(`setConfigOption: sessionId and configId required (got sessionId=${sessionId}, configId=${configId})`);
     }
-    return conn.agent.request(acp.methods.agent.session.setConfigOption, {
+    return requestAgent(conn, acp.methods.agent.session.setConfigOption, sdkRequest(acp.methods.agent.session.setConfigOption, {
       sessionId,
       configId,
       value,
-    } as unknown as never);
+      ...(typeof value === "boolean" ? { type: "boolean" } : {}),
+    }));
   }
 
   async cancel(sessionId: string): Promise<void> {
     const conn = this.ensureConn();
+    if (!this.canCancelSession(sessionId)) throw acp.RequestError.invalidParams(undefined, "This child session did not permit cancellation");
     try {
-      await conn.agent.notify(acp.methods.agent.session.cancel, { sessionId } as unknown as never);
+      await conn.agent.notify(acp.methods.agent.session.cancel, { sessionId });
     } catch (err) {
       console.error(`[UniversalACP:${this.profile.id}] cancel notify failed session=${sessionId}: ${(err as Error).message}`);
       throw err;
@@ -826,6 +860,10 @@ export class UniversalAgentConnection {
     this.interaction.cancelPendingForSession(sessionId);
   }
 
+  canCancelSession(sessionId: string): boolean {
+    return studioSessions.get(this.profile.id, sessionId)?.kind !== "subagent" || this.childStates.get(sessionId)?.capabilities?.cancel != null;
+  }
+
   /**
    * Send session/prompt. Streams session/update via onEvent callback until stop.
    * Permission/elicitation requests are surfaced via onEvent as well; the
@@ -834,11 +872,17 @@ export class UniversalAgentConnection {
    */
   async prompt(
     sessionId: string,
-    prompt: unknown[],
+    prompt: acp.ContentBlock[],
     onEvent: SseSend,
     opts?: { signal?: AbortSignal }
   ): Promise<unknown> {
     const conn = this.ensureConn();
+    const supported = this.initResult?.agentCapabilities?.promptCapabilities;
+    for (const block of prompt) {
+      if (block.type === "image") requireAgentCapability("prompt.image", supported?.image);
+      if (block.type === "audio") requireAgentCapability("prompt.audio", supported?.audio);
+      if (block.type === "resource") requireAgentCapability("prompt.embeddedContext", supported?.embeddedContext);
+    }
     if (!sessionId) throw new Error("sessionId is required");
     if (studioSessions.get(this.profile.id, sessionId)?.kind === "subagent") throw new Error("子智能体会话仅供查看，请在主会话中发送消息");
     if (this.promptLocks.has(sessionId)) {
@@ -868,10 +912,10 @@ export class UniversalAgentConnection {
       const compatibilityContext = this.resources.compatibilityText(sessionId);
       const isOpencode = this.profile.id === "opencode";
       const opencodeCompatibility = (isOpencode && turnCount === 0)
-        ? "【OpenCode 交互指引】：在当前通用客户端环境下，切勿调用内部 `question` 工具（该工具无法通过外部协议弹窗）。若需向用户征询技术路线、确认需求或做选择题，请直接在正文中以清晰的 Markdown 编号方案列出选项（如 方案 A、方案 B、方案 C）或调用 `show_interactive_card(cardType='decision')` 决策卡，供用户直接点击交互。"
+        ? "【OpenCode 交互指引】：客户端已通过官方 ACP SDK 声明并处理标准 elicitation 的 form 和 url 模式。只有运行时实际转发 elicitation/create，原生提问才能显示；若当前版本未转发或原生 question 已被禁用，请使用 show_interactive_card(cardType='decision') 或正文编号选项等待用户选择，不要重复调用失败的原生 question。"
         : null;
 
-      const prefixBlocks: Array<{ type: "text"; text: string }> = [];
+      const prefixBlocks: acp.ContentBlock[] = [];
       if (compatibilityContext) {
         prefixBlocks.push({ type: "text", text: compatibilityContext });
       }
@@ -883,10 +927,10 @@ export class UniversalAgentConnection {
         effectivePrompt = [...prefixBlocks, ...prompt];
       }
 
-      const res = await conn.agent.request(acp.methods.agent.session.prompt, {
+      const res = await requestAgent(conn, acp.methods.agent.session.prompt, sdkRequest(acp.methods.agent.session.prompt, {
         sessionId,
         prompt: effectivePrompt,
-      } as unknown as never);
+      }));
       return res;
     } finally {
       try {
@@ -900,8 +944,10 @@ export class UniversalAgentConnection {
     }
   }
 
-  private assertCap(_name: string, _ok: unknown) {
-    // Soft check: some agents omit caps but still implement the method; let server decide.
-    return;
+  private requestMeta(value: unknown): Record<string, unknown> {
+    if (value == null) return {};
+    if (typeof value !== "object" || Array.isArray(value)) throw acp.RequestError.invalidParams(undefined, "Invalid ACP _meta");
+    return Object.fromEntries(Object.entries(value));
   }
+
 }

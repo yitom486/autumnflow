@@ -28,8 +28,9 @@ const app = acp
       protocolVersion: 1,
       agentCapabilities: {
         promptCapabilities: { image: true, audio: false },
-        sessionCapabilities: { list: {}, close: {}, fork: {}, additionalDirectories: {} },
+        sessionCapabilities: { list: {}, close: {}, fork: {}, resume: {}, load: {}, additionalDirectories: {} },
         mcpCapabilities: { http: true },
+        loadSession: true,
         providers: true,
       },
       agentInfo: {

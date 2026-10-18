@@ -40,7 +40,9 @@
         "@xterm/addon-unicode11": "^0.9.0",
         "@xterm/addon-web-links": "^0.12.0",
         "@xterm/xterm": "^6.0.0",
-        "@yitom/acp-client": "^0.1.9",
+        "@yitom/acp-client": "latest",
+        "ajv": "latest",
+        "ajv-formats": "latest",
         "chokidar": "^5.0.0",
         "class-variance-authority": "^0.7.1",
         "clsx": "^2.1.1",
@@ -837,7 +839,7 @@
 
     "@xterm/xterm": ["@xterm/xterm@6.0.0", "", {}, "sha512-TQwDdQGtwwDt+2cgKDLn0IRaSxYu1tSUjgKarSDkUM0ZNiSRXFpjxEsvc/Zgc5kq5omJ+V0a8/kIM2WD3sMOYg=="],
 
-    "@yitom/acp-client": ["@yitom/acp-client@0.1.9", "", { "dependencies": { "@agentclientprotocol/sdk": "^1.0.0" }, "bin": { "acp-engine": "dist/sidecar.cjs" } }, "sha512-uvhHktGG0NwR81JABdFmX+hnU8vXXcoZEcOxGIWvZJcCkw2U7QYveAiMBJKkGzsONjHdjyb0ygDO5pxUIrKBJw=="],
+    "@yitom/acp-client": ["@yitom/acp-client@0.1.11", "", { "dependencies": { "@agentclientprotocol/sdk": "^1.0.0" }, "bin": { "acp-engine": "dist/sidecar.cjs" } }, "sha512-BX3MK+npV0LMiHnbAzWpXD6GUrwfJbqy4ZgjUwTZ4wasPsDfoTJNrO0X7d8pRX83XyRFtVErgqWotXbMLSaV0A=="],
 
     "abbrev": ["abbrev@4.0.0", "", {}, "sha512-a1wflyaL0tHtJSmLSOVybYhy22vRih4eduhhrkcjgrWGnRfrZtovJ2FRjxuTtkkj47O/baf0R86QU5OuYpz8fA=="],
 

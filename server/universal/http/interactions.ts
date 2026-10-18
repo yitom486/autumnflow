@@ -5,6 +5,7 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
+import { RequestError } from "@agentclientprotocol/sdk";
 import { universalRegistry } from "../registry";
 import { json, jsonBody, optId, optStr } from "./shared";
 
@@ -45,7 +46,7 @@ interactionsRouter.post("/permission/respond", jsonBody(permissionRespondBody), 
     if (!ok) return json({ ok: false, error: "permission not found or expired" }, 404);
     return json({ ok: true });
   } catch (err) {
-    return json({ ok: false, error: (err as Error).message }, 500);
+    return json({ ok: false, error: (err as Error).message }, err instanceof RequestError ? 400 : 500);
   }
 });
 
@@ -74,6 +75,6 @@ interactionsRouter.post("/elicitation/respond", jsonBody(elicitationRespondBody)
     if (!ok) return json({ ok: false, error: "elicitation not found or expired" }, 404);
     return json({ ok: true });
   } catch (err) {
-    return json({ ok: false, error: (err as Error).message }, 500);
+    return json({ ok: false, error: (err as Error).message }, err instanceof RequestError ? 400 : 500);
   }
 });

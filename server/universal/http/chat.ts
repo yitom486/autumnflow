@@ -6,20 +6,21 @@
  */
 import { Hono } from "hono";
 import { z } from "zod";
+import type { ContentBlock } from "@agentclientprotocol/sdk";
+import { sdkValue } from "../acp-sdk";
 import { universalRegistry } from "../registry";
 import { gatewayError, json, jsonBody, optStr } from "./shared";
 
 /** Normalize frontend prompt into ACP ContentBlock[] */
-function normalizePrompt(input: unknown): Array<Record<string, unknown>> {
+function normalizePrompt(input: unknown): ContentBlock[] {
   if (typeof input === "string") return [{ type: "text", text: input }];
   if (Array.isArray(input)) {
     return input.map((b) => {
       if (typeof b === "string") return { type: "text", text: b };
-      if (b && typeof b === "object") return b as Record<string, unknown>;
-      return { type: "text", text: String(b ?? "") };
+      return sdkValue<ContentBlock>("ContentBlock", b);
     });
   }
-  if (input && typeof input === "object") return [input as Record<string, unknown>];
+  if (input && typeof input === "object") return [sdkValue<ContentBlock>("ContentBlock", input)];
   return [{ type: "text", text: String(input ?? "") }];
 }
 
@@ -69,7 +70,8 @@ chatRouter.post("/", jsonBody(chatBody), async (c) => {
     return json({ ok: false, error: "sessionId missing and session/new returned none" }, 500);
   }
 
-  const promptBlocks = normalizePrompt(body.prompt);
+  let promptBlocks: ContentBlock[];
+  try { promptBlocks = normalizePrompt(body.prompt); } catch (err) { return gatewayError(err); }
 
   // Client-disconnect propagation: forward req.signal into conn.prompt()
   // so a closed SSE stream cancels the in-flight turn server-side.
@@ -117,7 +119,7 @@ chatRouter.post("/", jsonBody(chatBody), async (c) => {
       try {
         const res = (await conn.prompt(
           sessionId,
-          promptBlocks as unknown[],
+          promptBlocks,
           (evt) => {
             send({ ...evt, agentId, sessionId: (evt.sessionId as string) || sessionId });
           },

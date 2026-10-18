@@ -64,7 +64,7 @@ export function gatewayErrorBody(err: unknown): { status: number; body: Record<s
   const code = acpErrorCode(err);
   const authRequired = isAuthRequiredError(err);
   return {
-    status: authRequired ? 401 : 500,
+    status: authRequired ? 401 : code === -32602 ? 400 : code === -32601 ? 501 : 500,
     body: { ok: false, error: message, authRequired, ...(code !== null ? { code } : {}) },
   };
 }
