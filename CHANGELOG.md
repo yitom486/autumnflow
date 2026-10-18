@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### Fixed
+- 修复恢复的线程指向已失效会话时首条消息直接失败 `Invalid params: unknown session`：chat 路由现在识别 ACP -32602 的会话失效，先用 `session/resume` 接回（保住上下文），不行再新建会话并在同一轮重试一次；客户端从第二个 `start` 帧拿到新 session id，用户消息不丢、也不会重复计费。
 - 修复只有余额、没有限额窗口的配额（DeepSeek 账户）在顶部智能体 chip 上完全不显示：现在显示 `¥12.34` 形式的余额徽标；限额环和短计划名仍优先展示。配额数据本身一直存在（面板里的卡片能显示），只是 chip 之前只认窗口/计划名。
 - 修复 Agent 冷启动时首轮只显示「等待响应…」：未连接时首轮提示改为「正在启动 Agent…（首次或升级后可能较慢）」，对应 `bunx @deepseek-ai/dsh@latest` 首次解析与启动的实际耗时。
 - 修复 DeepSeek 轮次因缺少 API Key 失败时只抛原始英文错误：现在识别 `no API key for provider route`，在错误气泡里直接给出两条可操作路径（切到 **DeepSeek Account** 模型分组，或配置 `DEEPSEEK_API_KEY`），并说明这是 DSH 的 `deepseek-official` 路由缺凭据，而不是客户端没有读取本地配置。

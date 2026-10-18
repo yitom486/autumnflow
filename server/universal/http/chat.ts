@@ -42,6 +42,22 @@ const chatBody = z.looseObject({
 
 export const chatRouter = new Hono();
 
+/**
+ * A prompt rejected because the agent no longer knows that session id.
+ *
+ * Restored threads and window reopen can carry an id from a previous runtime,
+ * a cleaned history, or a different harness store; ACP reports it as invalid
+ * params (-32602) with an "unknown session" message.
+ */
+export function isUnknownSessionError(err: unknown): boolean {
+  const code = (err as { code?: unknown } | null)?.code;
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  if (!/unknown session|session\b[^\n]*(?:not found|does not exist|gone|expired)|invalid params[^\n]*session/i.test(msg)) {
+    return false;
+  }
+  return code === undefined || code === -32602;
+}
+
 const SSE_HEADERS = {
   "Content-Type": "text/event-stream; charset=utf-8",
   "Cache-Control": "no-cache, no-transform",
@@ -176,13 +192,15 @@ chatRouter.post("/", jsonBody(chatBody), async (c) => {
   }
 
   let sessionId = (body.sessionId as string) || "";
+  const requestedSessionId = sessionId;
+  const newSessionArgs = {
+    cwd: body.cwd as string | undefined,
+    mcpServers: (body.mcpServers as unknown[]) || [],
+    additionalDirectories: body.additionalDirectories as string[] | undefined,
+  };
   if (!sessionId) {
     try {
-      const fresh = (await conn.newSession({
-        cwd: body.cwd as string | undefined,
-        mcpServers: (body.mcpServers as unknown[]) || [],
-        additionalDirectories: body.additionalDirectories as string[] | undefined,
-      })) as { sessionId?: string };
+      const fresh = (await conn.newSession(newSessionArgs)) as { sessionId?: string };
       sessionId = fresh.sessionId || "";
     } catch (err) {
       console.error("[chat.ts session/new failed]", err);
@@ -213,18 +231,51 @@ chatRouter.post("/", jsonBody(chatBody), async (c) => {
   void (async () => {
     try {
       turnRegistry.append(turnId, { type: "start", turnId, agentId, sessionId });
-      const res = (await conn.prompt(
-        sessionId,
-        promptBlocks,
-        (evt) => {
-          turnRegistry.append(turnId, {
-            ...evt,
-            turnId,
-            agentId,
-            sessionId: (evt.sessionId as string) || sessionId,
+      let res: { stopReason?: string } | undefined;
+      const sendPrompt = (sid: string) =>
+        conn.prompt(
+          sid,
+          promptBlocks,
+          (evt) => {
+            turnRegistry.append(turnId, {
+              ...evt,
+              turnId,
+              agentId,
+              sessionId: (evt.sessionId as string) || sid,
+            });
+          }
+        ) as Promise<{ stopReason?: string } | undefined>;
+      try {
+        res = await sendPrompt(sessionId);
+      } catch (err) {
+        // A restored thread can point at a session the agent no longer knows
+        // (runtime swapped, history cleaned, host restarted with a new store).
+        // Prefer reattaching it — that keeps the conversation context — and
+        // only fall back to a fresh session when resume also rejects the id.
+        if (!requestedSessionId || !isUnknownSessionError(err)) throw err;
+        let resumed = false;
+        try {
+          console.warn(`[Universal] stale session ${requestedSessionId}; trying session/resume`);
+          await conn.resumeSession({
+            sessionId: requestedSessionId,
+            ...(body.cwd ? { cwd: body.cwd } : {}),
+            mcpServers: (body.mcpServers as unknown[]) || [],
+            ...(Array.isArray(body.additionalDirectories) ? { additionalDirectories: body.additionalDirectories } : {}),
           });
+          res = await sendPrompt(requestedSessionId);
+          resumed = true;
+        } catch (resumeErr) {
+          if (!isUnknownSessionError(resumeErr)) throw resumeErr;
         }
-      )) as { stopReason?: string } | undefined;
+        if (!resumed) {
+          console.warn(`[Universal] session ${requestedSessionId} is gone; creating a new one`);
+          const fresh = (await conn.newSession(newSessionArgs)) as { sessionId?: string };
+          if (!fresh?.sessionId) throw err;
+          sessionId = fresh.sessionId;
+          turnRegistry.append(turnId, { type: "start", turnId, agentId, sessionId });
+          res = await sendPrompt(sessionId);
+        }
+      }
       turnRegistry.append(turnId, {
         type: "done",
         turnId,

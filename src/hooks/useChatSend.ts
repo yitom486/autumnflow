@@ -357,11 +357,17 @@ export function useChatSend({
           // every turn until the model is switched or the key is stored.
           const isDeepseekKeyMissing =
             typeof err?.message === "string" && /no API key for provider route/i.test(err.message);
+          // The server already tries resume -> new session for a stale id; this
+          // only fires when even that failed.
+          const isStaleSession =
+            typeof err?.message === "string" && /unknown session|session\b[^\n]*(?:not found|expired)/i.test(err.message);
           const diagnosticHint = isToolCallDesync
             ? "\n\n> 💡 **会话上下文失步诊断**：智能体在工具调用异常后遗漏了回包（Tool Call 状态断裂），导致上游模型服务拒绝了当前历史记录。建议点击**新建会话**以开启干净上下文继续任务。"
             : isDeepseekKeyMissing
               ? "\n\n> 💡 **DeepSeek 凭据未配置**：当前模型走 `deepseek-official`（API Key 路由），但 DSH 里没有 `DEEPSEEK_API_KEY`。\n> 1. 打开模型菜单，切换到 **DeepSeek Account** 分组里的同名模型（复用你已登录的平台账户）；\n> 2. 或在 DSH 设置（`dsh --profile web` → 设置 → 模型）里保存 API Key，或在启动 AutumnFlow 前 `export DEEPSEEK_API_KEY=…`。"
-              : "";
+              : isStaleSession
+                ? "\n\n> 💡 **会话已失效**：Agent 侧已经没有这个会话（更换运行时或历史被清理时会出现）。已自动尝试接回并退化为新建会话；如果反复出现，请点标题栏的**新会话**再发送。"
+                : "";
           c2.patchMessage(assistantId, (m) => ({
             ...m,
             content: stripRetryNotes(m.content) + `\n\n> ❌ [${agentId}] ${err.message}${diagnosticHint}`,
