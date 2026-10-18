@@ -11,6 +11,7 @@
  */
 import * as acp from "@agentclientprotocol/sdk";
 import { parseMcpHttpSupported } from "@yitom/acp-client";
+import { supportsCodeMode } from "../../shared/acp-code-mode";
 import { requestAgent, requireAgentCapability, sdkRequest, sdkValue } from "./acp-sdk";
 import type { AgentProfile } from "./types";
 import type { FsGuard } from "./fs-guard";
@@ -46,15 +47,22 @@ export class SessionService {
   }
 
   /**
-   * Enrich sessions with local MCP descriptors and the SDK's version-gated resource binding.
+   * Enrich sessions with local MCP descriptors, the code-mode request and the
+   * SDK's version-gated resource binding.
    * Applied symmetrically to session/new, session/resume, session/load, session/fork.
    */
-  private enrichSessionPayload<T extends { cwd?: unknown; mcpServers?: unknown; additionalDirectories?: unknown }>(args: T): {
+  private enrichSessionPayload<T extends {
+    cwd?: unknown;
+    mcpServers?: unknown;
+    additionalDirectories?: unknown;
+    codeMode?: unknown;
+    _meta?: unknown;
+  }>(args: T): {
     cwd: string;
     mcpServers: acp.McpServer[];
     additionalDirectories: string[];
     roots: string[];
-    resourceMeta?: Record<string, unknown>;
+    meta?: Record<string, unknown>;
   } {
     const cwd = typeof args.cwd === "string" && args.cwd ? args.cwd : (this.defaultCwd || process.cwd());
     const additionalDirectories = Array.isArray(args.additionalDirectories) ? args.additionalDirectories.map(directory => {
@@ -89,16 +97,42 @@ export class SessionService {
         });
       }
     }
-    return { cwd, mcpServers, additionalDirectories, roots, resourceMeta: this.deps.resources.sessionMeta() };
+    const resourceMeta = this.deps.resources.sessionMeta();
+    // Session-level code mode: only request it when the client asked AND the
+    // agent declares (or is a known legacy) PTC presentation. The agent turns
+    // every visible tool — including the MCP mounts above — into its code-mode
+    // SDK, so nothing else has to be injected.
+    const codeModeMeta =
+      (args.codeMode === true || args.codeMode === "on") && supportsCodeMode((capabilities ?? {}) as Record<string, unknown>)
+        ? { toolsMode: "ptc" }
+        : undefined;
+    const meta = {
+      ...this.requestMeta(args._meta),
+      ...(resourceMeta ?? {}),
+      ...(codeModeMeta ?? {}),
+    };
+    return {
+      cwd,
+      mcpServers,
+      additionalDirectories,
+      roots,
+      meta: Object.keys(meta).length > 0 ? meta : undefined,
+    };
   }
 
-  async newSession(args: { cwd?: string; mcpServers?: unknown[]; additionalDirectories?: string[] }): Promise<unknown> {
+  async newSession(args: {
+    cwd?: string;
+    mcpServers?: unknown[];
+    additionalDirectories?: string[];
+    codeMode?: unknown;
+    _meta?: unknown;
+  }): Promise<unknown> {
     const conn = this.deps.ensureConnection();
-    const { cwd, mcpServers, additionalDirectories, roots, resourceMeta } = this.enrichSessionPayload(args);
+    const { cwd, mcpServers, additionalDirectories, roots, meta } = this.enrichSessionPayload(args);
     const result = await requestAgent(conn, acp.methods.agent.session.new, {
       cwd,
       mcpServers,
-      ...(resourceMeta ? { _meta: resourceMeta } : {}),
+      ...(meta ? { _meta: meta } : {}),
       ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
     });
     const newSid = result.sessionId;
@@ -115,13 +149,13 @@ export class SessionService {
     const conn = this.deps.ensureConnection();
     requireAgentCapability("loadSession", this.deps.init()?.agentCapabilities?.loadSession);
     const sessionId = typeof args.sessionId === "string" ? args.sessionId : "";
-    const { cwd, mcpServers, additionalDirectories, roots, resourceMeta } = this.enrichSessionPayload(args);
+    const { cwd, mcpServers, additionalDirectories, roots, meta } = this.enrichSessionPayload(args);
     const payload = {
       ...args,
       sessionId,
       cwd,
       mcpServers,
-      ...(resourceMeta ? { _meta: { ...this.requestMeta(args._meta), ...resourceMeta } } : {}),
+      ...(meta ? { _meta: meta } : {}),
       ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
     };
     // session/load replays history via session/update notifications before
@@ -165,12 +199,12 @@ export class SessionService {
   async forkSession(args: Record<string, unknown>): Promise<unknown> {
     const conn = this.deps.ensureConnection();
     requireAgentCapability("session.fork", this.deps.init()?.agentCapabilities?.sessionCapabilities?.fork);
-    const { cwd, mcpServers, additionalDirectories, roots, resourceMeta } = this.enrichSessionPayload(args);
+    const { cwd, mcpServers, additionalDirectories, roots, meta } = this.enrichSessionPayload(args);
     const payload = {
       ...args,
       cwd,
       mcpServers,
-      ...(resourceMeta ? { _meta: { ...this.requestMeta(args._meta), ...resourceMeta } } : {}),
+      ...(meta ? { _meta: meta } : {}),
       ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
     };
     const result = await requestAgent(conn, acp.methods.agent.session.fork, sdkRequest(acp.methods.agent.session.fork, payload));
@@ -187,12 +221,12 @@ export class SessionService {
   async resumeSession(args: Record<string, unknown>): Promise<unknown> {
     const conn = this.deps.ensureConnection();
     requireAgentCapability("session.resume", this.deps.init()?.agentCapabilities?.sessionCapabilities?.resume);
-    const { cwd, mcpServers, additionalDirectories, roots, resourceMeta } = this.enrichSessionPayload(args);
+    const { cwd, mcpServers, additionalDirectories, roots, meta } = this.enrichSessionPayload(args);
     const payload = {
       ...args,
       cwd,
       mcpServers,
-      ...(resourceMeta ? { _meta: { ...this.requestMeta(args._meta), ...resourceMeta } } : {}),
+      ...(meta ? { _meta: meta } : {}),
       ...(additionalDirectories.length > 0 ? { additionalDirectories } : {}),
     };
     const request = sdkRequest(acp.methods.agent.session.resume, payload);

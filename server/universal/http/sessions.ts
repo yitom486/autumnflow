@@ -89,6 +89,7 @@ sessionsRouter.post("/:agentId/session/:action", jsonBody(sessionBody), async (c
           cwd: body.cwd ?? undefined,
           mcpServers: body.mcpServers || [],
           additionalDirectories: body.additionalDirectories ?? undefined,
+          ...(body.codeMode ? { codeMode: body.codeMode } : {}),
         });
         result = await withCommands(conn, result);
         break;
@@ -113,6 +114,7 @@ sessionsRouter.post("/:agentId/session/:action", jsonBody(sessionBody), async (c
           cwd: body.cwd || process.cwd(),
           ...(body.additionalDirectories ? { additionalDirectories: body.additionalDirectories } : {}),
           ...(body.mcpServers ? { mcpServers: body.mcpServers } : {}),
+          ...(body.codeMode ? { codeMode: body.codeMode } : {}),
         });
         break;
       }

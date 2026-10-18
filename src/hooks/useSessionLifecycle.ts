@@ -101,8 +101,10 @@ export function useSessionLifecycle({
         const known = agentsRef.current.find((a) => a.id === agentId)?.status?.connected;
         if (!known) await connectAgent(agentId);
         const reqCwd = st.currentWorkspace || undefined;
-        // Auto-created sessions inherit the agent thread's MCP servers.
+        // Auto-created sessions inherit the agent thread's MCP servers and its
+        // session-level code mode.
         const autoServers = st.threadMcpServers(agentId);
+        const codeMode = st.activeThreadId ? st.threads[st.activeThreadId]?.codeMode === true : false;
 
         // Auto-prune uncommitted empty draft: if leaving behind an empty session with 0 user messages,
         // delete it from the agent so abandoned zero-message sessions don't clutter the sidebar.
@@ -115,6 +117,7 @@ export function useSessionLifecycle({
         const res: any = await sessionNew(agentId, {
           ...(reqCwd ? { cwd: reqCwd } : {}),
           ...(autoServers?.length ? { mcpServers: autoServers } : {}),
+          ...(codeMode ? { codeMode: "on" } : {}),
         });
 
         // Isolation guard: the user may have switched agents while session/new
@@ -194,6 +197,9 @@ export function useSessionLifecycle({
             : {}),
           // Carry the thread's MCP servers so auto-resume keeps working tools.
           mcpServers: thread.mcpServers ?? [],
+          // Re-request code mode: the agent applies it per session, and a resume
+          // is a new session activation on its side.
+          ...(thread.codeMode ? { codeMode: "on" } : {}),
         });
         // A late resume must not touch the new agent's view.
         if (useStudioStore.getState().activeAgentId !== agentId) return { resumed: false };

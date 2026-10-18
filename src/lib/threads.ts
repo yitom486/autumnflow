@@ -29,6 +29,8 @@ export interface ChatThread {
   cwd?: string | null;
   /** MCP servers bound to this thread (carried into auto new/resume). */
   mcpServers?: unknown[];
+  /** Run this session in the agent's code mode (PTC), when it supports one. */
+  codeMode?: boolean;
   title?: string | null;
   messages: Message[];
   updatedAt: number;

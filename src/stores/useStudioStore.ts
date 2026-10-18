@@ -185,6 +185,8 @@ interface StudioState {
   bindThreadSession: (sessionId: string | null, cwd?: string | null, mcpServers?: unknown[]) => void;
   /** Mark the live thread stale after a failed resume (visible degrade). */
   markThreadStale: () => void;
+  /** Session-level code mode (PTC): applies when this thread's session is created or resumed. */
+  setThreadCodeMode: (enabled: boolean) => void;
   /** Optimistic switch to a session: instant UI mount from local thread cache without blocking spinners. */
   optimisticOpenSession: (
     agentId: string,
@@ -801,6 +803,11 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
     // Continuity: a fresh thread inherits the agent's latest MCP servers so
     // auto-created sessions keep working tools until the user changes them.
     const inherited = threadForAgent(s0.threads, agentId, cwd)?.mcpServers;
+    const liveThread = s0.activeThreadId ? s0.threads[s0.activeThreadId] : undefined;
+    const inheritedCodeMode =
+      liveThread && liveThread.agentId === agentId
+        ? liveThread.codeMode
+        : threadForAgent(s0.threads, agentId, cwd)?.codeMode;
     const t: ChatThread = {
       id: newThreadId(),
       agentId,
@@ -808,6 +815,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       cwd,
       messages: [],
       mcpServers: inherited,
+      ...(inheritedCodeMode !== undefined ? { codeMode: inheritedCodeMode } : {}),
       updatedAt: Date.now(),
     };
     const next = pruneThreads({ ...s0.threads, [t.id]: t }, [t.id]);
@@ -863,6 +871,16 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       // no longer a live session: leaving it in `sessionId` made ensureSession
       // return the dead id forever (the "点击加载模型" button did nothing).
       return { threads, sessionId: null };
+    }),
+  setThreadCodeMode: (enabled) =>
+    set((s) => {
+      if (!s.activeThreadId) return {};
+      const cur = s.threads[s.activeThreadId];
+      if (!cur) return {};
+      const next = { ...cur, codeMode: enabled, updatedAt: Date.now() };
+      const threads = pruneThreads({ ...s.threads, [next.id]: next }, [next.id]);
+      saveThreads(threads);
+      return { threads };
     }),
   optimisticOpenSession: (agentId, sessionId, title, cwd) => {
     const s0 = get();

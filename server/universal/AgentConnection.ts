@@ -528,7 +528,13 @@ export class UniversalAgentConnection {
   // ---- session RPCs ----
   // All session bookkeeping lives in SessionService; these forwards keep the
   // connection's public surface (and every route) unchanged.
-  async newSession(args: { cwd?: string; mcpServers?: unknown[]; additionalDirectories?: string[] }): Promise<unknown> {
+  async newSession(args: {
+    cwd?: string;
+    mcpServers?: unknown[];
+    additionalDirectories?: string[];
+    codeMode?: unknown;
+    _meta?: unknown;
+  }): Promise<unknown> {
     return this.sessions.newSession(args);
   }
 

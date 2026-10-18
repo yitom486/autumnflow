@@ -24,6 +24,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { agentQuota, type AgentSummary } from "@/lib/universal-api";
+import { supportsCodeMode } from "../../../shared/acp-code-mode";
 import { DeepSeekCredentialsDialog } from "./DeepSeekCredentialsDialog";
 import { WorkspaceDropdown } from "./WorkspaceDropdown";
 import { GatewayDot } from "./GatewayDot";
@@ -100,6 +101,8 @@ export const AgentStatusChip: React.FC<{
   const storeQuota = useStudioStore((s) => s.quota);
   const setQuota = useStudioStore((s) => s.setQuota);
   const setInput = useStudioStore((s) => s.setInput);
+  const codeModeOn = useStudioStore((s) => (s.activeThreadId ? s.threads[s.activeThreadId]?.codeMode === true : false));
+  const setThreadCodeMode = useStudioStore((s) => s.setThreadCodeMode);
 
   useEffect(() => {
     if (!open) return;
@@ -129,6 +132,7 @@ export const AgentStatusChip: React.FC<{
   const agentInfo = active?.status?.agentInfo as any;
   const pid = active?.status?.pid;
   const isAuthed = authOk === true || (authOk !== false && quota?.status === "ok");
+  const codeModeSupported = supportsCodeMode((caps ?? {}) as Record<string, unknown>);
   const dot = connected ? "bg-success" : connecting ? "bg-warning animate-pulse" : "bg-muted-foreground/40";
 
   const handleRefreshQuota = useCallback(async () => {
@@ -262,7 +266,21 @@ export const AgentStatusChip: React.FC<{
               refreshing={refreshingQuota}
               onRefresh={handleRefreshQuota}
             />
-            <div className="pt-2 flex items-center gap-1.5">
+            <div className="pt-2 flex items-center gap-1.5 flex-wrap">
+              {codeModeSupported && (
+                <label
+                  className="flex items-center gap-1.5 text-xs text-muted-foreground cursor-pointer select-none"
+                  title="会话级：新建或恢复会话后生效；模型改为写代码调用工具（含 MCP 工具）"
+                >
+                  <input
+                    type="checkbox"
+                    checked={codeModeOn}
+                    onChange={(e) => setThreadCodeMode(e.target.checked)}
+                    className="rounded border-border text-primary focus:ring-primary/20"
+                  />
+                  Code mode
+                </label>
+              )}
               {!connected ? (
                 <Button size="sm" onClick={() => { onConnect(); }} disabled={connecting} className="h-7 px-2.5 text-xs gap-1.5">
                   <Plug className="w-3 h-3" /> {connecting ? "连接中" : "连接"}
