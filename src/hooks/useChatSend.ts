@@ -28,6 +28,7 @@ import {
 } from "@/components/assistant/toolkit";
 import { resolveToolDisplayTitle } from "@/components/assistant/tool-widget-utils";
 import { titleForThread } from "@/lib/threads";
+import { FrameBatcher } from "@/lib/frame-batcher";
 
 export interface UseChatSendOptions {
   qc: QueryClient;
@@ -54,6 +55,7 @@ const DEFAULT_RETRY = {
 export function isTransientSendError(err: unknown): boolean {
   if (!err) return false;
   if ((err as { name?: unknown } | null)?.name === "AbortError") return false;
+  if ((err as { terminal?: unknown } | null)?.terminal === true) return false;
   if (isAuthRequiredError(err)) return false;
   const msg = err instanceof Error ? err.message : String(err ?? "");
   return /fetch failed|failed to fetch|networkerror|network request failed|load failed|timeout|timed out|econnreset|econnrefused|epipe|socket hang up|connection reset|temporarily|try again|rate limit|too many requests|429|50[0234]|service unavailable|bad gateway|gateway timeout|not ready|eof|unexpected eof|eligibility check failed/i.test(
@@ -188,12 +190,19 @@ export function useChatSend({
       }
 
       const assistantId = "asst-" + Date.now();
+      // Server-side idempotency key: retries attach to this turn instead of
+      // prompting the agent again.
+      const turnId = `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
       // 发出的图片也显示在用户消息里（与历史回放一致）
       const sentImages = st.attachments
         .filter((a) => (a.block as any).type === "image" && typeof (a.block as any).data === "string")
         .map((a) => ({ src: `data:${(a.block as any).mimeType || a.mimeType};base64,${(a.block as any).data}`, mimeType: String((a.block as any).mimeType || a.mimeType) }))
         .slice(-8);
       let turnStarted = false;
+      // Assigned once the assistant bubble exists; outer catch/finally still
+      // need to flush any coalesced tail before stamping the turn end.
+      let flushPending = () => {};
+      let disposeBatching = () => {};
       const beginTurn = (initialHint?: string) => {
         const current = useStudioStore.getState();
         if (turnStarted && current.messages.some((m) => m.id === assistantId)) {
@@ -212,6 +221,7 @@ export function useChatSend({
         current.appendMessage({
           id: assistantId,
           role: "assistant",
+          turnId,
           content: "",
           thought: "",
           plan: [],
@@ -265,6 +275,35 @@ export function useChatSend({
         // automatically with backoff; the retry note is stripped on success.
         // Anything else (abort/auth/semantic) falls through to the handlers below.
         let attempt = 0;
+        // Highest SSE sequence already rendered. Sent back as afterSeq so a
+        // reconnect replays only the missing tail, never duplicate chunks.
+        let lastSeq = 0;
+        // Coalesce token-rate writes to one UI commit per animation frame.
+        const textBatcher = new FrameBatcher((text) => {
+          useStudioStore.getState().patchMessage(assistantId, (m) => ({
+            ...m,
+            content: m.content + text,
+            statusHint: undefined,
+          }));
+        });
+        let thoughtStartedAt = 0;
+        const thoughtBatcher = new FrameBatcher((text) => {
+          useStudioStore.getState().patchMessage(assistantId, (m) => ({
+            ...m,
+            thought: (m.thought || "") + text,
+            statusHint: "正在思考…",
+            thoughtTiming: m.thoughtTiming ?? { startedAt: thoughtStartedAt || Date.now() },
+          }));
+        });
+        const flushPendingNow = () => {
+          textBatcher.flush();
+          thoughtBatcher.flush();
+        };
+        flushPending = flushPendingNow;
+        disposeBatching = () => {
+          textBatcher.dispose();
+          thoughtBatcher.dispose();
+        };
         // Terminal error reporting (auth modal, ❌ note, turn stamp).
         // Stale retry notes are stripped first so a dead "retrying…" line
         // never survives next to the final error.
@@ -297,9 +336,12 @@ export function useChatSend({
         for (;;) {
           let failedErr: any = null;
           try {
-            await consumeUniversalChat(
-              { agentId, sessionId: sid, prompt: blocks },
+            const result = await consumeUniversalChat(
+              { agentId, sessionId: sid, prompt: blocks, turnId, afterSeq: lastSeq },
               {
+            onSequence: (seq) => {
+              lastSeq = seq;
+            },
             onConnect: () => {
               // 传输通道连接就绪，不写入虚假「深入思考」文案，等待后端下发首个真实事件
             },
@@ -325,24 +367,23 @@ export function useChatSend({
                 useStudioStore.getState().patchMessage(assistantId, (m) => ({ ...m, statusHint: text }));
               }
             },
-            onTextChunk: (chunk) =>
-              useStudioStore.getState().patchMessage(assistantId, (m) => ({ ...m, content: m.content + chunk, statusHint: undefined })),
-            onThoughtChunk: (chunk) =>
-              useStudioStore.getState().patchMessage(assistantId, (m) => ({
-                ...m,
-                thought: (m.thought || "") + chunk,
-                statusHint: "正在思考…",
-                thoughtTiming: m.thoughtTiming ?? { startedAt: Date.now() },
-              })),
-            onImageChunk: (img) =>
+            onTextChunk: (chunk) => textBatcher.push(chunk),
+            onThoughtChunk: (chunk) => {
+              if (!thoughtStartedAt) thoughtStartedAt = Date.now();
+              thoughtBatcher.push(chunk);
+            },
+            onImageChunk: (img) => {
+              flushPending();
               useStudioStore.getState().patchMessage(assistantId, (m) => {
                 const images = [...(m.images || []), img];
                 if (images.length > 8) {
                   console.debug("[App] 图片附件超限，已丢弃旧图 (保留最新 8 张)");
                 }
                 return { ...m, images: images.slice(-8) };
-              }),
-            onToolCall: (c) =>
+              });
+            },
+            onToolCall: (c) => {
+              flushPending();
               useStudioStore.getState().patchMessage(assistantId, (m) => {
                 const isGen = isGenerativeTool(c);
                 const displayTitle = resolveToolDisplayTitle(c);
@@ -365,8 +406,10 @@ export function useChatSend({
                     },
                   ],
                 };
-              }),
-            onToolCallUpdate: (c) =>
+              });
+            },
+            onToolCallUpdate: (c) => {
+              flushPending();
               useStudioStore.getState().patchMessage(assistantId, (m) => {
                 const calls = [...(m.toolCalls || [])];
                 const i = calls.findIndex((x) => x.id === c.id);
@@ -420,7 +463,8 @@ export function useChatSend({
                   statusHint: hint,
                   toolCalls: calls,
                 };
-              }),
+              });
+            },
             onPlan: (entries) =>
               useStudioStore.getState().patchMessage(assistantId, (m) => {
                 const hint = statusTextForUpdate("plan", { entries });
@@ -428,7 +472,14 @@ export function useChatSend({
               }),
             onAvailableCommands: (cmds) => useStudioStore.getState().setAvailableCommands(cmds, sid),
             onConfigOptions: (options) => useStudioStore.getState().setConfigOptions(options),
-            onContentBlock: (content) => useStudioStore.getState().patchMessage(assistantId, m => ({ ...m, contentBlocks: [...(m.contentBlocks ?? []), content], statusHint: undefined })),
+            onContentBlock: (content) => {
+              flushPending();
+              useStudioStore.getState().patchMessage(assistantId, (m) => ({
+                ...m,
+                contentBlocks: [...(m.contentBlocks ?? []), content],
+                statusHint: undefined,
+              }));
+            },
             onArtifactUpdate: (update) => {
               const state = useStudioStore.getState();
               const owner = state.messages.find(m => m.artifacts?.some(entry => artifactKey(entry) === updateKey(update)));
@@ -486,6 +537,7 @@ export function useChatSend({
             onElicitationRequest: (e) => useStudioStore.getState().addElicitation(e),
             onElicitationClosed: (id) => useStudioStore.getState().removeElicitation(id),
             onDone: (_stopReason, resp) => {
+              flushPending();
               if (resp && (resp.usage || resp._meta)) {
                 const extras = pickUsageExtras({ ...(resp.usage || {}), _meta: resp._meta });
                 const c2 = useStudioStore.getState();
@@ -516,6 +568,7 @@ export function useChatSend({
               stampTurnEnd(assistantId);
             },
             onError: (err) => {
+              flushPending();
               // Mid-stream error frame: consumeUniversalChat reports but does
               // NOT throw, so transient ones defer to the resend below.
               if (shouldRetry(err)) {
@@ -527,6 +580,7 @@ export function useChatSend({
           },
           abortRef.current.signal
           );
+          lastSeq = result.lastEventId ?? lastSeq;
         } catch (e: any) {
           // Pre-stream throw (connect/session/chat-POST failure).
           if (e?.name === "AbortError") throw e;
@@ -601,6 +655,7 @@ export function useChatSend({
           invalidateSessions(qc, agentId);
         }
       } catch (e: any) {
+        flushPending();
         if (e?.name !== "AbortError") {
           beginTurn();
           const c2 = useStudioStore.getState();
@@ -618,6 +673,8 @@ export function useChatSend({
           stampTurnEnd(assistantId);
         }
       } finally {
+        flushPending();
+        disposeBatching();
         sendingRef.current = false;
         const c2 = useStudioStore.getState();
         c2.setStreaming(false);

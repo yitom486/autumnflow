@@ -20,6 +20,10 @@
 - 多终端浮动窗口：每个窗口独立 xterm + PTY/WebSocket，可同时开多个 shell；标题栏「+」新建窗口、点击置顶、窗口位置分别持久化，关闭单个窗口不影响其他终端。
 - 终端 shell 自动探测：优先用户本机的 PowerShell 7 (`pwsh.exe`)，再回落 Windows PowerShell、`%COMSPEC%`/cmd、`$SHELL`/常见 POSIX shell；支持 `ACP_TERMINAL_SHELL` 显式覆盖，状态接口与终端标题显示实际 shell（例如 PowerShell 7+），不再硬编码 PowerShell 5。
 - 模型目录冷启动缓存：按 Agent 持久化上一次 `models` / `configOptions`（含 OpenCode 的 100+ 模型选项），启动或切换 Agent 时先立即恢复模型选择器，再由新的 `session/new` 后台刷新；避免每次重启都要等 OpenCode 冷启动数秒才看到 OpenCode Go 模型。
+- Turn 幂等与断线续传：客户端为每次发送生成 `turnId`，服务端 turn ledger 只接受一次 prompt；SSE 断线后客户端带同一 `turnId` 与 `afterSeq` 续流，服务端按序号补发缺失事件，不再重复工具调用/计费/副作用；新增 `GET /chat/:turnId/follow`。
+- 流式 UI 按动画帧合并：文本与思考 chunk 先进入 `FrameBatcher`，每帧最多提交一次 store patch；工具卡/图片/终态前强制 flush，保持内容与事件顺序。
+- Electron IPC 边界加厚：所有 native IPC 都校验发送窗口、主 frame 与 `senderFrame.url` 的 origin，只允许应用自己的页面调用。
+- 有界崩溃诊断：主进程/渲染进程/子进程异常与启动失败写入 `userData/logs/crashes/crash-*.log`，包含版本、平台、错误与最近 error 级渲染日志，最多保留 10 份；不阻塞启动或退出。
 
 <!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 

@@ -16,6 +16,15 @@ import { attachPtyUpgrade } from "../server/universal/pty";
 import { initUpdater, checkForUpdatesFromMenu } from "./updater";
 import { buildAppMenu, type MenuActions } from "./menu";
 import { addRecent, loadRecent } from "./recent";
+import { isTrustedSenderUrl } from "./sender-policy";
+import {
+  RendererConsoleTail,
+  pruneCrashReports,
+  writeCrashReport,
+  type CrashReportApp,
+  type CrashReportPhase,
+  type CrashReportSource,
+} from "./crash-report";
 import { setTrashImpl } from "../server/universal/http/files";
 import { startMcpUiServer, stopMcpUiServer } from "../server/universal/mcp-ui-server";
 
@@ -46,6 +55,40 @@ try {
 const windows = new Set<BrowserWindow>();
 let win: BrowserWindow | null = null; // 最近聚焦的窗口
 let gateway: { close: (cb?: () => void) => void } | null = null;
+
+const rendererConsole = new RendererConsoleTail();
+const crashReportDir = () => path.join(app.getPath("userData"), "logs", "crashes");
+
+function crashAppFacts(): CrashReportApp {
+  return {
+    name: app.getName(),
+    version: app.getVersion(),
+    platform: process.platform,
+    arch: process.arch,
+    electron: process.versions.electron || "unknown",
+    node: process.versions.node,
+    locale: app.getLocale(),
+  };
+}
+
+/** Best-effort async crash file; never blocks quitting or masks the failure. */
+function recordCrash(source: CrashReportSource, phase: CrashReportPhase, error: unknown): void {
+  try {
+    const dir = crashReportDir();
+    void writeCrashReport(dir, {
+      source,
+      phase,
+      error,
+      rendererConsole: rendererConsole.snapshot(),
+      app: crashAppFacts(),
+      time: new Date(),
+    }).then((file) => {
+      if (file) console.error(`[Electron] crash report written: ${file}`);
+    });
+  } catch (err) {
+    console.error("[Electron] crash report setup failed:", err);
+  }
+}
 
 async function startGateway() {
   setupEnv();
@@ -207,6 +250,13 @@ const isOurWindow = (e: Electron.IpcMainInvokeEvent) => {
   return !!w && windows.has(w) && e.senderFrame === w.webContents.mainFrame;
 };
 
+/** Only the app-owned main frame may invoke native IPC. */
+function assertOurSender(e: Electron.IpcMainInvokeEvent, channel: string): void {
+  if (!isOurWindow(e) || !isTrustedSenderUrl(e.senderFrame?.url, START_URL)) {
+    throw new Error(`${channel} denied: caller is not the AutumnFlow main window`);
+  }
+}
+
 async function createWindow(cwd?: string) {
   const isMac = process.platform === "darwin";
   const appIcon = getAppIcon();
@@ -238,6 +288,18 @@ async function createWindow(cwd?: string) {
   // 先登记再加载页面：渲染端一启动就会通过 gateway:getToken 校验“是否本应用窗口”
   windows.add(w);
   win = w;
+  w.webContents.on("console-message", (_event, details) => {
+    if (details.level >= 3) {
+      rendererConsole.push(`[${new Date().toISOString()}] ${details.message}`);
+    }
+  });
+  w.webContents.on("render-process-gone", (_event, details) => {
+    recordCrash(
+      "renderer",
+      "running",
+      new Error(`Renderer process gone: ${details.reason} (exitCode=${details.exitCode})`)
+    );
+  });
   console.log(`[Electron] 桌面窗口已创建 (${isDev ? "开发版" : "正式版"})`);
   w.once("ready-to-show", () => {
     if (!w.isDestroyed()) { w.show(); w.focus(); }
@@ -332,13 +394,15 @@ async function createWindow(cwd?: string) {
 
 function reportStartupFailure(error: unknown) {
   console.error("[Electron] 启动或页面加载失败:", error);
+  recordCrash("web-boot", "startup", error);
   dialog.showErrorBox("AutumnFlow 启动失败", error instanceof Error ? error.message : String(error));
   if (windows.size === 0) app.quit();
 }
 
 // Native Desktop IPC Handlers: Folder selection & system explorer reveal
-ipcMain.handle("dialog:openDirectory", async (_event, opts?: { defaultPath?: string }) => {
-  const targetWin = senderWin(_event) || win || BrowserWindow.getFocusedWindow();
+ipcMain.handle("dialog:openDirectory", async (event, opts?: { defaultPath?: string }) => {
+  assertOurSender(event, "dialog:openDirectory");
+  const targetWin = senderWin(event) || win || BrowserWindow.getFocusedWindow();
   const res = await dialog.showOpenDialog(targetWin!, {
     properties: ["openDirectory"],
     title: "选择项目工作区目录",
@@ -348,19 +412,24 @@ ipcMain.handle("dialog:openDirectory", async (_event, opts?: { defaultPath?: str
   return res.filePaths[0];
 });
 
-ipcMain.handle("shell:openPath", async (_event, targetPath: string) => {
+ipcMain.handle("shell:openPath", async (event, targetPath: string) => {
+  assertOurSender(event, "shell:openPath");
   if (!targetPath) return;
   await shell.openPath(targetPath);
 });
 
 // Window controls styling (pure React handles 100% of the UI; kept as no-op for IPC compatibility)
-ipcMain.handle("window:setTitleBarOverlay", () => {});
+ipcMain.handle("window:setTitleBarOverlay", (event) => {
+  assertOurSender(event, "window:setTitleBarOverlay");
+});
 
 ipcMain.handle("window:minimize", (e) => {
+  assertOurSender(e, "window:minimize");
   senderWin(e)?.minimize();
 });
 
 ipcMain.handle("window:maximize", (e) => {
+  assertOurSender(e, "window:maximize");
   const w = senderWin(e);
   if (!w) return;
   if (w.isMaximized()) w.unmaximize();
@@ -368,28 +437,37 @@ ipcMain.handle("window:maximize", (e) => {
 });
 
 ipcMain.handle("window:close", (e) => {
+  assertOurSender(e, "window:close");
   senderWin(e)?.close();
 });
 
 ipcMain.handle("window:isMaximized", (e) => {
+  assertOurSender(e, "window:isMaximized");
   return senderWin(e)?.isMaximized() ?? false;
 });
 
 // ---- 工作台：新窗口 / 最近文件夹 / 在文件管理器中显示 / 复制路径 ----
-ipcMain.handle("window:new", (_e, cwd?: string) => {
+ipcMain.handle("window:new", (e, cwd?: string) => {
+  assertOurSender(e, "window:new");
   void createWindow(typeof cwd === "string" && cwd ? cwd : undefined).catch(reportStartupFailure);
 });
-ipcMain.handle("recent:list", () => loadRecent());
-ipcMain.handle("recent:add", (_e, p: string) => {
+ipcMain.handle("recent:list", (e) => {
+  assertOurSender(e, "recent:list");
+  return loadRecent();
+});
+ipcMain.handle("recent:add", (e, p: string) => {
+  assertOurSender(e, "recent:add");
   if (typeof p !== "string" || !p || !fs.existsSync(p)) return loadRecent();
   const list = addRecent(p);
   buildAppMenu(menuActions, { isDev });
   return list;
 });
-ipcMain.handle("shell:reveal", (_e, p: string) => {
+ipcMain.handle("shell:reveal", (e, p: string) => {
+  assertOurSender(e, "shell:reveal");
   if (typeof p === "string" && p && fs.existsSync(p)) shell.showItemInFolder(p);
 });
-ipcMain.handle("clipboard:writeText", (_e, t: string) => {
+ipcMain.handle("clipboard:writeText", (e, t: string) => {
+  assertOurSender(e, "clipboard:writeText");
   if (typeof t === "string") clipboard.writeText(t);
 });
 
@@ -422,10 +500,28 @@ const menuActions: MenuActions = {
 // `Authorization: Bearer <token>`，PTY WebSocket 带 `?token=`。
 // 只响应本应用自己加载的页面（主窗口），其他 webContents 拿不到。
 ipcMain.handle("gateway:getToken", (event) => {
-  if (!isOurWindow(event)) {
-    throw new Error("gateway:getToken denied: caller is not the ACP Studio main window");
-  }
+  assertOurSender(event, "gateway:getToken");
   return process.env.ACP_GATEWAY_TOKEN || ensureGatewayToken();
+});
+
+process.on("uncaughtException", (error) => {
+  recordCrash("main", "running", error);
+  console.error("[Electron] uncaught exception:", error);
+});
+process.on("unhandledRejection", (reason) => {
+  recordCrash("main", "running", reason);
+  console.error("[Electron] unhandled rejection:", reason);
+});
+app.on("child-process-gone", (_event, details) => {
+  if (details.reason === "clean-exit") return;
+  recordCrash(
+    "child",
+    "running",
+    new Error(
+      `Child process gone: type=${details.type} reason=${details.reason} exitCode=${details.exitCode} ` +
+        `service=${details.serviceName || "n/a"} name=${details.name || "n/a"}`
+    )
+  );
 });
 
 if (!app.requestSingleInstanceLock()) {
@@ -446,6 +542,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.whenReady().then(async () => {
+    void pruneCrashReports(crashReportDir());
     if (!isDev) await startGateway();
     buildAppMenu(menuActions, { isDev });
     await createWindow();

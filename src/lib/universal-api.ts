@@ -825,6 +825,8 @@ export interface UniversalHandlers {
   onPermissionRequest?: (p: PendingPermission) => void;
   onElicitationRequest?: (e: PendingElicitation) => void;
   onElicitationClosed?: (id: string) => void;
+  /** Monotonic SSE event id; feed it back as afterSeq when reconnecting. */
+  onSequence?: (seq: number) => void;
   onDone?: (stopReason?: string, response?: any) => void;
   onError?: (err: Error) => void;
 }
@@ -1100,7 +1102,7 @@ export async function consumeUniversalChat(
   body: Record<string, unknown>,
   handlers: UniversalHandlers = {},
   signal?: AbortSignal
-): Promise<{ stopReason?: string; sessionId?: string }> {
+): Promise<{ stopReason?: string; sessionId?: string; lastEventId?: number }> {
   const res = await apiFetch("/api/universal/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1120,6 +1122,7 @@ export async function consumeUniversalChat(
   let sessionId: string | undefined;
   let stopReason: string | undefined;
   let done = false;
+  let lastEventId = 0;
 
   try {
     while (true) {
@@ -1130,6 +1133,14 @@ export async function consumeUniversalChat(
       buffer = lines.pop() || "";
       for (const line of lines) {
         const trimmed = line.trim();
+        if (trimmed.startsWith("id:")) {
+          const seq = Number(trimmed.slice(3).trim());
+          if (Number.isFinite(seq) && seq > 0) {
+            lastEventId = Math.floor(seq);
+            handlers.onSequence?.(lastEventId);
+          }
+          continue;
+        }
         if (!trimmed.startsWith("data: ")) continue;
         let payload: any;
         try {
@@ -1286,7 +1297,16 @@ export async function consumeUniversalChat(
           break;
         } else if (payload.type === "error") {
           done = true;
-          handlers.onError?.(new Error(payload.message || "prompt failed"));
+          // A server-sent error is terminal for this turn. Reconnecting with
+          // the same turnId would only replay the same terminal state, so do
+          // not let the transport auto-retry re-prompt it.
+          const terminal = new Error(payload.message || "prompt failed") as Error & {
+            terminal?: boolean;
+            code?: number;
+          };
+          terminal.terminal = true;
+          if (typeof payload.code === "number") terminal.code = payload.code;
+          handlers.onError?.(terminal);
           try {
             await reader.cancel();
           } catch {
@@ -1298,10 +1318,10 @@ export async function consumeUniversalChat(
       if (done) break;
     }
   } catch (err: any) {
-    if (err?.name === "AbortError") return { stopReason: "cancelled", sessionId };
+    if (err?.name === "AbortError") return { stopReason: "cancelled", sessionId, lastEventId };
     if (!done) handlers.onError?.(err instanceof Error ? err : new Error(String(err)));
   }
-  return { stopReason, sessionId };
+  return { stopReason, sessionId, lastEventId };
 }
 
 function mapToolStatus(s: unknown): ToolCallItem["status"] {

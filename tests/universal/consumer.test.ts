@@ -8,12 +8,24 @@ import {
   configCurrentValue,
   flattenConfigOptions,
 } from "../../src/lib/universal-api";
+import { isTransientSendError } from "../../src/hooks/useChatSend";
 
 function sseResponse(frames: unknown[]): Response {
   const enc = new TextEncoder();
   const body = new ReadableStream<Uint8Array>({
     start(c) {
       for (const f of frames) c.enqueue(enc.encode(`data: ${JSON.stringify(f)}\n\n`));
+      c.close();
+    },
+  });
+  return new Response(body, { status: 200 });
+}
+
+function sseSequenced(frames: Array<{ id: number; data: unknown }>): Response {
+  const enc = new TextEncoder();
+  const body = new ReadableStream<Uint8Array>({
+    start(c) {
+      for (const f of frames) c.enqueue(enc.encode(`id: ${f.id}\ndata: ${JSON.stringify(f.data)}\n\n`));
       c.close();
     },
   });
@@ -77,6 +89,34 @@ describe("consumeUniversalChat (v1 full updates)", () => {
     expect(seen).toContain("activity:fs_read");
     expect(seen).toContain("activity:compaction_update");
     expect(seen).toContain("done:end_turn");
+  });
+
+  it("parses SSE ids for reconnect and marks server errors terminal", async () => {
+    let requestBody: any = null;
+    globalThis.fetch = vi.fn(async (_url, init) => {
+      requestBody = JSON.parse(String((init as RequestInit)?.body || "{}"));
+      return sseSequenced([
+        { id: 11, data: { type: "start", sessionId: "s1" } },
+        { id: 12, data: { type: "update", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "hi" } } } },
+        { id: 13, data: { type: "error", message: "boom" } },
+      ]);
+    }) as unknown as typeof fetch;
+
+    const seqs: number[] = [];
+    let terminal: any = null;
+    const out = await consumeUniversalChat(
+      { agentId: "codex", prompt: "hi", turnId: "turn-x", afterSeq: 10 },
+      {
+        onSequence: (seq) => seqs.push(seq),
+        onError: (err) => (terminal = err),
+      }
+    );
+    expect(requestBody).toMatchObject({ turnId: "turn-x", afterSeq: 10 });
+    expect(seqs).toEqual([11, 12, 13]);
+    expect(out.lastEventId).toBe(13);
+    expect(terminal?.message).toBe("boom");
+    expect(terminal?.terminal).toBe(true);
+    expect(isTransientSendError(terminal)).toBe(false);
   });
 
   it("rebuilds transcripts from session/load replay", () => {

@@ -1,14 +1,18 @@
 /**
  * POST /api/universal/chat — one prompt turn streamed back as SSE.
- * Creates a session on demand (no sessionId), forwards client disconnects
- * into the agent turn (cancel), and maps same-session concurrency to an
- * `error` event with code 409 (HTTP status is already sent once SSE starts).
+ *
+ * A turn is accepted at most once. The HTTP stream is only a subscriber to the
+ * turn ledger: a dropped SSE can reconnect with the same turnId (and
+ * Last-Event-ID) while the ACP prompt keeps running, and a late retry replays
+ * the final answer instead of prompting the agent again.
  */
+import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import { z } from "zod";
 import type { ContentBlock } from "@agentclientprotocol/sdk";
 import { sdkValue } from "../acp-sdk";
 import { universalRegistry } from "../registry";
+import { turnRegistry, type TurnRecord } from "../turn-registry";
 import { gatewayError, json, jsonBody, optStr } from "./shared";
 
 /** Normalize frontend prompt into ACP ContentBlock[] */
@@ -31,18 +35,105 @@ const chatBody = z.looseObject({
   cwd: optStr,
   mcpServers: z.array(z.unknown()).nullish(),
   additionalDirectories: z.array(z.string()).nullish(),
+  turnId: optStr,
+  afterSeq: z.union([z.number(), z.string()]).nullish(),
 });
 
 export const chatRouter = new Hono();
 
+const SSE_HEADERS = {
+  "Content-Type": "text/event-stream; charset=utf-8",
+  "Cache-Control": "no-cache, no-transform",
+  Connection: "keep-alive",
+  "X-Accel-Buffering": "no",
+};
+
+function parseAfterSeq(value: unknown): number {
+  const n = Number(value);
+  return Number.isFinite(n) && n > 0 ? Math.floor(n) : 0;
+}
+
+/** Stream a turn from `afterSeq`, then follow it until terminal status. */
+function streamTurn(record: TurnRecord, afterSeq: number): Response {
+  let cleanup = () => {};
+  const stream = new ReadableStream({
+    start(controller) {
+      const encoder = new TextEncoder();
+      let closed = false;
+      let ping: ReturnType<typeof setInterval> | null = null;
+      const close = () => {
+        if (closed) return;
+        closed = true;
+        if (ping) clearInterval(ping);
+        ping = null;
+        try {
+          controller.close();
+        } catch (err) {
+          console.error(`[chat.ts] SSE close failed turn=${record.id}: ${(err as Error).message}`);
+        }
+      };
+      const send = (event: { seq: number; data: Record<string, unknown> }) => {
+        if (closed) return;
+        try {
+          controller.enqueue(
+            encoder.encode(`id: ${event.seq}\ndata: ${JSON.stringify(event.data)}\n\n`)
+          );
+        } catch (err) {
+          // Client disconnected; the turn keeps running and remains replayable.
+          closed = true;
+          if (ping) clearInterval(ping);
+          ping = null;
+          console.debug(`[chat.ts] SSE client gone turn=${record.id}: ${(err as Error).message}`);
+        }
+      };
+      ping = setInterval(() => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(": keepalive\n\n"));
+        } catch {
+          closed = true;
+          if (ping) clearInterval(ping);
+          ping = null;
+        }
+      }, 2000);
+      const unsubscribe = turnRegistry.subscribe(record.id, afterSeq, send, close);
+      cleanup = () => {
+        unsubscribe();
+        if (ping) clearInterval(ping);
+        ping = null;
+      };
+    },
+    cancel() {
+      cleanup();
+    },
+  });
+  return new Response(stream, { headers: SSE_HEADERS });
+}
+
 chatRouter.post("/", jsonBody(chatBody), async (c) => {
   const body = c.get("body") as Record<string, unknown>;
   const agentId = String(body.agentId || "codex");
+  const turnId = String(body.turnId || "").trim() || `turn-${randomUUID()}`;
+  const afterSeq = parseAfterSeq(body.afterSeq ?? c.req.header("last-event-id"));
+
   let conn;
   try {
     conn = universalRegistry.connFor(agentId);
   } catch (err) {
     return json({ ok: false, error: (err as Error).message }, 404);
+  }
+
+  // Idempotent reconnect: the ledger owns the prompt, this request only reads.
+  const existing = turnRegistry.get(turnId);
+  if (existing) {
+    if (existing.agentId !== agentId) {
+      return json({ ok: false, error: `turn ${turnId} belongs to agent ${existing.agentId}` }, 409);
+    }
+    const requestedSession = String(body.sessionId || "");
+    if (requestedSession && existing.sessionId && requestedSession !== existing.sessionId) {
+      return json({ ok: false, error: `turn ${turnId} belongs to another session` }, 409);
+    }
+    return streamTurn(existing, afterSeq);
   }
 
   try {
@@ -71,111 +162,72 @@ chatRouter.post("/", jsonBody(chatBody), async (c) => {
   }
 
   let promptBlocks: ContentBlock[];
-  try { promptBlocks = normalizePrompt(body.prompt); } catch (err) { return gatewayError(err); }
-
-  // Client-disconnect propagation: forward req.signal into conn.prompt()
-  // so a closed SSE stream cancels the in-flight turn server-side.
-  const aborter = new AbortController();
-  const reqSignal = c.req.raw.signal as AbortSignal | undefined;
-  let onReqAbort: (() => void) | undefined;
   try {
-    if (reqSignal) {
-      if (reqSignal.aborted) {
-        aborter.abort();
-      } else {
-        onReqAbort = () => {
-          try {
-            aborter.abort();
-          } catch (err) {
-            console.error(`[Universal] chat abort forward failed: ${(err as Error).message}`);
-          }
-        };
-        reqSignal.addEventListener("abort", onReqAbort, { once: true });
-      }
-    }
+    promptBlocks = normalizePrompt(body.prompt);
   } catch (err) {
-    console.error(`[Universal] chat signal wiring failed: ${(err as Error).message}`);
+    return gatewayError(err);
   }
 
-  const stream = new ReadableStream({
-    async start(controller) {
-      const encoder = new TextEncoder();
-      const send = (data: Record<string, unknown>) => {
-        try {
-          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
-        } catch (err) {
-          console.error(`[Universal] SSE enqueue failed (closed?): ${(err as Error).message}`);
-        }
-      };
-      const ping = setInterval(() => {
-        try {
-          controller.enqueue(encoder.encode(`: keepalive\n\n`));
-        } catch {
-          // controller closed mid-keepalive: stop silently, close handled below
-        }
-      }, 2000);
+  const raced = turnRegistry.get(turnId);
+  if (raced) return streamTurn(raced, afterSeq);
+  const record = turnRegistry.create(turnId, { agentId, sessionId });
+  // A concurrent request may have created the same turn between connect and
+  // here; attach instead of prompting twice.
+  if (record.events.length > 0 || record.status !== "running") {
+    return streamTurn(record, afterSeq);
+  }
 
-      send({ type: "start", agentId, sessionId });
-      try {
-        const res = (await conn.prompt(
-          sessionId,
-          promptBlocks,
-          (evt) => {
-            send({ ...evt, agentId, sessionId: (evt.sessionId as string) || sessionId });
-          },
-          { signal: aborter.signal }
-        )) as { stopReason?: string } | undefined;
-        send({ type: "done", agentId, sessionId, stopReason: res?.stopReason || "end_turn", response: res, quota: conn.status().quota });
-      } catch (err) {
-        const msg = (err as Error).message || "prompt failed";
-        // Mutex: same-session concurrent prompt() throws `... (409)` in
-        // AgentConnection; surface as error event with code 409 so the
-        // frontend can serialize (routes can't return HTTP 409 once SSE
-        // headers are sent).
-        const busy = /session busy.*\(409\)/i.test(msg);
-        if (busy) {
-          console.warn(`[Universal] chat rejected busy session=${sessionId}`);
-        } else {
-          console.error(`[Universal] chat prompt failed session=${sessionId}: ${msg}`);
+  void (async () => {
+    try {
+      turnRegistry.append(turnId, { type: "start", turnId, agentId, sessionId });
+      const res = (await conn.prompt(
+        sessionId,
+        promptBlocks,
+        (evt) => {
+          turnRegistry.append(turnId, {
+            ...evt,
+            turnId,
+            agentId,
+            sessionId: (evt.sessionId as string) || sessionId,
+          });
         }
-        send({ type: "error", agentId, sessionId, message: msg, ...(busy ? { code: 409 } : {}) });
-      } finally {
-        clearInterval(ping);
-        try {
-          if (onReqAbort && reqSignal) reqSignal.removeEventListener("abort", onReqAbort);
-        } catch (err) {
-          console.error(`[Universal] chat signal cleanup failed: ${(err as Error).message}`);
-        }
-        await new Promise((r) => setTimeout(r, 50));
-        try {
-          controller.close();
-        } catch (err) {
-          console.error(`[Universal] SSE close failed: ${(err as Error).message}`);
-        }
+      )) as { stopReason?: string } | undefined;
+      turnRegistry.append(turnId, {
+        type: "done",
+        turnId,
+        agentId,
+        sessionId,
+        stopReason: res?.stopReason || "end_turn",
+        response: res,
+        quota: conn.status().quota,
+      });
+      turnRegistry.finish(turnId, "done");
+    } catch (err) {
+      const msg = (err as Error).message || "prompt failed";
+      const busy = /session busy.*\(409\)/i.test(msg);
+      if (busy) {
+        console.warn(`[Universal] chat rejected busy session=${sessionId}`);
+      } else {
+        console.error(`[Universal] chat prompt failed session=${sessionId}: ${msg}`);
       }
-    },
-    cancel() {
-      try {
-        aborter.abort();
-      } catch (err) {
-        console.error(`[Universal] SSE cancel abort failed: ${(err as Error).message}`);
-      }
-      try {
-        conn.cancel(sessionId).catch((err: Error) => {
-          console.error(`[Universal] SSE cancel session=${sessionId} failed: ${err.message}`);
-        });
-      } catch (err) {
-        console.error(`[Universal] SSE cancel threw: ${(err as Error).message}`);
-      }
-    },
-  });
+      turnRegistry.append(turnId, {
+        type: "error",
+        turnId,
+        agentId,
+        sessionId,
+        message: msg,
+        ...(busy ? { code: 409 } : {}),
+      });
+      turnRegistry.finish(turnId, "error");
+    }
+  })();
 
-  return new Response(stream, {
-    headers: {
-      "Content-Type": "text/event-stream; charset=utf-8",
-      "Cache-Control": "no-cache, no-transform",
-      Connection: "keep-alive",
-      "X-Accel-Buffering": "no",
-    },
-  });
+  return streamTurn(record, afterSeq);
+});
+
+/** Explicit reconnect endpoint (GET /chat/:turnId/follow?after=N). */
+chatRouter.get("/:turnId/follow", (c) => {
+  const turn = turnRegistry.get(c.req.param("turnId"));
+  if (!turn) return json({ ok: false, error: "unknown or expired turn" }, 404);
+  return streamTurn(turn, parseAfterSeq(c.req.query("after") ?? c.req.header("last-event-id")));
 });
