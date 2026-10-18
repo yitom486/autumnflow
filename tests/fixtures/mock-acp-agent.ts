@@ -29,7 +29,7 @@ const app = acp
       agentCapabilities: {
         promptCapabilities: { image: true, audio: false },
         sessionCapabilities: { list: {}, close: {}, fork: {}, resume: {}, load: {}, additionalDirectories: {} },
-        mcpCapabilities: { http: true },
+        mcpCapabilities: { http: process.env.MOCK_MCP_HTTP !== "0" },
         loadSession: true,
         providers: true,
       },

@@ -66,6 +66,35 @@ describe("MCP Integration Pipeline - Mock LLM Agent Tool Calls & Auto-Injection"
     expect(inspected.additionalDirectories).toEqual([]);
   });
 
+  it("omits the studio-ui HTTP MCP server when the agent does not advertise mcpCapabilities.http", async () => {
+    // OpenCode/DSH both advertise http, but an agent that does not must not
+    // receive an HTTP descriptor it cannot mount (ACP requires capability).
+    const gated = new UniversalAgentConnection({
+      id: "mock-http-off",
+      name: "Mock HTTP Off",
+      command: process.platform === "win32" ? "bun.exe" : "bun",
+      args: ["run", fixturePath],
+      env: { MOCK_MCP_HTTP: "0" },
+    });
+    try {
+      await gated.connect();
+      const sessionRes: any = await gated.newSession({ cwd: process.cwd() });
+      const replayed: any[] = [];
+      await gated.prompt(
+        sessionRes.sessionId,
+        [{ type: "text", text: "trigger_inspect_session" }],
+        (evt: any) => {
+          if (evt.type === "update") replayed.push(evt.update);
+        }
+      );
+      const chunk = replayed.find((u) => u.sessionUpdate === "agent_message_chunk");
+      const inspected = JSON.parse(chunk.content.text);
+      expect(inspected.mcpServers.some((s: any) => s.name === "studio-ui")).toBe(false);
+    } finally {
+      await gated.disconnect().catch(() => undefined);
+    }
+  });
+
   it("simulates mock LLM output stream delivering full set of Generative UI tool calls", async () => {
     const sessionRes: any = await conn.newSession({ cwd: process.cwd() });
     const sid = sessionRes.sessionId;

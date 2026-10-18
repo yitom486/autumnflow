@@ -10,6 +10,7 @@
  * exactly one owner: `releaseSessionState`.
  */
 import * as acp from "@agentclientprotocol/sdk";
+import { parseMcpHttpSupported } from "@yitom/acp-client";
 import { requestAgent, requireAgentCapability, sdkRequest, sdkValue } from "./acp-sdk";
 import type { AgentProfile } from "./types";
 import type { FsGuard } from "./fs-guard";
@@ -68,11 +69,14 @@ export class SessionService {
       if (!mcpServers.some(existing => existing.name === server.name)) mcpServers.push(server);
     }
     const mcpInfo = getMcpUiServerInfo();
-    const agentCaps = this.deps.init()?.agentCapabilities?.mcpCapabilities;
+    const capabilities = this.deps.init()?.agentCapabilities;
+    const agentCaps = capabilities?.mcpCapabilities;
     for (const server of mcpServers) {
       if ("type" in server) requireAgentCapability(`mcp.${server.type}`, agentCaps?.[server.type]);
     }
-    if (mcpInfo && agentCaps?.http) {
+    // Negotiate through the SDK's typed parser (same rule the client uses):
+    // only advertise the studio-ui HTTP server when the agent declares it.
+    if (mcpInfo && parseMcpHttpSupported((capabilities ?? {}) as Record<string, unknown>)) {
       const alreadyHas = mcpServers.some(
         s => s.name === mcpInfo.name || ("url" in s && s.url === mcpInfo.url)
       );
