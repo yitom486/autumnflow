@@ -277,7 +277,9 @@ export function useChatSend({
           sid = await resolveSession(agentId);
           if (!sid) throw new Error("无法创建会话");
         }
-        beginTurn("等待响应…");
+        // A cold agent (`bunx @deepseek-ai/dsh@latest`) spends its first seconds
+        // in spawn + session/new; label that instead of a bare "等待响应…".
+        beginTurn(known ? "等待响应…" : "正在启动 Agent…（首次或升级后可能较慢）");
         st.setStreaming(true);
         useStudioStore.getState().patchMessage(assistantId, (m) => ({
           ...m,

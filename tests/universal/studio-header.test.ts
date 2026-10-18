@@ -112,6 +112,54 @@ describe("StudioHeader modern UI", () => {
     el.remove();
   });
 
+  it("shows an account balance badge when the quota has credits but no limit window", () => {
+    const html = renderToString(
+      h(StudioHeader, {
+        agents: [
+          {
+            id: "deepseek",
+            name: "DeepSeek",
+            title: "DeepSeek Harness",
+            status: {
+              connected: true,
+              protocolVersion: 1,
+              quota: {
+                runtimeId: "deepseek",
+                provider: "DeepSeek",
+                account: { plan: "DeepSeek Account", type: "account" },
+                credits: { balance: 10.9, currency: "CNY" },
+                status: "ok",
+              },
+            },
+          },
+        ],
+        activeAgentId: "deepseek",
+        onSelectAgent: () => {},
+        onConnect: () => {},
+        connecting: false,
+        onOpenAuth: () => {},
+        onLogout: () => {},
+        authOk: true,
+        sessionId: "ses_deepseek",
+        hasChangesCwd: false,
+        supportsFork: false,
+        supportsProviders: false,
+        busy: false,
+        isStreaming: false,
+        onNewSession: () => {},
+        onForkSession: () => {},
+        onOpenProviders: () => {},
+        onOpenChanges: () => {},
+        onCloseSession: () => {},
+        onDeleteSession: () => {},
+        onClearMessages: () => {},
+      } as any)
+    );
+    // Credits-only quotas (DeepSeek Account) used to render nothing in the chip.
+    // React server rendering splits adjacent text nodes with comments.
+    expect(html.replace(/<!--.*?-->/g, "")).toContain("¥10.90");
+  });
+
   it("shows a generic title instead of the raw session id when no title exists", () => {
     const html = renderToString(
       h(StudioHeader, {

@@ -10,6 +10,8 @@
 ## [Unreleased]
 
 ### Fixed
+- 修复只有余额、没有限额窗口的配额（DeepSeek 账户）在顶部智能体 chip 上完全不显示：现在显示 `¥12.34` 形式的余额徽标；限额环和短计划名仍优先展示。配额数据本身一直存在（面板里的卡片能显示），只是 chip 之前只认窗口/计划名。
+- 修复 Agent 冷启动时首轮只显示「等待响应…」：未连接时首轮提示改为「正在启动 Agent…（首次或升级后可能较慢）」，对应 `bunx @deepseek-ai/dsh@latest` 首次解析与启动的实际耗时。
 - 修复 DeepSeek 轮次因缺少 API Key 失败时只抛原始英文错误：现在识别 `no API key for provider route`，在错误气泡里直接给出两条可操作路径（切到 **DeepSeek Account** 模型分组，或配置 `DEEPSEEK_API_KEY`），并说明这是 DSH 的 `deepseek-official` 路由缺凭据，而不是客户端没有读取本地配置。
 - 修复取消后立刻重发导致 prompt 互斥锁失效：`session/cancel` 只是通知，被取消 turn 的 `finally` 会释放**下一个** turn 刚拿到的锁，使同一会话出现并发 prompt（409 保护形同虚设）。改为带租约令牌的 `PromptLock`：旧 turn 只能释放自己的租约，取消时按抢占处理；Agent 进程退出时重置全部租约，崩溃后不会留下永久 409 的会话。
 - 修复 per-session 内存只增不减：`sessionCommands` / `childUpdates`（每子会话最多 200 条 update）/ `childStates` / `childParents` / `releasedTerminals` 原先只在进程断开时清理，长跑 Host 下随会话数持续增长。现由 `SessionState` 单一所有者持有，`session/close`、`session/delete` 时连同子智能体会话一起回收。

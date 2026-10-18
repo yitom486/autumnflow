@@ -173,6 +173,14 @@ export const AgentStatusChip: React.FC<{
             <QuotaRing percentLeft={quota.primaryWindow.percentLeft} size={14} className="shrink-0" />
             <span className="text-[10px] font-mono text-muted-foreground">{quota.primaryWindow.percentLeft}%</span>
           </div>
+        ) : quota?.credits && quota.credits.unlimited !== true && quota.credits.balance !== undefined && Number.isFinite(Number(quota.credits.balance)) ? (
+          <span
+            className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-500 font-semibold shrink-0"
+            title={`账户余额${quota.credits.currency ? ` (${quota.credits.currency})` : ""}`}
+          >
+            {quota.credits.currency === "CNY" ? "¥" : quota.credits.currency === "USD" ? "$" : ""}
+            {Number(quota.credits.balance).toFixed(2)}
+          </span>
         ) : quota?.account?.plan && !quota.account.plan.includes("(") && quota.account.plan.length <= 8 ? (
           <span className="px-1.5 py-0.2 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-500 font-semibold shrink-0" title={`订阅计划: ${quota.account.plan}`}>
             {quota.account.plan}
