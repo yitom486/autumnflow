@@ -117,7 +117,7 @@ describe("useStudioStore", () => {
     const thread = useStudioStore.getState().threads[useStudioStore.getState().activeThreadId!];
     expect(thread.title).toBe("这个项目算是一个pyqt的一个demo项目是吗请问");
     // Restoring the thread restores the header title as well.
-    s.restoreThread("opencode");
+    s.restoreThread("opencode", "D:/title-only-test");
     expect(useStudioStore.getState().sessionInfo?.title).toBe(
       "这个项目算是一个pyqt的一个demo项目是吗请问"
     );
