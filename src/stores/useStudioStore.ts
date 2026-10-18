@@ -590,7 +590,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
   setModelsOpen: (v) => set({ modelsOpen: v }),
   addPermission: (p) => set((s) => ({ pendingPerms: [...s.pendingPerms, p] })),
   removePermission: (id) => set((s) => ({ pendingPerms: s.pendingPerms.filter((x) => x.permissionId !== id) })),
-  addElicitation: (e) => set((s) => ({ pendingElic: [...s.pendingElic, e] })),
+  addElicitation: (e) => set((s) => ({ pendingElic: [...s.pendingElic.filter(p => p.agentId !== e.agentId || p.elicitationId !== e.elicitationId), e] })),
   removeElicitation: (id) => set((s) => ({ pendingElic: s.pendingElic.filter((x) => x.elicitationId !== id) })),
   setRespondingId: (id) => set({ respondingId: id }),
   saveAgentPref: (agentId, patch) =>

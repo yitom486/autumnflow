@@ -10,6 +10,7 @@ import { ExternalHistoryDialog } from "@/components/universal/SessionHistoryTool
 import { Sidebar, type SessionItem } from "@/components/universal/Sidebar";
 import { PermissionDialog } from "@/components/universal/PermissionDialog";
 import { ElicitationCard } from "@/components/universal/ElicitationCard";
+import { useElicitationSync } from "@/hooks/useElicitationSync";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TitleBar } from "@/components/universal/TitleBar";
 import { MountOnFirstOpen } from "@/components/MountOnFirstOpen";
@@ -123,6 +124,7 @@ function useSyncPanel(ref: ReturnType<typeof usePanelRef>, open: boolean) {
 }
 
 export default function App() {
+  useElicitationSync();
   const qc = useQueryClient();
   const agentsRef = useRef<AgentSummary[]>([]);
   const [customOpen, setCustomOpen] = useState(false);
@@ -447,7 +449,7 @@ export default function App() {
             {/* Human-in-the-Loop Interaction Dock (ApprovalCard for questions & permissions) */}
             {(s.pendingElic.length > 0 || s.pendingPerms.length > 0) && (
               <div className="px-4 pb-2 z-10 shrink-0 space-y-2 max-h-[340px] overflow-y-auto">
-                {s.pendingElic.map((e) => (
+                {s.pendingElic.filter(e => !s.authOpen && e.agentId === s.activeAgentId && (!e.sessionId || e.sessionId === s.sessionId)).map((e) => (
                   <ElicitationCard
                     key={e.elicitationId}
                     e={e}
@@ -505,12 +507,14 @@ export default function App() {
       <MountOnFirstOpen isOpen={s.authOpen}>
         <Suspense fallback={s.authOpen ? <LazyModalFallback /> : null}>
           <UniversalAuthModal
+            onElicitationRespond={handleElicRespond}
             isOpen={s.authOpen}
             onClose={() => s.setAuthOpen(false)}
             agent={activeAgent}
             onAuthenticated={async () => {
               invalidateAgents(qc);
               const activeId = useStudioStore.getState().activeAgentId;
+                useStudioStore.getState().setAuthOk(activeId, true);
               try {
                 await sessionRpc(activeId, "list", {});
                 useStudioStore.getState().setAuthOk(activeId, true);

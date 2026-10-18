@@ -1,4 +1,5 @@
 import type { Message } from "@/lib/message-types";
+import { mergeArtifacts } from "../../shared/acp-session-state";
 
 /**
  * Chat threads: persisted per-agent conversation records (Inkdown-style
@@ -49,6 +50,7 @@ function freezeToolCall(tc: any) {
     status: tc.status,
     name: tc.name,
     rawInput: tc.rawInput,
+    locations: tc.locations,
     rawOutput: typeof tc.rawOutput === "string" ? trunc(tc.rawOutput) : tc.rawOutput,
     startedAt: tc.startedAt,
     completedAt: tc.completedAt,
@@ -69,7 +71,15 @@ export function freezeMessage(m: Message): Message {
     isStreaming: false,
     toolCalls: Array.isArray(m.toolCalls) ? m.toolCalls.map(freezeToolCall) : undefined,
     images: undefined,
+    contentBlocks: freezeBlocks(m.contentBlocks),
+    artifacts: m.artifacts?.map(entry => entry.kind === "compaction" ? { ...entry, value: { ...entry.value, summary: entry.value.summary == null ? entry.value.summary : freezeBlocks(entry.value.summary) } }
+      : entry.kind === "message" ? { ...entry, value: { ...entry.value, content: entry.value.content == null ? entry.value.content : freezeBlocks(entry.value.content) } } : entry),
   };
+}
+
+function freezeBlocks(blocks?: import("@agentclientprotocol/sdk").ContentBlock[]) {
+  return blocks?.filter(block => block.type !== "audio" && block.type !== "image" && !(block.type === "resource" && "blob" in block.resource))
+    .map(block => block.type === "text" ? { ...block, text: trunc(block.text) } : block.type === "resource" && "text" in block.resource ? { ...block, resource: { ...block.resource, text: trunc(block.resource.text) } } : block);
 }
 
 function hasUserMessage(t: ChatThread): boolean {
@@ -83,6 +93,8 @@ const MERGED_TURN_KEYS = [
   "thought",
   "toolCalls",
   "images",
+  "contentBlocks",
+  "artifacts",
   "plan",
   "usage",
   "model",
@@ -208,6 +220,8 @@ export function mergeAssistantTurns<T extends Partial<Message> & { role: string;
         thought: mergedThought,
         toolCalls: mergedTools && mergedTools.length > 0 ? mergedTools : undefined,
         images: mergedImages && mergedImages.length > 0 ? mergedImages : undefined,
+        contentBlocks: msg.contentBlocks?.length ? [...(prev.contentBlocks ?? []), ...msg.contentBlocks] : prev.contentBlocks,
+        artifacts: msg.artifacts?.length ? mergeArtifacts(prev.artifacts ?? [], msg.artifacts) : prev.artifacts,
         plan: msg.plan || prev.plan,
         usage: msg.usage || prev.usage,
         model: msg.model || prev.model,

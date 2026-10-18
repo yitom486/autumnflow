@@ -1,4 +1,6 @@
 import { useCallback, useRef } from "react";
+import { CreateElicitationRequest, CreateElicitationResponse } from "@agentclientprotocol/sdk";
+import { applyArtifactUpdate, artifactKey, updateKey } from "../../shared/acp-session-state";
 import type { QueryClient } from "@tanstack/react-query";
 import { useStudioStore } from "@/stores/useStudioStore";
 import { invalidateSessions, acpKeys } from "@/lib/acp-queries";
@@ -236,14 +238,13 @@ export function useChatSend({
       try {
         const known = agentsRef.current.find((a) => a.id === agentId)?.status?.connected;
         if (!known) {
-          beginTurn("启动中…");
-          st.setStreaming(true);
           await connectAgent(agentId);
         }
         let sid = useStudioStore.getState().sessionId;
         if (!sid) {
-          beginTurn("创建会话…");
-          st.setStreaming(true);
+          // Resolve the clean draft before marking a turn as streaming. Session
+          // resolution intentionally refuses to create sessions during a stream;
+          // setting that flag first makes an early first send fail with no ID.
           sid = await resolveSession(agentId);
           if (!sid) throw new Error("无法创建会话");
         }
@@ -363,7 +364,7 @@ export function useChatSend({
               useStudioStore.getState().patchMessage(assistantId, (m) => {
                 const calls = [...(m.toolCalls || [])];
                 const i = calls.findIndex((x) => x.id === c.id);
-                const terminal = TERMINAL_TOOL.has(c.status);
+                const terminal = c.status != null && TERMINAL_TOOL.has(c.status);
                 let targetCall: any;
                 if (i >= 0) {
                   const prevCall = calls[i];
@@ -385,6 +386,8 @@ export function useChatSend({
                 } else {
                   targetCall = {
                     ...c,
+                    title: c.title ?? "Tool call",
+                    status: c.status ?? "running",
                     rawOutput: (c as any)._deltaChunk || c.rawOutput,
                     startedAt: Date.now(),
                     completedAt: terminal ? Date.now() : undefined,
@@ -418,6 +421,13 @@ export function useChatSend({
                 return hint ? { ...m, plan: entries, statusHint: hint } : { ...m, plan: entries };
               }),
             onAvailableCommands: (cmds) => useStudioStore.getState().setAvailableCommands(cmds, sid),
+            onConfigOptions: (options) => useStudioStore.getState().setConfigOptions(options),
+            onContentBlock: (content) => useStudioStore.getState().patchMessage(assistantId, m => ({ ...m, contentBlocks: [...(m.contentBlocks ?? []), content], statusHint: undefined })),
+            onArtifactUpdate: (update) => {
+              const state = useStudioStore.getState();
+              const owner = state.messages.find(m => m.artifacts?.some(entry => artifactKey(entry) === updateKey(update)));
+              state.patchMessage(owner?.id ?? assistantId, m => ({ ...m, artifacts: applyArtifactUpdate(m.artifacts ?? [], update) }));
+            },
             onModeUpdate: (modeId) => {
               const stNow = useStudioStore.getState();
               if (stNow.modes) stNow.setModes({ ...stNow.modes, currentModeId: modeId });
@@ -468,6 +478,7 @@ export function useChatSend({
             },
             onPermissionRequest: (p) => useStudioStore.getState().addPermission(p),
             onElicitationRequest: (e) => useStudioStore.getState().addElicitation(e),
+            onElicitationClosed: (id) => useStudioStore.getState().removeElicitation(id),
             onDone: (_stopReason, resp) => {
               if (resp && (resp.usage || resp._meta)) {
                 const extras = pickUsageExtras({ ...(resp.usage || {}), _meta: resp._meta });
@@ -672,15 +683,16 @@ export function useChatSend({
   );
 
   const handleElicRespond = useCallback(
-    async (e: PendingElicitation, accept: boolean, payload?: unknown) => {
+    async (e: PendingElicitation, result: CreateElicitationResponse) => {
       const st = useStudioStore.getState();
       st.setRespondingId(e.elicitationId);
       try {
-        const result = accept ? { action: "accept", content: payload ?? {} } : { action: "decline" };
         await respondElicitation(e.agentId, e.elicitationId, result);
-        useStudioStore.getState().removeElicitation(e.elicitationId);
-      } catch (err: any) {
-        alert(`elicitation respond 失败: ${err.message}`);
+        if (CreateElicitationRequest.isUrl(e.schema) && CreateElicitationResponse.isAccept(result)) {
+          if (useStudioStore.getState().pendingElic.some(p => p.elicitationId === e.elicitationId)) {
+            useStudioStore.getState().addElicitation({ ...e, status: "accepted" });
+          }
+        } else useStudioStore.getState().removeElicitation(e.elicitationId);
       } finally {
         useStudioStore.getState().setRespondingId(null);
       }

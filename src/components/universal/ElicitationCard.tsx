@@ -1,378 +1,142 @@
-import React, { useMemo, useState } from "react";
-import { ExternalLink, Code2 } from "lucide-react";
+import React, { useId, useRef, useState } from "react";
+import { CreateElicitationRequest, ElicitationPropertySchema, type CreateElicitationResponse, type ElicitationSchema } from "@agentclientprotocol/sdk";
 import { Button } from "@/components/atoms/Button";
-import ApprovalCard, { type ApprovalQuestion, type ApprovalOptionItem } from "@/components/primitives/ApprovalCard";
 import type { PendingElicitation } from "@/lib/universal-api";
+import { elicitationUrl, enumOptions, supportedElicitation, validateElicitationContent, type ElicitationContent } from "../../../shared/elicitation";
 
 export interface ElicitationCardProps {
   e: PendingElicitation;
-  onRespond: (e: PendingElicitation, accept: boolean, payload?: unknown) => void;
+  onRespond: (e: PendingElicitation, result: CreateElicitationResponse) => void | Promise<void>;
   busy: boolean;
   className?: string;
 }
+type Draft = Record<string, string | string[] | boolean>;
 
-interface FieldDef {
-  key: string;
-  title: string;
-  description?: string;
-  type: string;
-  options: ApprovalOptionItem[];
-  rawOptions: any[];
-  required: boolean;
+function defaults(schema: ElicitationSchema): Draft {
+  const draft: Draft = Object.create(null);
+  for (const [key, field] of Object.entries(schema.properties ?? {})) {
+    if (ElicitationPropertySchema.isArray(field)) draft[key] = field.default ?? [];
+    else if (ElicitationPropertySchema.isBoolean(field)) { if (field.default != null) draft[key] = field.default; }
+    else if (ElicitationPropertySchema.isString(field)) { if (field.default != null) draft[key] = field.default; }
+    else if (ElicitationPropertySchema.isInteger(field) || ElicitationPropertySchema.isNumber(field)) { if (field.default != null) draft[key] = String(field.default); }
+  }
+  return draft;
 }
-
-function coerce(type: string, v: string): unknown {
-  if (type === "boolean") return v === "true" || v === "on" || v === "1";
-  if (type === "integer") {
-    const n = parseInt(v, 10);
-    return Number.isNaN(n) ? v : n;
+function formContent(schema: ElicitationSchema, draft: Draft): ElicitationContent {
+  const content: ElicitationContent = Object.create(null);
+  for (const [key, field] of Object.entries(schema.properties ?? {})) {
+    if (!Object.hasOwn(draft, key)) continue;
+    const value = draft[key];
+    if (ElicitationPropertySchema.isNumber(field) || ElicitationPropertySchema.isInteger(field)) {
+      if (typeof value === "string" && value.trim() !== "") content[key] = Number(value);
+    } else content[key] = value;
   }
-  if (type === "number") {
-    const n = parseFloat(v);
-    return Number.isNaN(n) ? v : n;
-  }
-  return v;
+  return content;
 }
 
 export const ElicitationCard: React.FC<ElicitationCardProps> = ({ e, onRespond, busy, className }) => {
-  const [showRaw, setShowRaw] = useState(false);
-  const [rawJson, setRawJson] = useState("");
+  const baseId = useId();
+  const request = e.schema;
+  const schema = CreateElicitationRequest.isForm(request) ? request.requestedSchema : {};
+  const [draft, setDraft] = useState<Draft>(() => defaults(schema));
+  const [errors, setErrors] = useState<Record<string, string>>({});
+  const [failure, setFailure] = useState("");
+  const [sending, setSending] = useState(false);
+  const inFlight = useRef(false);
+  const disabled = busy || sending;
+  const send = async (response: CreateElicitationResponse) => {
+    if (inFlight.current || busy) return;
+    inFlight.current = true;
+    setSending(true);
+    setFailure("");
+    try { await onRespond(e, response); }
+    catch (err) { setFailure(err instanceof Error ? err.message : "提交失败，请重试"); }
+    finally { inFlight.current = false; setSending(false); }
+  };
+  const update = (key: string, value: Draft[string]) => setDraft(prev => ({ ...prev, [key]: value }));
+  const check = () => {
+    const next = validateElicitationContent(schema, formContent(schema, draft));
+    setErrors(next);
+    return Object.keys(next).length === 0;
+  };
+  const controls = <div className="flex flex-wrap justify-end gap-2 pt-2">
+    <Button type="button" size="xs" variant="ghost" disabled={disabled} onClick={() => void send({ action: "cancel" })}>取消</Button>
+    <Button type="button" size="xs" variant="secondary" disabled={disabled} onClick={() => void send({ action: "decline" })}>拒绝</Button>
+    <Button type="submit" size="xs" variant="primary" disabled={disabled}>{disabled ? "提交中…" : "确认提交"}</Button>
+  </div>;
+  const shell = "rounded-card bg-surface shadow-card border border-line p-3.5 space-y-3 text-[13px] text-ink";
+  const inputClass = "w-full rounded-control border border-line bg-inset/40 px-3 py-2 text-ink outline-none focus-visible:ring-2 focus-visible:ring-primary disabled:opacity-60";
+  const heading = <div className="space-y-1"><div className="text-xs text-ink-2">{e.agentId} 请求你提供信息</div><div id={`${baseId}-title`} className="font-semibold whitespace-pre-wrap break-words">{request.message}</div></div>;
+  if (!supportedElicitation(request)) return <div className={`${shell} ${className ?? ""}`}>
+    {heading}<p role="alert">当前客户端无法处理此请求，请取消后重试。</p>
+    <Button type="button" disabled={disabled} onClick={() => void send({ action: "cancel" })}>取消</Button>
+  </div>;
 
-  const parsed = useMemo(() => {
-    const s = e.schema || {};
-    if (s.mode === "url" && s.url) {
-      return { mode: "url" as const, url: s.url as string, title: e.message || "需要前往浏览器确认" };
-    }
-
-    // 1. OpenCode format / questions list:
-    // Check multiple possible paths where OpenCode, plugins, or ACP agents place the questions list
-    const rawQuestionsList: any[] | null =
-      (Array.isArray(s.questions) && s.questions) ||
-      (Array.isArray(s.requestedSchema?.questions) && s.requestedSchema.questions) ||
-      (Array.isArray(s.schema?.questions) && s.schema.questions) ||
-      (Array.isArray(s.params?.questions) && s.params.questions) ||
-      (Array.isArray(s.payload?.questions) && s.payload.questions) ||
-      (Array.isArray(s.requestedSchema?.properties?.questions) && s.requestedSchema.properties.questions) ||
-      (Array.isArray(s) && s) ||
-      null;
-
-    if (rawQuestionsList && rawQuestionsList.length > 0) {
-      const questions: ApprovalQuestion[] = rawQuestionsList.map((q: any) => {
-        const rawOpts = q.options ?? q.choices ?? q.items ?? q.oneOf ?? q.anyOf ?? [];
-        const options: ApprovalOptionItem[] = (Array.isArray(rawOpts) ? rawOpts : []).map((o: any) => {
-          if (typeof o === "string" || typeof o === "number") {
-            return String(o);
-          }
-          const label = o?.label ?? o?.title ?? o?.name ?? o?.text ?? o?.const ?? String(o?.value ?? "");
-          const desc = o?.description ?? o?.desc ?? undefined;
-          const val = o?.value ?? o?.const ?? label;
-          return {
-            label: label || String(val),
-            description: desc,
-            value: String(val),
-          };
-        });
-
-        // In OpenCode, header is a concise tag (e.g. "Database") and question is the prompt
-        const promptTitle = q.header && q.question && q.header !== q.question
-          ? `[${q.header}] ${q.question}`
-          : (q.question || q.header || q.title || e.message || "请选择或确认：");
-
-        return {
-          q: promptTitle,
-          description: q.header && q.question && q.header !== q.question ? undefined : (q.description || undefined),
-          type: q.multiple ? "check" : "radio",
-          options,
-        };
-      });
-
-      return { mode: "opencode" as const, questions, rawQuestions: rawQuestionsList };
-    }
-
-    // 2. Standard JSON-Schema form fields
-    const rs = s.requestedSchema || s.schema || s.params?.requestedSchema || {};
-    const props = rs.properties || {};
-    const required: string[] = rs.required || [];
-    const fields: FieldDef[] = Object.entries(props).map(([key, def]: [string, any]) => {
-      const t = Array.isArray(def?.type)
-        ? def.type.find((x: string) => x !== "null") || "string"
-        : def?.type || "string";
-
-      // Parse options from enum, oneOf, anyOf, options, choices, or items (for arrays)
-      let rawOptions: any[] = [];
-      if (Array.isArray(def?.enum)) {
-        rawOptions = def.enum;
-      } else if (Array.isArray(def?.oneOf)) {
-        rawOptions = def.oneOf;
-      } else if (Array.isArray(def?.anyOf)) {
-        rawOptions = def.anyOf;
-      } else if (Array.isArray(def?.options)) {
-        rawOptions = def.options;
-      } else if (Array.isArray(def?.choices)) {
-        rawOptions = def.choices;
-      } else if (t === "array" && def?.items) {
-        if (Array.isArray(def.items.enum)) {
-          rawOptions = def.items.enum;
-        } else if (Array.isArray(def.items.anyOf)) {
-          rawOptions = def.items.anyOf;
-        } else if (Array.isArray(def.items.oneOf)) {
-          rawOptions = def.items.oneOf;
-        }
-      }
-
-      const options: ApprovalOptionItem[] = rawOptions.map((o: any) => {
-        if (typeof o === "string" || typeof o === "number") {
-          return String(o);
-        }
-        const label = o?.title ?? o?.label ?? o?.name ?? o?.text ?? String(o?.const ?? o?.value ?? "");
-        const desc = o?.description ?? undefined;
-        const val = o?.const ?? o?.value ?? label;
-        return {
-          label: label || String(val),
-          description: desc,
-          value: String(val),
-        };
-      });
-
-      if (options.length === 0 && t === "boolean") {
-        options.push(
-          { label: "是 (true)", value: "true" },
-          { label: "否 (false)", value: "false" }
-        );
-      }
-
-      return {
-        key,
-        title: def?.title || key,
-        description: def?.description,
-        type: t,
-        options,
-        rawOptions,
-        required: required.includes(key),
-      };
-    });
-
-    if (fields.length > 0) {
-      const questions: ApprovalQuestion[] = fields.map((f) => {
-        return {
-          q: f.title || f.key,
-          description: f.description,
-          type: f.type === "array" ? "check" : "radio",
-          options: f.options,
-        };
-      });
-      return { mode: "schema" as const, questions, fields, title: rs.title || e.message };
-    }
-
-    // 3. Fallback: general question or confirmation
-    const fallbackQuestion: ApprovalQuestion = {
-      q: e.message || "智能体需要您的确认与输入：",
-      type: "radio",
-      options: [
-        { label: "确认继续 (Continue)", value: "continue" },
-        { label: "取消 / 拒绝 (Decline)", value: "cancel" },
-      ],
-    };
-    return { mode: "fallback" as const, questions: [fallbackQuestion] };
-  }, [e]);
-
-  if (parsed.mode === "url") {
-    return (
-      <div className={`rounded-card bg-surface shadow-card border border-line p-3.5 space-y-2.5 ${className || ""}`}>
-        <div className="font-semibold text-[13.5px] text-ink leading-snug">{parsed.title}</div>
-        <div className="text-[12px] text-ink-2 break-all">{parsed.url}</div>
-        <div className="flex items-center gap-2 pt-1">
-          <Button
-            size="xs"
-            variant="secondary"
-            onClick={() => window.open(parsed.url, "_blank")}
-            className="gap-1.5 h-8 text-[12px]"
-          >
-            <ExternalLink className="w-3.5 h-3.5" /> 在浏览器中打开
-          </Button>
-          <Button
-            size="xs"
-            variant="ghost"
-            onClick={() => onRespond(e, false)}
-            className="h-8 text-[12px] text-ink-3 hover:text-ink"
-          >
-            跳过
-          </Button>
-        </div>
-      </div>
-    );
+  if (CreateElicitationRequest.isUrl(request)) {
+    const url = elicitationUrl(request.url);
+    return <section aria-labelledby={`${baseId}-title`} aria-busy={disabled} className={`${shell} ${className ?? ""}`}>
+      {heading}
+      <p className="text-ink-2">目标网站：<strong>{url.host}</strong></p>
+      <p className="break-all select-text">{request.url}</p>
+      {url.hostname.includes("xn--") && <p className="text-warning">此域名包含国际化编码，请仔细核对目标网站。</p>}
+      {failure && <p role="alert" className="text-danger">{failure}</p>}
+      {e.status === "accepted" ? <div className="flex items-center justify-between gap-3"><p role="status">已同意打开，等待外部流程完成…</p><Button type="button" size="xs" disabled={disabled} onClick={() => void send({ action: "cancel" })}>关闭提示</Button></div>
+        : <div className="flex flex-wrap justify-end gap-2">
+          <Button type="button" size="xs" variant="ghost" disabled={disabled} onClick={() => void send({ action: "cancel" })}>取消</Button>
+          <Button type="button" size="xs" variant="secondary" disabled={disabled} onClick={() => void send({ action: "decline" })}>拒绝</Button>
+          <Button type="button" size="xs" variant="primary" disabled={disabled} onClick={() => {
+            if (inFlight.current || busy) return;
+            try { window.open(url.href, "_blank", "noopener,noreferrer"); void send({ action: "accept" }); }
+            catch { setFailure("无法打开浏览器，请重试"); }
+          }}>同意并在浏览器中打开</Button>
+        </div>}
+    </section>;
   }
 
-  const handleSubmitted = (answers: Record<number, number[]>, customAnswers: Record<number, string>) => {
-    if (showRaw) {
-      let payload: unknown = {};
-      if (rawJson.trim()) {
-        try {
-          payload = JSON.parse(rawJson);
-        } catch {
-          alert("不是合法的 JSON 格式");
-          return;
+  return <form noValidate aria-labelledby={`${baseId}-title`} aria-busy={disabled} className={`${shell} ${className ?? ""}`} onSubmit={event => {
+    event.preventDefault();
+    if (check()) void send({ action: "accept", content: formContent(schema, draft) });
+  }}>
+    {heading}
+    {schema.title && <p className="font-medium">{schema.title}</p>}
+    {schema.description && <p className="text-ink-2 whitespace-pre-wrap">{schema.description}</p>}
+    <fieldset disabled={disabled} className="space-y-3">
+      {Object.entries(schema.properties ?? {}).map(([key, field], index) => {
+        const id = `${baseId}-${index}`;
+        const label = typeof field.title === "string" ? field.title : key;
+        const required = schema.required?.includes(key) ?? false;
+        const options = enumOptions(field);
+        const common = { id, "aria-describedby": `${id}-hint ${id}-error`, "aria-invalid": Boolean(errors[key]), required, onBlur: check, className: inputClass };
+        const title = <>{label}{required && <span className="text-ink-2">（必填）</span>}</>;
+        let input: React.ReactNode;
+        if (ElicitationPropertySchema.isArray(field)) {
+          const selected = Array.isArray(draft[key]) ? draft[key] as string[] : [];
+          input = <fieldset id={id} aria-describedby={common["aria-describedby"]} aria-invalid={common["aria-invalid"]} onBlur={check} className="space-y-2"><legend className="mb-2 font-medium">{title}</legend>
+            {options.map(option => <label key={option.value} className="flex items-start gap-2 rounded-control border border-line px-3 py-2 cursor-pointer">
+              <input type="checkbox" className="mt-1 accent-primary" checked={selected.includes(option.value)} onChange={event => update(key, event.target.checked ? [...selected, option.value] : selected.filter(v => v !== option.value))} />
+              <span>{option.title}{option.description && <span className="block text-xs text-ink-2">{option.description}</span>}</span>
+            </label>)}
+          </fieldset>;
+        } else if (ElicitationPropertySchema.isBoolean(field)) {
+          input = <select {...common} value={draft[key] === undefined ? "" : String(draft[key])} onChange={event => {
+            if (event.target.value === "") setDraft(prev => { const next = { ...prev }; delete next[key]; return next; });
+            else update(key, event.target.value === "true");
+          }}><option value="">请选择</option><option value="true">是</option><option value="false">否</option></select>;
+        } else if (options.length) {
+          input = <select {...common} value={String(draft[key] ?? "")} onChange={event => update(key, event.target.value)}><option value="" disabled={required}>请选择</option>{options.map(option => <option key={option.value} value={option.value}>{option.title}{option.description ? ` — ${option.description}` : ""}</option>)}</select>;
+        } else if (ElicitationPropertySchema.isNumber(field) || ElicitationPropertySchema.isInteger(field)) {
+          input = <input {...common} type="number" step={ElicitationPropertySchema.isInteger(field) ? 1 : "any"} min={field.minimum ?? undefined} max={field.maximum ?? undefined} value={String(draft[key] ?? "")} onChange={event => update(key, event.target.value)} />;
+        } else if (ElicitationPropertySchema.isString(field)) {
+          input = <input {...common} type={field.format === "email" ? "email" : field.format === "date" ? "date" : "text"} minLength={field.minLength ?? undefined} maxLength={field.maxLength ?? undefined} value={String(draft[key] ?? "")} onChange={event => update(key, event.target.value)} />;
         }
-      }
-      onRespond(e, true, payload);
-      return;
-    }
-
-    if (parsed.mode === "opencode") {
-      const resultAnswers: string[][] = [];
-      const contentAnswers: Record<string, any> = {};
-
-      parsed.questions.forEach((q, idx) => {
-        const custom = customAnswers[idx]?.trim();
-        const selectedIndices = answers[idx] ?? [];
-        const rawQ = parsed.rawQuestions?.[idx];
-        const rawOpts = rawQ?.options ?? rawQ?.choices ?? rawQ?.items ?? rawQ?.oneOf ?? rawQ?.anyOf ?? [];
-
-        let chosenStrings: string[] = [];
-        if (custom) {
-          chosenStrings = [custom];
-        } else if (selectedIndices.length > 0) {
-          chosenStrings = selectedIndices.map((i) => {
-            const rawOpt = rawOpts[i];
-            if (rawOpt == null) {
-              const opt = q.options[i];
-              return typeof opt === "string" ? opt : opt?.label || opt?.value || "";
-            }
-            if (typeof rawOpt === "string" || typeof rawOpt === "number") return String(rawOpt);
-            // OpenCode expects the label of the selected option, or value
-            return String(rawOpt.label ?? rawOpt.value ?? rawOpt.title ?? rawOpt.name ?? rawOpt.const ?? "");
-          });
-        }
-
-        // OpenCode QuestionV2.Answer[] expects string[] for each question
-        resultAnswers.push(chosenStrings);
-
-        const key = rawQ?.header || rawQ?.question || `q${idx}`;
-        contentAnswers[key] = q.type === "check" ? chosenStrings : (chosenStrings[0] ?? "");
-      });
-
-      // Submit both standard OpenCode format { answers: string[][] } and key-value mapping
-      onRespond(e, true, { answers: resultAnswers, ...contentAnswers });
-      return;
-    }
-
-    if (parsed.mode === "schema" && parsed.fields) {
-      const content: Record<string, unknown> = {};
-      parsed.fields.forEach((f, idx) => {
-        const custom = customAnswers[idx]?.trim();
-        const selectedIndices = answers[idx] ?? [];
-        const q = parsed.questions[idx];
-
-        if (custom) {
-          content[f.key] = coerce(f.type, custom);
-          return;
-        }
-
-        if (q.type === "check") {
-          content[f.key] = selectedIndices.map((i) => {
-            const rawOpt = f.rawOptions?.[i];
-            if (rawOpt != null && typeof rawOpt === "object") {
-              return rawOpt.const ?? rawOpt.value ?? rawOpt.label ?? rawOpt.title;
-            }
-            const opt = q.options[i];
-            return typeof opt === "string" ? opt : opt.value ?? opt.label;
-          });
-          return;
-        }
-
-        if (selectedIndices.length > 0) {
-          const i = selectedIndices[0];
-          const rawOpt = f.rawOptions?.[i];
-          let chosenVal: unknown = "";
-          if (rawOpt != null && typeof rawOpt === "object") {
-            chosenVal = rawOpt.const ?? rawOpt.value ?? rawOpt.label ?? rawOpt.title ?? "";
-          } else {
-            const opt = q.options[i];
-            chosenVal = typeof opt === "string" ? opt : opt.value ?? opt.label;
-          }
-
-          if (f.type === "boolean") {
-            const strVal = String(chosenVal);
-            chosenVal = strVal.includes("true") || strVal === "是 (true)";
-          } else if (f.type === "number" || f.type === "integer") {
-            chosenVal = coerce(f.type, String(chosenVal));
-          }
-
-          content[f.key] = chosenVal;
-        }
-      });
-
-      onRespond(e, true, content);
-      return;
-    }
-
-    // Fallback mode
-    const custom = customAnswers[0]?.trim();
-    const selectedIdx = answers[0]?.[0] ?? 0;
-    const isConfirm = selectedIdx === 0 && !custom;
-    const opt = parsed.questions[0].options[selectedIdx];
-    const chosenAnswer = custom || (typeof opt === "string" ? opt : opt?.label || opt?.value || "");
-    onRespond(e, true, { accepted: isConfirm, answer: chosenAnswer });
-  };
-
-  return (
-    <div className={`space-y-1.5 ${className || ""}`}>
-      {showRaw ? (
-        <div className="rounded-card bg-surface shadow-card border border-line p-3.5 space-y-2.5">
-          <div className="flex items-center justify-between">
-            <span className="font-semibold text-[13px] text-ink">{e.message || "原始 Elicitation 交互"}</span>
-            <button
-              type="button"
-              onClick={() => setShowRaw(false)}
-              className="text-[11px] text-primary hover:underline"
-            >
-              返回问答卡片
-            </button>
-          </div>
-          <textarea
-            value={rawJson}
-            onChange={(ev) => setRawJson(ev.target.value)}
-            placeholder="accept 时提交的 JSON content（如 {}）"
-            rows={3}
-            spellCheck={false}
-            className="w-full rounded-control bg-inset/40 border border-line px-2.5 py-1.5 font-mono text-[11px] text-ink outline-none"
-          />
-          <div className="flex items-center justify-end gap-2">
-            <Button size="xs" variant="ghost" disabled={busy} onClick={() => onRespond(e, false)}>
-              跳过
-            </Button>
-            <Button size="xs" variant="primary" disabled={busy} onClick={() => handleSubmitted({}, {})}>
-              提交 JSON
-            </Button>
-          </div>
-        </div>
-      ) : (
-        <ApprovalCard
-          questions={parsed.questions}
-          labels={{
-            skip: "跳过",
-            continue: "继续",
-            send: busy ? "提交中…" : "确认提交",
-            customPlaceholder: "自定义补充或输入…",
-            sentMessage: "已提交回答",
-          }}
-          onSubmitted={handleSubmitted}
-          onDismiss={() => onRespond(e, false)}
-          className="w-full max-w-full"
-        />
-      )}
-
-      {/* 底部微型调试开关 */}
-      <div className="flex items-center justify-end pr-1">
-        <button
-          type="button"
-          onClick={() => setShowRaw((v) => !v)}
-          className="inline-flex items-center gap-1 text-[10px] font-mono text-ink-3 hover:text-ink transition-colors cursor-pointer"
-        >
-          <Code2 className="w-2.5 h-2.5" />
-          <span>{showRaw ? "卡片视图" : "原始 Schema"}</span>
-        </button>
-      </div>
-    </div>
-  );
+        return <div key={key} className="space-y-1.5">
+          {!ElicitationPropertySchema.isArray(field) && <label htmlFor={id} className="block font-medium">{title}</label>}
+          <p id={`${id}-hint`} className="text-xs text-ink-2 whitespace-pre-wrap">{typeof field.description === "string" ? field.description : ""}</p>
+          {input}<p id={`${id}-error`} role={errors[key] ? "alert" : undefined} className="text-xs text-danger">{errors[key]}</p>
+        </div>;
+      })}
+    </fieldset>
+    {failure && <p role="alert" className="text-danger">{failure}</p>}
+    {controls}
+  </form>;
 };

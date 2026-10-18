@@ -129,6 +129,10 @@ describe("send retry policy", () => {
   it("keeps the first turn when resolving a session replaces the draft thread", async () => {
     const resolveSession = vi.fn(async () => {
       const store = useStudioStore.getState();
+      // Real session resolution rejects creating a session while streaming.
+      // It must still see a clean draft when the first send arrives early.
+      expect(store.isStreaming).toBe(false);
+      expect(store.messages).toHaveLength(0);
       store.newThread(store.activeAgentId);
       store.setSessionId("first-session");
       return "first-session";

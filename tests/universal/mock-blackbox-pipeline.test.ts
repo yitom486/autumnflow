@@ -345,6 +345,13 @@ describe("Mock ACP Black-box Integration Pipeline", () => {
     }
     expect(elicId).toBeTruthy();
 
+    // Invalid/untyped answers must not consume the pending SDK request.
+    const invalidRes = await app.fetch(authedRequest("http://localhost:3004/api/universal/elicitation/respond", {
+      method: "POST", headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ agentId: mockAgentId, elicitationId: elicId, result: { targetEnv: "staging-cluster-1" } }),
+    }));
+    expect(invalidRes.status).toBe(400);
+
     // Respond to elicitation via Gateway HTTP API
     const respondRes = await app.fetch(
       authedRequest(`http://localhost:3004/api/universal/elicitation/respond`, {
@@ -353,7 +360,7 @@ describe("Mock ACP Black-box Integration Pipeline", () => {
         body: JSON.stringify({
           agentId: mockAgentId,
           elicitationId: elicId,
-          result: { targetEnv: "staging-cluster-1" },
+          result: { action: "accept", content: { targetEnv: "staging-cluster-1" } },
         }),
       })
     );
@@ -362,6 +369,8 @@ describe("Mock ACP Black-box Integration Pipeline", () => {
     // Await stream completion
     await readPromise;
     expect(textReceived).toContain("Elicitation resolved");
+    expect(textReceived).toContain('"action":"accept"');
+    expect(textReceived).toContain('"targetEnv":"staging-cluster-1"');
   });
 
   it("handles prompt turn cancellation cleanly without process crash", async () => {

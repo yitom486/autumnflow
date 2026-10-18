@@ -4,6 +4,8 @@
  * Every request goes through apiFetch (adds the gateway Bearer token).
  */
 import { apiFetch } from "@/lib/gateway-auth";
+import type * as acp from "@agentclientprotocol/sdk";
+import { applyArtifactUpdate, isArtifactUpdate, artifactKey, updateKey, type ArtifactUpdate, type SessionArtifact } from "../../shared/acp-session-state";
 import {
   isGenerativeTool,
   appendGenerativeToolPlaceholder,
@@ -152,9 +154,9 @@ export interface AgentSummary {
     connected: boolean;
     pid?: number | null;
     protocolVersion?: number | null;
-    agentInfo?: { name?: string; title?: string; version?: string } | null;
-    agentCapabilities?: Record<string, any> | null;
-    authMethods?: Array<{ id: string; name?: string; description?: string; type?: string }> | null;
+    agentInfo?: acp.Implementation | null;
+    agentCapabilities?: acp.AgentCapabilities | null;
+    authMethods?: acp.AuthMethod[] | null;
     /** initialize._meta.authStatus passthrough (e.g. codex), null when unknown */
     authStatus?: unknown;
     meta?: Record<string, any> | null;
@@ -170,7 +172,7 @@ export interface ToolCallItem {
   title: string;
   kind?: string;
   status: ToolCallStatus;
-  content?: unknown;
+  content?: acp.ToolCallContent[];
   /**
    * Rich payloads (agent 透传、有则收）：raw tool name / params / file
    * locations / result output / error. Display-only; capped below.
@@ -254,13 +256,7 @@ export interface PendingPermission {
   options: Array<{ optionId: string; name: string; kind?: string }>;
 }
 
-export interface PendingElicitation {
-  elicitationId: string;
-  agentId: string;
-  sessionId: string;
-  message: string;
-  schema: any;
-}
+export type PendingElicitation = import("../../shared/elicitation").ElicitationItem;
 
 export interface FlattenedOption {
   value: string;
@@ -319,6 +315,9 @@ export function configCurrentValue(opt: ConfigOptionLike): string {
 /** Map a session config option to a composer role (model / thinking / permission). */
 export function findConfigOption(options: ConfigOptionLike[] | null | undefined, role: "model" | "thinking" | "permission"): ConfigOptionLike | undefined {
   if (!options) return undefined;
+  const category = role === "thinking" ? "thought_level" : role === "permission" ? "mode" : "model";
+  const standard = options.find(option => option.category === category);
+  if (standard) return standard;
   const hit = (o: ConfigOptionLike, re: RegExp) => re.test(o.id || "") || re.test(o.name || "") || re.test(o.category || "");
   if (role === "model") return options.find((o) => o.id === "model" || o.category === "model");
   if (role === "thinking") return options.find((o) => hit(o, /reason|effort|think/i));
@@ -790,11 +789,14 @@ export interface UniversalHandlers {
   onThoughtChunk?: (chunk: string) => void;
   onImageChunk?: (img: ChatImage, messageId?: string) => void;
   onToolCall?: (call: ToolCallItem) => void;
-  onToolCallUpdate?: (call: ToolCallItem) => void;
+  onToolCallUpdate?: (call: Partial<ToolCallItem> & { id: string }) => void;
   onPlan?: (entries: PlanEntry[]) => void;
   onAvailableCommands?: (commands: Array<{ name: string; description?: string }>) => void;
   onModeUpdate?: (modeId: string) => void;
   onConfigUpdate?: (option: any) => void;
+  onConfigOptions?: (options: acp.SessionConfigOption[]) => void;
+  onArtifactUpdate?: (update: ArtifactUpdate) => void;
+  onContentBlock?: (content: acp.ContentBlock) => void;
   onSessionInfo?: (info: any) => void;
   onUsage?: (usage: UsageUpdate) => void;
   onQuota?: (quota: any) => void;
@@ -802,8 +804,65 @@ export interface UniversalHandlers {
   onActivity?: (a: ActivityEvent) => void;
   onPermissionRequest?: (p: PendingPermission) => void;
   onElicitationRequest?: (e: PendingElicitation) => void;
+  onElicitationClosed?: (id: string) => void;
   onDone?: (stopReason?: string, response?: any) => void;
   onError?: (err: Error) => void;
+}
+
+/** Standard protocol dispatch. Compatibility aliases below are only the legacy boundary. */
+export function dispatchStandardUpdate(update: acp.SessionUpdate, handlers: UniversalHandlers): boolean {
+  if (isArtifactUpdate(update)) {
+    handlers.onArtifactUpdate?.(update);
+    handlers.onActivity?.({
+      kind: update.sessionUpdate,
+      detail: update,
+      timestamp: new Date().toISOString(),
+    });
+    return true;
+  }
+  switch (update.sessionUpdate) {
+    case "agent_thought_chunk": {
+      if (update.content?.type !== "text") return false;
+      handlers.onThoughtChunk?.(update.content.text); return true;
+    }
+    case "agent_message_chunk": {
+      const content = update.content;
+      if (!content || !["text", "image", "audio", "resource", "resource_link"].includes(content.type)) return false;
+      if (content.type === "text") handlers.onTextChunk?.(content.text, update.messageId ?? undefined);
+      else if (content.type === "image") {
+        const image = toChatImage(content); if (image) handlers.onImageChunk?.(image, update.messageId ?? undefined);
+      } else handlers.onContentBlock?.(content);
+      return true;
+    }
+    case "user_message_chunk":
+      // A server replay/echo of the user's input must not be appended to the assistant answer.
+      handlers.onActivity?.({ kind: "user_message_chunk", detail: update }); return true;
+    case "config_option_update":
+      if (!Array.isArray(update.configOptions)) return false;
+      handlers.onConfigOptions?.(update.configOptions); return true;
+    case "tool_call": {
+      handlers.onToolCall?.({ id: update.toolCallId, title: cleanToolTitle(update.title, update.toolCallId, undefined, update.rawInput) || "Tool call", kind: update.kind ?? undefined, status: mapToolStatus(update.status), content: update.content,
+        ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}), ...(update.rawOutput !== undefined ? { rawOutput: capToolText(update.rawOutput) } : {}), ...(update.locations ? { locations: update.locations.map(location => ({ path: location.path, ...(location.line != null ? { line: location.line } : {}) })) } : {}) });
+      return true;
+    }
+    case "tool_call_update": {
+      handlers.onToolCallUpdate?.({ id: update.toolCallId,
+        ...(update.title != null ? { title: update.title } : {}), ...(update.kind != null ? { kind: update.kind } : {}),
+        ...(update.status != null ? { status: mapToolStatus(update.status) } : {}), ...(update.content != null ? { content: update.content } : {}),
+        ...(update.rawInput !== undefined ? { rawInput: update.rawInput } : {}), ...(update.rawOutput !== undefined ? { rawOutput: capToolText(update.rawOutput) } : {}), ...(update.locations != null ? { locations: update.locations.map(location => ({ path: location.path, ...(location.line != null ? { line: location.line } : {}) })) } : {}) });
+      return true;
+    }
+    case "notice":
+      if (typeof update.title !== "string") return false;
+      handlers.onNotice?.({ message: [update.title, update.description].filter(Boolean).join("\n"), severity: update.severity === "error" ? "error" : update.severity === "warning" ? "warning" : "info" });
+      return true;
+    case "plan": handlers.onPlan?.(update.entries); return true;
+    case "available_commands_update": handlers.onAvailableCommands?.(update.availableCommands); return true;
+    case "current_mode_update": handlers.onModeUpdate?.(update.currentModeId); return true;
+    case "session_info_update": handlers.onSessionInfo?.(update); return true;
+    case "usage_update": handlers.onUsage?.({ used: update.used, size: update.size, ...(update.cost ? { cost: update.cost } : {}), ...pickUsageExtras(update) }); return true;
+    default: return false; // Tool adapters below also retain optional vendor display metadata.
+  }
 }
 
 export async function fetchAgents(): Promise<AgentSummary[]> {
@@ -903,11 +962,11 @@ export async function deleteAgentProfile(agentId: string) {
   if (!data.ok) throw new Error(data.error || "delete agent failed");
 }
 
-export async function authenticateAgent(agentId: string, methodId: string, extra?: Record<string, unknown>) {
+export async function authenticateAgent(agentId: string, methodId: string, meta?: acp.AuthenticateRequest["_meta"]) {
   const res = await apiFetch(`/api/universal/agents/${encodeURIComponent(agentId)}/authenticate`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ methodId, ...(extra || {}) }),
+    body: JSON.stringify({ methodId, ...(meta ? { _meta: meta } : {}) }),
   });
   const data = await res.json();
   if (!data.ok) throwGatewayError(data, "authenticate failed", res.status);
@@ -992,7 +1051,21 @@ export async function respondPermission(agentId: string, permissionId: string, o
   if (!data.ok) throw new Error(data.error || "permission respond failed");
 }
 
-export async function respondElicitation(agentId: string, elicitationId: string, result: unknown) {
+export async function fetchPendingElicitations(agentId: string, signal?: AbortSignal): Promise<PendingElicitation[]> {
+  const res = await apiFetch(`/api/universal/elicitation/pending?agentId=${encodeURIComponent(agentId)}`, { signal });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || "无法读取待处理的提问");
+  return data.pending;
+}
+
+export async function fetchTerminalOutput(agentId: string, request: acp.TerminalOutputRequest): Promise<acp.TerminalOutputResponse> {
+  const res = await apiFetch(`/api/universal/agents/${encodeURIComponent(agentId)}/terminal/${encodeURIComponent(request.terminalId)}?sessionId=${encodeURIComponent(request.sessionId)}`);
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || "终端暂不可用");
+  return data.result;
+}
+
+export async function respondElicitation(agentId: string, elicitationId: string, result: import("@agentclientprotocol/sdk").CreateElicitationResponse) {
   const res = await apiFetch("/api/universal/elicitation/respond", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1053,14 +1126,8 @@ export async function consumeUniversalChat(
         } else if (payload.type === "update" && payload.update) {
           const u = payload.update;
           const kind = u.sessionUpdate as string;
-          const isThoughtChunk =
-            kind === "agent_thought_chunk" ||
-            kind === "agent_thought" ||
-            kind === "thought_chunk" ||
-            kind === "reasoning_chunk" ||
-            kind === "thought" ||
-            kind === "reasoning" ||
-            (kind === "agent_message_chunk" && (u.content?.type === "thought" || u.content?.type === "reasoning"));
+          if (dispatchStandardUpdate(u, handlers)) continue;
+          const isThoughtChunk = isThoughtUpdate(u);
 
           if (isThoughtChunk) {
             const thoughtText = extractText(u.content || u.text || u.thought || u);
@@ -1171,7 +1238,10 @@ export async function consumeUniversalChat(
             sessionId: payload.sessionId,
             message: payload.message || "",
             schema: payload.schema,
+            status: payload.status,
           });
+        } else if (payload.type === "elicitation_completed" || payload.type === "elicitation_closed") {
+          handlers.onElicitationClosed?.(payload.elicitationId);
         } else if (payload.type === "done") {
           done = true;
           stopReason = payload.stopReason;
@@ -1223,6 +1293,12 @@ function mapToolStatus(s: unknown): ToolCallItem["status"] {
   return "running";
 }
 
+/** Reasoning is one semantic channel, independent of chunk cadence or newlines. */
+export function isThoughtUpdate(u: any): boolean {
+  return ["agent_thought_chunk", "agent_thought", "thought_chunk", "reasoning_chunk", "thought", "reasoning"].includes(u?.sessionUpdate)
+    || (u?.sessionUpdate === "agent_message_chunk" && ["thought", "reasoning"].includes(u?.content?.type));
+}
+
 export interface RebuiltTranscript {
   messages: Array<{
     id?: string;
@@ -1231,6 +1307,8 @@ export interface RebuiltTranscript {
     thought?: string;
     toolCalls?: ToolCallItem[];
     images?: ChatImage[];
+    contentBlocks?: acp.ContentBlock[];
+    artifacts?: SessionArtifact[];
     messageId?: string;
   }>;
   plan: PlanEntry[];
@@ -1239,6 +1317,7 @@ export interface RebuiltTranscript {
   currentModeId: string | null;
   sessionTitle?: string;
   sessionGoal?: string | null;
+  configOptions?: acp.SessionConfigOption[];
   activities: ActivityEvent[];
 }
 
@@ -1264,6 +1343,8 @@ export function buildTranscriptFromReplay(replayed: any[]): RebuiltTranscript {
     thought?: string;
     toolCalls?: ToolCallItem[];
     images?: ChatImage[];
+    contentBlocks?: acp.ContentBlock[];
+    artifacts?: SessionArtifact[];
     messageId?: string;
   }>();
   const order: string[] = [];
@@ -1289,6 +1370,17 @@ export function buildTranscriptFromReplay(replayed: any[]): RebuiltTranscript {
 
   for (const u of replayed || []) {
     const kind = u?.sessionUpdate as string;
+    if (isArtifactUpdate(u)) {
+      const owner = [...byId.values()].find(message => message.artifacts?.some(entry => artifactKey(entry) === updateKey(u)));
+      const k = lastAssistantKey || ensureMessage("assistant");
+      lastAssistantKey = k;
+      const target = owner ?? byId.get(k)!;
+      target.artifacts = applyArtifactUpdate(target.artifacts ?? [], u);
+      if (kind !== "session_message" && kind !== "session_message_chunk") {
+        continue;
+      }
+    }
+    if (kind === "config_option_update" && Array.isArray(u.configOptions)) { out.configOptions = u.configOptions; continue; }
 
     if (kind === "user_message_chunk" || kind === "user_message") {
       const k = u.messageId ? ensureMessage("user", u.messageId) : (lastUserKey || ensureMessage("user"));
@@ -1302,12 +1394,12 @@ export function buildTranscriptFromReplay(replayed: any[]): RebuiltTranscript {
       // 回放里用户发过的图片（ACP image 块或数组）
       const uimgs = findChatImages(u.content);
       if (uimgs.length) m.images = [...(m.images || []), ...uimgs].slice(-8);
-    } else if (
+    } else if (!isThoughtUpdate(u) && (
       kind === "agent_message_chunk" ||
       kind === "agent_message" ||
       kind === "session_message_chunk" ||
       kind === "session_message"
-    ) {
+    )) {
       // Aggregate into current assistant turn so intermediate step messageIds don't fragment the bubble
       const k = lastAssistantKey || ensureMessage("assistant", u.messageId);
       lastAssistantKey = k;
@@ -1329,12 +1421,8 @@ export function buildTranscriptFromReplay(replayed: any[]): RebuiltTranscript {
       }
       const imgs = findChatImages(u.content);
       if (imgs.length) m.images = [...(m.images || []), ...imgs].slice(-8);
-    } else if (
-      kind === "agent_thought_chunk" ||
-      kind === "agent_thought" ||
-      kind === "thought_chunk" ||
-      kind === "thought"
-    ) {
+      if (u.content && ["audio", "resource", "resource_link"].includes(u.content.type)) m.contentBlocks = [...(m.contentBlocks ?? []), u.content];
+    } else if (isThoughtUpdate(u)) {
       // Aggregate thoughts into current assistant turn
       const k = lastAssistantKey || ensureMessage("assistant", u.messageId);
       lastAssistantKey = k;
@@ -1383,8 +1471,8 @@ export function buildTranscriptFromReplay(replayed: any[]): RebuiltTranscript {
           Object.assign(t, {
             title: updTitle || t.title,
             kind: u.kind ?? t.kind,
-            status: mapToolStatus(u.status),
-            content: u.content !== undefined ? u.content : t.content,
+            status: u.status != null ? mapToolStatus(u.status) : t.status,
+            content: u.content != null ? u.content : t.content,
             ...pickToolExtras(u),
           });
           if (isGenerativeTool(t)) {
@@ -1429,7 +1517,7 @@ export function buildTranscriptFromReplay(replayed: any[]): RebuiltTranscript {
 
   out.messages = order
     .map((k) => byId.get(k)!)
-    .filter((m) => m.content || m.thought || (m.toolCalls && m.toolCalls.length > 0) || (m.images && m.images.length > 0));
+    .filter((m) => m.content || m.thought || m.artifacts?.length || m.contentBlocks?.length || (m.toolCalls && m.toolCalls.length > 0) || (m.images && m.images.length > 0));
 
   return out;
 }

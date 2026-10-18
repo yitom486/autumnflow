@@ -477,6 +477,8 @@ export function useSessionLifecycle({
                   thought: m.thought,
                   toolCalls: m.toolCalls,
                   images: m.images,
+                  contentBlocks: m.contentBlocks,
+                  artifacts: m.artifacts,
                   timestamp: now(),
                 }))
               );
@@ -495,6 +497,7 @@ export function useSessionLifecycle({
                 useStudioStore.getState().patchMessage(lastAsst.id, { plan: t.plan });
               }
             }
+            if (t.configOptions) useStudioStore.getState().setConfigOptions(t.configOptions);
             if (t.usage) useStudioStore.getState().setUsage(t.usage);
             {
               const fromRes = (result as any)?.availableCommands;

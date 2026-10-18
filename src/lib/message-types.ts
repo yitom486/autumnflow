@@ -6,6 +6,8 @@ export interface Message {
   /** 中间阶段执行过程文本（多阶段/工具调用时自动收拢折叠，正文区仅展示最终结论）。 */
   progressContent?: string;
   thought?: string;
+  contentBlocks?: import("@agentclientprotocol/sdk").ContentBlock[];
+  artifacts?: import("../../shared/acp-session-state").SessionArtifact[];
   plan?: Array<{ content: string; priority?: string; status?: string }>;
   usage?: {
     used: number;
@@ -34,6 +36,7 @@ export interface Message {
     /** Rich payloads (allowlisted from tool_call(_update), display-only). */
     name?: string;
     rawInput?: unknown;
+    content?: import("@agentclientprotocol/sdk").ToolCallContent[];
     locations?: Array<{ path: string; line?: number }>;
     rawOutput?: unknown;
     rawError?: unknown;

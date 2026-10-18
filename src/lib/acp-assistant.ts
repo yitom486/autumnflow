@@ -41,7 +41,7 @@ function toToolCallPart(tc: NonNullable<Message["toolCalls"]>[number]) {
     toolName,
     args,
     argsText,
-    result: tc.rawOutput !== undefined ? tc.rawOutput : tc.status,
+    result: tc.rawOutput !== undefined ? tc.rawOutput : tc.content ?? tc.status,
     isError: tc.status === "failed" || tc.status === "cancelled",
     ...(tc.startedAt ? { timing: { startedAt: tc.startedAt, ...(tc.completedAt ? { completedAt: tc.completedAt } : {}) } } : {}),
   };

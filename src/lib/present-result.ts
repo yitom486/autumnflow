@@ -82,6 +82,7 @@ export interface PresentForm extends PresentResultBase {
 }
 
 export type DiagramType =
+  | "mindmap"
   | "architecture"
   | "sequence"
   | "flowchart"
@@ -285,7 +286,7 @@ export function parsePresentResult(value: unknown): PresentResult | null {
   if (input.kind === "diagram") {
     const rawType = String(input.diagramType || "architecture").toLowerCase();
     const diagramType: DiagramType =
-      rawType === "sequence" || rawType === "flowchart" || rawType === "quadrant" || rawType === "timeline"
+      rawType === "mindmap" || rawType === "sequence" || rawType === "flowchart" || rawType === "quadrant" || rawType === "timeline"
         ? rawType
         : "architecture";
 
@@ -466,7 +467,7 @@ export function normalizeToPresentResult(raw: unknown): PresentResult | null {
   if (obj.diagramType || obj.kind === "diagram") {
     const rawType = String(obj.diagramType || "architecture").toLowerCase();
     const diagramType: DiagramType =
-      rawType === "sequence" || rawType === "flowchart" || rawType === "quadrant" || rawType === "timeline"
+      rawType === "mindmap" || rawType === "sequence" || rawType === "flowchart" || rawType === "quadrant" || rawType === "timeline"
         ? rawType
         : "architecture";
 

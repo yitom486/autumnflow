@@ -253,6 +253,7 @@ function isGenerativeToolName(clean: string): boolean {
 export function inferDiagramType(args: Record<string, any> | null | undefined): DiagramType {
   const t = String(args?.diagramType || "").toLowerCase().trim();
   if (
+    t === "mindmap" ||
     t === "architecture" ||
     t === "sequence" ||
     t === "flowchart" ||
@@ -264,6 +265,7 @@ export function inferDiagramType(args: Record<string, any> | null | undefined): 
   const raw = args as Record<string, any> | null | undefined;
   const d =
     raw && raw.data && typeof raw.data === "object" && !Array.isArray(raw.data) ? raw.data : raw || {};
+  if (d.root || d.tree) return "mindmap";
   if (Array.isArray(d.milestones)) return "timeline";
   if (d.xAxis || d.yAxis) return "quadrant";
   if (Array.isArray(d.participants) || Array.isArray(d.messages)) return "sequence";
@@ -460,9 +462,10 @@ const GenerativeSkeleton: React.FC<{
 
 function hasDiagramContent(type: DiagramType, data: Record<string, any>): boolean {
   const keys = {
-    architecture: ["layers"], sequence: ["messages", "steps"], flowchart: ["steps", "nodes"],
+    mindmap: [], architecture: ["layers"], sequence: ["messages", "steps"], flowchart: ["steps", "nodes"],
     quadrant: ["items"], timeline: ["milestones"],
   }[type];
+  if (type === "mindmap") return Boolean(data.root || data.tree);
   return keys.some(key => Array.isArray(data[key]) && data[key].length > 0);
 }
 
@@ -636,6 +639,8 @@ export const AcpGenerativeToolCard: React.FC<{
           return {
             label: String(m.label ?? m.name ?? m.title ?? `指标 ${idx + 1}`),
             value: String(m.value ?? m.val ?? "--"),
+            unit: m.unit == null ? undefined : String(m.unit),
+            progress: typeof m.progress === "number" && Number.isFinite(m.progress) ? m.progress : undefined,
             change: m.change ?? m.delta,
             status: m.status,
             description: m.description ?? m.desc,
@@ -644,6 +649,8 @@ export const AcpGenerativeToolCard: React.FC<{
         .filter(Boolean) as Array<{
           label: string;
           value: string;
+          unit?: string;
+          progress?: number;
           change?: string;
           status?: "good" | "bad" | "neutral";
           description?: string;
