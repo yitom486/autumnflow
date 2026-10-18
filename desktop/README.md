@@ -56,6 +56,13 @@ preload token；同源 HTTP 与 PTY WebSocket 自动携带 Cookie。服务端对
 提供，后者在设置页手动保存。生产环境的 `gateway:getToken` 返回空字符串，
 避免 renderer JS 直接拿到 token。
 
+## SSE 事件边界
+
+`src/lib/app-events.ts` 定义闭合的 `AppEvent`（start/update/done/error/
+permission/elicitation/activity）。`consumeUniversalChat` 先归一化再分派；
+ACP 新增的未知 update kind 仍会进入 activity 转发，未知顶层事件保留 raw 并
+记录 debug，不会被静默丢弃。
+
 ## 开发
 
 ```bash

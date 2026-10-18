@@ -4,6 +4,7 @@
  * Every request goes through apiFetch (adds the gateway Bearer token).
  */
 import { apiFetch } from "@/lib/gateway-auth";
+import { normalizeAppEvent } from "@/lib/app-events";
 import type * as acp from "@agentclientprotocol/sdk";
 import { applyArtifactUpdate, isArtifactUpdate, artifactKey, updateKey, type ArtifactUpdate, type SessionArtifact } from "../../shared/acp-session-state";
 import {
@@ -1151,11 +1152,18 @@ export async function consumeUniversalChat(
         if (payload.quota) {
           handlers.onQuota?.(payload.quota);
         }
-        if (payload.type === "start" && payload.sessionId) {
-          sessionId = payload.sessionId;
-          handlers.onSessionId?.(payload.sessionId);
-        } else if (payload.type === "update" && payload.update) {
-          const u = payload.update;
+        const event = normalizeAppEvent(payload);
+        if (event.type === "unknown") {
+          // Preserve forward compatibility without inventing a handler: the
+          // raw frame stays visible in debug logs, never silently executed.
+          console.debug("[Universal] unknown SSE event:", event.rawType);
+          continue;
+        }
+        if (event.type === "start") {
+          sessionId = event.sessionId;
+          handlers.onSessionId?.(event.sessionId);
+        } else if (event.type === "update") {
+          const u = event.update as any;
           const kind = u.sessionUpdate as string;
           if (dispatchStandardUpdate(u, handlers)) continue;
           const isThoughtChunk = isThoughtUpdate(u);
@@ -1252,31 +1260,31 @@ export async function consumeUniversalChat(
             // Forward-compatible: never silently drop unknown update kinds.
             handlers.onActivity?.({ kind: kind || "unknown_update", detail: u });
           }
-        } else if (payload.type === "activity") {
-          handlers.onActivity?.({ kind: payload.kind || "activity", detail: payload.detail });
-        } else if (payload.type === "permission_request") {
+        } else if (event.type === "activity") {
+          handlers.onActivity?.({ kind: event.kind, detail: event.detail });
+        } else if (event.type === "permission_request") {
           handlers.onPermissionRequest?.({
-            permissionId: payload.permissionId,
-            agentId: payload.agentId,
-            sessionId: payload.sessionId,
-            toolCall: payload.toolCall,
-            options: payload.options || [],
+            permissionId: event.permissionId,
+            agentId: event.agentId,
+            sessionId: event.sessionId,
+            toolCall: event.toolCall as any,
+            options: event.options as any,
           });
-        } else if (payload.type === "elicitation_request") {
+        } else if (event.type === "elicitation_request") {
           handlers.onElicitationRequest?.({
-            elicitationId: payload.elicitationId,
-            agentId: payload.agentId,
-            sessionId: payload.sessionId,
-            message: payload.message || "",
-            schema: payload.schema,
-            status: payload.status,
+            elicitationId: event.elicitationId,
+            agentId: event.agentId,
+            sessionId: event.sessionId,
+            message: event.message,
+            schema: event.schema as any,
+            status: event.status,
           });
-        } else if (payload.type === "elicitation_completed" || payload.type === "elicitation_closed") {
-          handlers.onElicitationClosed?.(payload.elicitationId);
-        } else if (payload.type === "done") {
+        } else if (event.type === "elicitation_closed") {
+          handlers.onElicitationClosed?.(event.elicitationId);
+        } else if (event.type === "done") {
           done = true;
-          stopReason = payload.stopReason;
-          const resp = payload.response;
+          stopReason = event.stopReason;
+          const resp = event.response as any;
           if (resp && (resp.usage || resp._meta)) {
             const rawUsage = resp.usage || {};
             const extras = pickUsageExtras({ ...rawUsage, _meta: resp._meta });
@@ -1288,24 +1296,24 @@ export async function consumeUniversalChat(
               ...extras,
             });
           }
-          handlers.onDone?.(payload.stopReason, payload.response);
+          handlers.onDone?.(event.stopReason, event.response);
           try {
             await reader.cancel();
           } catch {
             // ignore
           }
           break;
-        } else if (payload.type === "error") {
+        } else if (event.type === "error") {
           done = true;
           // A server-sent error is terminal for this turn. Reconnecting with
           // the same turnId would only replay the same terminal state, so do
           // not let the transport auto-retry re-prompt it.
-          const terminal = new Error(payload.message || "prompt failed") as Error & {
+          const terminal = new Error(event.message || "prompt failed") as Error & {
             terminal?: boolean;
             code?: number;
           };
           terminal.terminal = true;
-          if (typeof payload.code === "number") terminal.code = payload.code;
+          if (typeof event.code === "number") terminal.code = event.code;
           handlers.onError?.(terminal);
           try {
             await reader.cancel();
