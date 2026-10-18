@@ -123,6 +123,31 @@ describe("useStudioStore", () => {
     );
   });
 
+  it("persists and restores an active turn pointer", () => {
+    const s = useStudioStore.getState();
+    s.setActiveAgentId("opencode");
+    s.newThread("opencode", "D:/active-turn-test");
+    s.setMessages([
+      { id: "u1", role: "user", content: "run it", timestamp: "t" },
+      { id: "a1", role: "assistant", content: "partial", timestamp: "t", turnId: "turn-1" },
+    ]);
+    s.setActiveTurn({
+      turnId: "turn-1",
+      lastSeq: 17,
+      status: "running",
+      assistantId: "a1",
+      startedAt: 123,
+    });
+    s.snapshotThread();
+    s.restoreThread("opencode", "D:/active-turn-test");
+    expect(useStudioStore.getState().activeTurn).toMatchObject({
+      turnId: "turn-1",
+      lastSeq: 17,
+      status: "running",
+      assistantId: "a1",
+    });
+  });
+
   it("hydrates the last-known model catalog on agent switch (cold-start picker)", () => {
     localStorage.removeItem("acp_model_catalog_v1");
     const s = useStudioStore.getState();

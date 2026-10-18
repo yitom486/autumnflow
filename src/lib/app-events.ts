@@ -28,6 +28,7 @@ export type AppEvent =
     }
   | { type: "elicitation_closed"; elicitationId: string }
   | { type: "activity"; kind: string; detail?: unknown }
+  | { type: "reset"; reason: string; firstSeq: number; lastSeq: number }
   | { type: "unknown"; rawType: string; raw: Record<string, unknown> };
 
 export function assertNever(value: never): never {
@@ -104,6 +105,13 @@ export function normalizeAppEvent(payload: unknown): AppEvent {
         type: "activity",
         kind: text(raw.kind) || "activity",
         detail: raw.detail,
+      };
+    case "reset":
+      return {
+        type: "reset",
+        reason: text(raw.reason) || "gap",
+        firstSeq: Number.isFinite(Number(raw.firstSeq)) ? Math.max(0, Math.floor(Number(raw.firstSeq))) : 0,
+        lastSeq: Number.isFinite(Number(raw.lastSeq)) ? Math.max(0, Math.floor(Number(raw.lastSeq))) : 0,
       };
     default:
       return { type: "unknown", rawType, raw };

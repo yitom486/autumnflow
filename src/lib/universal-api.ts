@@ -828,6 +828,8 @@ export interface UniversalHandlers {
   onElicitationClosed?: (id: string) => void;
   /** Monotonic SSE event id; feed it back as afterSeq when reconnecting. */
   onSequence?: (seq: number) => void;
+  /** Server lost/trimmed the requested window; events are replayed from firstSeq. */
+  onReset?: (reset: { reason: string; firstSeq: number; lastSeq: number }) => void;
   onDone?: (stopReason?: string, response?: any) => void;
   onError?: (err: Error) => void;
 }
@@ -1102,8 +1104,12 @@ export async function respondElicitation(agentId: string, elicitationId: string,
 export async function consumeUniversalChat(
   body: Record<string, unknown>,
   handlers: UniversalHandlers = {},
-  signal?: AbortSignal
+  signal?: AbortSignal,
+  options: { follow?: boolean } = {}
 ): Promise<{ stopReason?: string; sessionId?: string; lastEventId?: number }> {
+  if (options.follow && typeof body.turnId === "string" && body.turnId) {
+    return followUniversalTurn(body.turnId, Number(body.afterSeq) || 0, handlers, signal);
+  }
   const res = await apiFetch("/api/universal/chat", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
@@ -1114,8 +1120,35 @@ export async function consumeUniversalChat(
     const errJson = await res.json().catch(() => null);
     throwGatewayError(errJson, `Server ${res.status}: ${res.statusText}`, res.status);
   }
-  if (!res.body) throw new Error("No response stream body");
   handlers.onConnect?.();
+  return consumeSseResponse(res, handlers, signal);
+}
+
+/** Reconnect without re-sending a prompt: GET /chat/:turnId/follow. */
+export async function followUniversalTurn(
+  turnId: string,
+  afterSeq: number,
+  handlers: UniversalHandlers = {},
+  signal?: AbortSignal
+): Promise<{ stopReason?: string; sessionId?: string; lastEventId?: number }> {
+  const res = await apiFetch(
+    `/api/universal/chat/${encodeURIComponent(turnId)}/follow?after=${Math.max(0, Math.floor(afterSeq || 0))}`,
+    { signal }
+  );
+  if (!res.ok) {
+    const errJson = await res.json().catch(() => null);
+    throwGatewayError(errJson, `Server ${res.status}: ${res.statusText}`, res.status);
+  }
+  handlers.onConnect?.();
+  return consumeSseResponse(res, handlers, signal);
+}
+
+async function consumeSseResponse(
+  res: Response,
+  handlers: UniversalHandlers,
+  signal?: AbortSignal
+): Promise<{ stopReason?: string; sessionId?: string; lastEventId?: number }> {
+  if (!res.body) throw new Error("No response stream body");
 
   const reader = res.body.getReader();
   const decoder = new TextDecoder();
@@ -1157,6 +1190,10 @@ export async function consumeUniversalChat(
           // Preserve forward compatibility without inventing a handler: the
           // raw frame stays visible in debug logs, never silently executed.
           console.debug("[Universal] unknown SSE event:", event.rawType);
+          continue;
+        }
+        if (event.type === "reset") {
+          handlers.onReset?.(event);
           continue;
         }
         if (event.type === "start") {
@@ -1328,6 +1365,12 @@ export async function consumeUniversalChat(
   } catch (err: any) {
     if (err?.name === "AbortError") return { stopReason: "cancelled", sessionId, lastEventId };
     if (!done) handlers.onError?.(err instanceof Error ? err : new Error(String(err)));
+  }
+  if (!done) {
+    if (signal?.aborted) return { stopReason: "cancelled", sessionId, lastEventId };
+    const eof = new Error("unexpected eof: SSE stream ended before done");
+    handlers.onError?.(eof);
+    throw eof;
   }
   return { stopReason, sessionId, lastEventId };
 }

@@ -10,6 +10,17 @@ import { mergeArtifacts } from "../../shared/acp-session-state";
  * store only ever binds ids obtained while that agent is active.
  */
 
+export interface ActiveTurn {
+  turnId: string;
+  lastSeq: number;
+  /** Highest seq whose resulting messages were frozen into the thread. */
+  persistedSeq?: number;
+  status: "running" | "done" | "error" | "interrupted";
+  /** Assistant message this turn writes into (stable across reload). */
+  assistantId?: string;
+  startedAt: number;
+}
+
 export interface ChatThread {
   id: string;
   agentId: string;
@@ -23,6 +34,8 @@ export interface ChatThread {
   updatedAt: number;
   /** True when the remembered sessionId failed to resume (visible degrade). */
   stale?: boolean;
+  /** Durable pointer to a turn that may still be running after reload. */
+  activeTurn?: ActiveTurn;
 }
 
 export const THREADS_KEY = "acp_threads_v1";

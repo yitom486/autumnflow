@@ -119,6 +119,38 @@ describe("consumeUniversalChat (v1 full updates)", () => {
     expect(isTransientSendError(terminal)).toBe(false);
   });
 
+  it("uses GET follow in follow mode instead of re-posting the prompt", async () => {
+    let url = "";
+    globalThis.fetch = vi.fn(async (input) => {
+      url = String(input);
+      return sseSequenced([{ id: 1, data: { type: "done", stopReason: "end_turn" } }]);
+    }) as unknown as typeof fetch;
+    await consumeUniversalChat(
+      { agentId: "codex", prompt: "must-not-resend", turnId: "turn-follow", afterSeq: 3 },
+      {},
+      undefined,
+      { follow: true }
+    );
+    expect(url).toContain("/api/universal/chat/turn-follow/follow?after=3");
+  });
+
+  it("treats a clean EOF without done as a transient interruption", async () => {
+    globalThis.fetch = vi.fn(async () =>
+      sseSequenced([
+        { id: 1, data: { type: "start", sessionId: "s1" } },
+        { id: 2, data: { type: "update", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "partial" } } } },
+      ])
+    ) as unknown as typeof fetch;
+    const errors: Error[] = [];
+    await expect(
+      consumeUniversalChat(
+        { agentId: "codex", prompt: "hi", turnId: "turn-eof" },
+        { onError: (err) => errors.push(err) }
+      )
+    ).rejects.toThrow("unexpected eof");
+    expect(errors.some((err) => /unexpected eof/.test(err.message))).toBe(true);
+  });
+
   it("rebuilds transcripts from session/load replay", () => {
     const t = buildTranscriptFromReplay([
       { sessionUpdate: "user_message_chunk", messageId: "m1", content: { type: "text", text: "hello" } },

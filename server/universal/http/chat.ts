@@ -87,6 +87,26 @@ function streamTurn(record: TurnRecord, afterSeq: number): Response {
           console.debug(`[chat.ts] SSE client gone turn=${record.id}: ${(err as Error).message}`);
         }
       };
+      const sendData = (data: Record<string, unknown>) => {
+        if (closed) return;
+        try {
+          controller.enqueue(encoder.encode(`data: ${JSON.stringify(data)}\n\n`));
+        } catch {
+          closed = true;
+          if (ping) clearInterval(ping);
+          ping = null;
+        }
+      };
+      const plan = turnRegistry.replayPlan(record.id, afterSeq);
+      if (plan.resetRequired) {
+        sendData({
+          type: "reset",
+          turnId: record.id,
+          reason: plan.reason || "gap",
+          firstSeq: plan.firstSeq,
+          lastSeq: plan.lastSeq,
+        });
+      }
       ping = setInterval(() => {
         if (closed) return;
         try {
@@ -97,7 +117,7 @@ function streamTurn(record: TurnRecord, afterSeq: number): Response {
           ping = null;
         }
       }, 2000);
-      const unsubscribe = turnRegistry.subscribe(record.id, afterSeq, send, close);
+      const unsubscribe = turnRegistry.subscribe(record.id, plan.from, send, close);
       cleanup = () => {
         unsubscribe();
         if (ping) clearInterval(ping);
@@ -249,14 +269,19 @@ chatRouter.get("/:turnId/snapshot", async (c) => {
     turn = turnRegistry.restore(loaded);
   }
   const afterSeq = parseAfterSeq(c.req.query("after"));
-  const events = turn.events.filter((event) => event.seq > afterSeq);
+  const plan = turnRegistry.replayPlan(turn.id, afterSeq);
+  const events = turn.events.filter((event) => event.seq > plan.from);
   return json({
     ok: true,
     turnId: turn.id,
     agentId: turn.agentId,
     sessionId: turn.sessionId,
     status: turn.status,
-    lastSeq: turn.events.at(-1)?.seq || 0,
+    firstSeq: plan.firstSeq,
+    lastSeq: plan.lastSeq,
+    fromSeq: plan.from,
+    resetRequired: plan.resetRequired,
+    ...(plan.reason ? { resetReason: plan.reason } : {}),
     events,
   });
 });

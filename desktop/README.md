@@ -36,6 +36,13 @@ turn。没有 finish 的 turn 视为中断，恢复时只追加一次 terminal e
 **不会把 prompt 再发给 Agent**。写盘按 50ms 合并，turn 结束和 Host 退出时
 强制 flush；默认保留 7 天或最近 500 个 turn。
 
+前端 thread 还保存一个 `activeTurn` 指针（`turnId`、`lastSeq`、
+`persistedSeq`、状态、assistantId）。流式期间每 1.5 秒冻结一次消息；页面
+刷新或新窗口恢复 thread 时会自动 `GET /chat/:turnId/follow`，从已经持久化
+的 seq 继续，不重新发送 prompt。服务端在事件被裁剪或客户端 seq 超前时发送
+`reset` 帧并重建气泡；SSE 干净 EOF 但没有 `done` 会作为 interrupted 重试，
+不会静默当成正常结束。
+
 ## 退出/更新保护
 
 主进程在关闭最后一个窗口、普通退出和安装更新前请求

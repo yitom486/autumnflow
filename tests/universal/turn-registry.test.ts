@@ -56,4 +56,35 @@ describe("turn ledger", () => {
     registry.subscribe("missing", 0, () => {}, end);
     expect(end).toHaveBeenCalledTimes(1);
   });
+
+  it("reports gap/ahead replay plans for trimmed or restored windows", () => {
+    registry = new TurnRegistry();
+    registry.restore({
+      turnId: "turn-gap",
+      agentId: "codex",
+      sessionId: "s",
+      status: "done",
+      startedAt: 1,
+      events: [
+        { seq: 10, data: { type: "update", n: 10 } },
+        { seq: 11, data: { type: "done" } },
+      ],
+    });
+    expect(registry.replayPlan("turn-gap", 5)).toMatchObject({
+      from: 9,
+      firstSeq: 10,
+      lastSeq: 11,
+      resetRequired: true,
+      reason: "gap",
+    });
+    expect(registry.replayPlan("turn-gap", 12)).toMatchObject({
+      from: 9,
+      resetRequired: true,
+      reason: "ahead",
+    });
+    expect(registry.replayPlan("turn-gap", 9)).toMatchObject({
+      from: 9,
+      resetRequired: false,
+    });
+  });
 });

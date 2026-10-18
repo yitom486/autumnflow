@@ -34,6 +34,7 @@ import {
   useAgentConfig,
   useSessionLifecycle,
   useChatSend,
+  useTurnRecovery,
   useEmptySessionCleanup,
 } from "@/hooks";
 import { isDefaultSessionTitle, isThreadEmpty, titleForThread, type ChatThread } from "@/lib/threads";
@@ -203,6 +204,9 @@ export default function App() {
     activeThreadId: s.activeThreadId,
     currentWorkspace: s.currentWorkspace,
   });
+
+  // Refresh/window recovery: reattach an accepted turn from its last seq.
+  useTurnRecovery();
 
   // Dynamic forward-reference for ensureSession between useAgentConfig & useSessionLifecycle
   const ensureSessionRef = useRef<(agentId?: string, force?: boolean) => Promise<string | null>>(async () => null);

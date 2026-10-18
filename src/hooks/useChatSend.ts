@@ -29,6 +29,7 @@ import {
 import { resolveToolDisplayTitle } from "@/components/assistant/tool-widget-utils";
 import { titleForThread } from "@/lib/threads";
 import { FrameBatcher } from "@/lib/frame-batcher";
+import { clearTurnLive, markTurnLive } from "@/lib/live-turns";
 
 export interface UseChatSendOptions {
   qc: QueryClient;
@@ -203,6 +204,7 @@ export function useChatSend({
       // need to flush any coalesced tail before stamping the turn end.
       let flushPending = () => {};
       let disposeBatching = () => {};
+      let stopPersisting = () => {};
       const beginTurn = (initialHint?: string) => {
         const current = useStudioStore.getState();
         if (turnStarted && current.messages.some((m) => m.id === assistantId)) {
@@ -231,6 +233,17 @@ export function useChatSend({
           startedAt: Date.now(),
           statusHint: initialHint,
         });
+        current.setActiveTurn({
+          turnId,
+          lastSeq: 0,
+          status: "running",
+          assistantId,
+          startedAt: Date.now(),
+        });
+        markTurnLive(turnId);
+        // Persist the user prompt immediately so a refresh during the first
+        // second can still reattach instead of showing an empty conversation.
+        useStudioStore.getState().snapshotThread();
       };
       abortRef.current = new AbortController();
 
@@ -275,6 +288,9 @@ export function useChatSend({
         // automatically with backoff; the retry note is stripped on success.
         // Anything else (abort/auth/semantic) falls through to the handlers below.
         let attempt = 0;
+        // Once the server has accepted the turn, retries must be read-only
+        // GET /follow; only a pre-accept failure may POST the prompt again.
+        let accepted = false;
         // Highest SSE sequence already rendered. Sent back as afterSeq so a
         // reconnect replays only the missing tail, never duplicate chunks.
         let lastSeq = 0;
@@ -304,6 +320,21 @@ export function useChatSend({
           textBatcher.dispose();
           thoughtBatcher.dispose();
         };
+        const persistActiveTurn = () => {
+          const st = useStudioStore.getState();
+          if (st.activeTurn?.turnId !== turnId) return;
+          st.snapshotThread();
+        };
+        const persistTimer = setInterval(persistActiveTurn, 1500);
+        const onPageHide = () => {
+          flushPending();
+          persistActiveTurn();
+        };
+        window.addEventListener("pagehide", onPageHide);
+        stopPersisting = () => {
+          clearInterval(persistTimer);
+          window.removeEventListener("pagehide", onPageHide);
+        };
         // Terminal error reporting (auth modal, ❌ note, turn stamp).
         // Stale retry notes are stripped first so a dead "retrying…" line
         // never survives next to the final error.
@@ -325,6 +356,7 @@ export function useChatSend({
             ...m,
             content: stripRetryNotes(m.content) + `\n\n> ❌ [${agentId}] ${err.message}${diagnosticHint}`,
           }));
+          c2.patchActiveTurn({ status: "error", lastSeq });
           stampTurnEnd(assistantId);
         };
         // Retryable when: budget left, not user-aborted, transport-level failure.
@@ -341,8 +373,24 @@ export function useChatSend({
               {
             onSequence: (seq) => {
               lastSeq = seq;
+              useStudioStore.getState().patchActiveTurn({ lastSeq: seq });
+            },
+            onReset: (reset) => {
+              if (reset.reason !== "gap" && reset.reason !== "ahead") return;
+              // The server retained only a suffix (or we are ahead of it).
+              // Rebuild the assistant bubble from the retained replay instead
+              // of duplicating a prefix we can no longer reconcile.
+              lastSeq = Math.max(0, reset.firstSeq - 1);
+              useStudioStore.getState().patchActiveTurn({ lastSeq });
+              useStudioStore.getState().patchMessage(assistantId, (m) => ({
+                ...m,
+                content: "",
+                thought: "",
+                toolCalls: [],
+              }));
             },
             onConnect: () => {
+              accepted = true;
               // 传输通道连接就绪，不写入虚假「深入思考」文案，等待后端下发首个真实事件
             },
             onSessionId: (id) => {
@@ -538,6 +586,7 @@ export function useChatSend({
             onElicitationClosed: (id) => useStudioStore.getState().removeElicitation(id),
             onDone: (_stopReason, resp) => {
               flushPending();
+              useStudioStore.getState().patchActiveTurn({ status: "done", lastSeq });
               if (resp && (resp.usage || resp._meta)) {
                 const extras = pickUsageExtras({ ...(resp.usage || {}), _meta: resp._meta });
                 const c2 = useStudioStore.getState();
@@ -578,7 +627,8 @@ export function useChatSend({
               reportError(err);
             },
           },
-          abortRef.current.signal
+          abortRef.current.signal,
+          { follow: accepted && attempt > 0 }
           );
           lastSeq = result.lastEventId ?? lastSeq;
         } catch (e: any) {
@@ -673,10 +723,18 @@ export function useChatSend({
           stampTurnEnd(assistantId);
         }
       } finally {
+        stopPersisting();
+        clearTurnLive(turnId);
         flushPending();
         disposeBatching();
         sendingRef.current = false;
         const c2 = useStudioStore.getState();
+        if (c2.activeTurn?.turnId === turnId && c2.activeTurn.status === "running") {
+          c2.patchActiveTurn({
+            status: abortRef.current?.signal.aborted ? "interrupted" : "error",
+            lastSeq: c2.activeTurn.lastSeq,
+          });
+        }
         c2.setStreaming(false);
         c2.setBusy(false);
         stampTurnEnd(assistantId);

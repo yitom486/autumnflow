@@ -82,6 +82,32 @@ export class TurnRegistry {
     return [...this.turns.values()].filter((turn) => turn.status === "running");
   }
 
+  /** Where a replay must start, and whether the requested window is incomplete. */
+  replayPlan(
+    id: string,
+    afterSeq: number
+  ): { from: number; firstSeq: number; lastSeq: number; resetRequired: boolean; reason?: "gap" | "ahead" } {
+    const record = this.turns.get(id);
+    if (!record || record.events.length === 0) {
+      return {
+        from: 0,
+        firstSeq: 0,
+        lastSeq: 0,
+        resetRequired: afterSeq > 0,
+        ...(afterSeq > 0 ? { reason: "ahead" as const } : {}),
+      };
+    }
+    const firstSeq = record.events[0].seq;
+    const lastSeq = record.events[record.events.length - 1].seq;
+    if (afterSeq > lastSeq) {
+      return { from: Math.max(0, firstSeq - 1), firstSeq, lastSeq, resetRequired: true, reason: "ahead" };
+    }
+    if (afterSeq < firstSeq - 1) {
+      return { from: Math.max(0, firstSeq - 1), firstSeq, lastSeq, resetRequired: true, reason: "gap" };
+    }
+    return { from: afterSeq, firstSeq, lastSeq, resetRequired: false };
+  }
+
   /**
    * Rebuild a turn from the persistent journal. A file without a finish line
    * is an interrupted turn: append a terminal error instead of prompting the

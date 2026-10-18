@@ -51,6 +51,16 @@ describe("chat turn idempotency", () => {
     expect(snapshotJson.status).toBe("done");
     expect(snapshotJson.events.map((event: any) => event.seq)).toEqual([3]);
     expect(snapshotJson.lastSeq).toBe(3);
+    expect(snapshotJson.firstSeq).toBe(1);
+    expect(snapshotJson.resetRequired).toBe(false);
+
+    const reset = await chatRouter.request(
+      "http://localhost/turn-idem-1/follow?after=99"
+    );
+    const resetText = await reset.text();
+    expect(resetText).toContain('"type":"reset"');
+    expect(resetText).toContain('"reason":"ahead"');
+    expect(prompt).toHaveBeenCalledTimes(1);
   });
 
   it("replays only events after afterSeq", async () => {

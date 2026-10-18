@@ -18,6 +18,7 @@ import {
   threadForAgent,
   titleForThread,
   toEnvironmentNativeCwd,
+  type ActiveTurn,
   type ChatThread,
 } from "@/lib/threads";
 
@@ -83,6 +84,8 @@ interface StudioState {
   sessionInfo: any;
   // thread
   messages: Message[];
+  /** Durable pointer used by refresh/window recovery to follow a live turn. */
+  activeTurn: ActiveTurn | null;
   // composer
   input: string;
   attachments: Attachment[];
@@ -145,6 +148,8 @@ interface StudioState {
   setMessages: (m: Message[]) => void;
   appendMessage: (m: Message) => void;
   patchMessage: (id: string, patch: Partial<Message> | ((m: Message) => Message)) => void;
+  setActiveTurn: (turn: ActiveTurn | null) => void;
+  patchActiveTurn: (patch: Partial<ActiveTurn>) => void;
   setInput: (v: string) => void;
   setAttachments: (a: Attachment[]) => void;
   setStreaming: (v: boolean) => void;
@@ -198,6 +203,7 @@ function cmdsFor(s: { commandsBySession: Record<string, SlashCommand[]> }, agent
 
 const initialThread = {
   messages: [] as Message[],
+  activeTurn: null as ActiveTurn | null,
   sessionError: null as string | null,
   sessionLoading: false as boolean,
   modes: null as ModeState | null,
@@ -679,6 +685,9 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
     set((s) => ({
       messages: s.messages.map((m) => (m.id === id ? (typeof patch === "function" ? patch(m) : { ...m, ...patch }) : m)),
     })),
+  setActiveTurn: (turn) => set({ activeTurn: turn }),
+  patchActiveTurn: (patch) =>
+    set((s) => ({ activeTurn: s.activeTurn ? { ...s.activeTurn, ...patch } : null })),
   setInput: (v) => set({ input: v }),
   setAttachments: (a) => set({ attachments: a }),
   setStreaming: (v) => set({ isStreaming: v }),
@@ -754,6 +763,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
         stale: prev?.stale ? true : undefined,
         cwd: s.currentWorkspace ?? prev?.cwd ?? null,
         messages: s.messages,
+        activeTurn: s.activeTurn ? { ...s.activeTurn, persistedSeq: s.activeTurn.lastSeq } : undefined,
         // Preserve the thread's MCP servers across snapshots (auto new/resume).
         mcpServers: prev?.mcpServers,
         updatedAt: Date.now(),
@@ -774,6 +784,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       models: cached?.models ?? null,
       configOptions: cached?.configOptions ?? null,
       messages: t.messages.map((m) => ({ ...m })),
+      activeTurn: t.activeTurn ?? null,
       // A stale thread is a read-only historical transcript: showing its dead
       // id as the live session is what made resume/ensureSession loop forever.
       sessionId: t.stale ? null : t.sessionId,
@@ -867,6 +878,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
         availableCommands: cmdsFor(st, agentId, sessionId),
         activeThreadId: existing.id,
         messages: mergeAssistantTurns(existing.messages).map((m) => ({ ...m })),
+        activeTurn: existing.activeTurn ?? null,
         sessionInfo: {
           ...(st.sessionInfo || {}),
           title: titleForThread(existing) || title || st.sessionInfo?.title,
