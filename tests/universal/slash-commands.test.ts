@@ -99,7 +99,7 @@ describe("gateway: available_commands_update cache", () => {
   it("caches commands that arrive before anyone subscribes", async () => {
     const conn = new AgentConnection({ id: "mock", name: "mock", title: "Mock", command: "true", args: [] } as never);
     expect(conn.getAvailableCommands("s1")).toBeUndefined();
-    setTimeout(() => (conn as any).sessionCommands.set("s1", [{ name: "x", input: { hint: "h" } }]), 40);
+    setTimeout(() => (conn as any).state.commands.set("s1", [{ name: "x", input: { hint: "h" } }]), 40);
     expect(await conn.awaitAvailableCommands("s1", 200)).toEqual([{ name: "x", input: { hint: "h" } }]);
     expect(await conn.awaitAvailableCommands("none", 50)).toBeUndefined();
   });

@@ -105,8 +105,9 @@ async function main(): Promise<void> {
     }
   );
   // Never cut long-lived SSE streams.
-  netServer.requestTimeout = 0;
-  netServer.headersTimeout = 0;
+  const httpServer = netServer as unknown as { requestTimeout: number; headersTimeout: number };
+  httpServer.requestTimeout = 0;
+  httpServer.headersTimeout = 0;
   // PTY WebSocket upgrade belongs to the host, never the Electron UI process.
   await attachPtyUpgrade(netServer as never);
   send({ type: "ready", port: PORT });

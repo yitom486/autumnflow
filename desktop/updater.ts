@@ -47,13 +47,18 @@ function broadcast(payload: unknown) {
   for (const w of BrowserWindow.getAllWindows()) if (!w.isDestroyed()) w.webContents.send("update:event", payload);
 }
 
-function notifyIfBackground(title: string, body: string) {
+function notifyIfBackground(title: string, body: string, onOpenWindow?: () => void) {
   const anyFocused = BrowserWindow.getAllWindows().some((w) => w.isFocused());
   if (anyFocused || !Notification.isSupported()) return;
   const n = new Notification({ title, body });
   n.on("click", () => {
     const w = BrowserWindow.getAllWindows()[0];
-    if (!w) return;
+    if (!w) {
+      // Background residency: there is no window to focus, so ask the shell to
+      // recreate one instead of dropping the notification on the floor.
+      onOpenWindow?.();
+      return;
+    }
     if (w.isMinimized()) w.restore();
     w.focus();
     w.webContents.send("app:command", "settings.about");
@@ -74,6 +79,8 @@ export function checkForUpdatesFromMenu() {
 export interface UpdaterOptions {
   /** Native confirmation before quitting into an update; false cancels install. */
   beforeInstall?: () => Promise<boolean>;
+  /** Recreate a window when an update notification is clicked while resident. */
+  onOpenWindow?: () => void;
 }
 
 export function initUpdater(options: UpdaterOptions = {}) {
@@ -153,12 +160,12 @@ export function initUpdater(options: UpdaterOptions = {}) {
       notes: typeof u.releaseNotes === "string" ? u.releaseNotes : undefined,
       canAutoInstall: autoInstall,
     });
-    notifyIfBackground("AutumnFlow 有新版本", `${u.version} 可以更新了`);
+    notifyIfBackground("AutumnFlow 有新版本", `${u.version} 可以更新了`, options.onOpenWindow);
   });
   autoUpdater.on("download-progress", (p) => broadcast({ type: "progress", percent: p.percent }));
   autoUpdater.on("update-downloaded", (u) => {
     broadcast({ type: "downloaded", version: u.version });
-    notifyIfBackground("AutumnFlow 更新已就绪", `${u.version} 已下载，重启即可完成更新`);
+    notifyIfBackground("AutumnFlow 更新已就绪", `${u.version} 已下载，重启即可完成更新`, options.onOpenWindow);
   });
   autoUpdater.on("error", (e) => broadcast({ type: "error", message: String(e?.message || e), manual: manualCheck }));
 

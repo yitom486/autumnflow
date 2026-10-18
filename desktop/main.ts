@@ -3,7 +3,7 @@
  * Starts the Node gateway in-process, then opens the Studio window on it.
  * Dev: ELECTRON_DEV=1 ELECTRON_START_URL=http://localhost:5188 (external vite+gateway).
  */
-import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, shell } from "electron";
+import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { fork, type ChildProcess } from "node:child_process";
@@ -14,6 +14,13 @@ import { initUpdater, checkForUpdatesFromMenu } from "./updater";
 import { buildAppMenu, type MenuActions } from "./menu";
 import { addRecent, loadRecent } from "./recent";
 import { isTrustedSenderUrl } from "./sender-policy";
+import {
+  BackgroundKeeper,
+  IDLE_EXIT_CHOICES,
+  readBackgroundSettings,
+  writeBackgroundSettings,
+  type BackgroundSettings,
+} from "./background-policy";
 import {
   RendererConsoleTail,
   pruneCrashReports,
@@ -224,6 +231,221 @@ async function confirmActiveWork(action: "quit" | "install"): Promise<boolean> {
   return true;
 }
 
+// ---- 后台常驻（混合策略） ----
+// 关掉最后一个窗口时：没有进行中的任务就照常退出；有活跃任务（对话轮次 / 终端 /
+// 待确认权限 / 子智能体）则缩到托盘继续跑，任务全部结束后发系统通知，空闲超过
+// 设定时长（默认 30 分钟）自动退出。托盘菜单可以改这个时长，也可以立刻退出。
+const backgroundDir = () => app.getPath("userData");
+let backgroundSettings: BackgroundSettings = readBackgroundSettings(backgroundDir());
+let tray: Tray | null = null;
+let backgroundTimer: ReturnType<typeof setInterval> | null = null;
+let backgroundPollInFlight = false;
+let backgroundHintShown = false;
+let quitting = false;
+
+const backgroundKeeper = new BackgroundKeeper({
+  settings: backgroundSettings,
+  onAllWorkDone: () => notifyBackground("后台任务已完成", "AutumnFlow 里已经没有进行中的任务了。"),
+  onIdleExit: () => {
+    console.log(`[Electron] 后台空闲超过 ${backgroundSettings.idleExitMinutes} 分钟，自动退出`);
+    quitApp();
+  },
+});
+
+function quitApp(): void {
+  quitting = true;
+  app.quit();
+}
+
+function notifyBackground(title: string, body: string): void {
+  if (!Notification.isSupported()) return;
+  try {
+    const notification = new Notification({ title, body });
+    notification.on("click", () => openMainWindow());
+    notification.show();
+  } catch (err) {
+    console.warn("[Electron] background notification failed:", err);
+  }
+}
+
+function trayImage(): Electron.NativeImage | undefined {
+  const icon = getAppIcon();
+  if (!icon || icon.isEmpty()) return undefined;
+  try {
+    return icon.resize({ width: process.platform === "darwin" ? 22 : 16, height: process.platform === "darwin" ? 22 : 16 });
+  } catch {
+    return icon;
+  }
+}
+
+function openMainWindow(): void {
+  leaveBackground();
+  const existing = win && !win.isDestroyed() ? win : [...windows].find((w) => !w.isDestroyed());
+  if (existing) {
+    if (existing.isMinimized()) existing.restore();
+    if (!existing.isVisible()) existing.show();
+    existing.focus();
+    return;
+  }
+  void createWindow().catch(reportStartupFailure);
+}
+
+function refreshTrayMenu(): void {
+  if (!tray) return;
+  tray.setContextMenu(
+    Menu.buildFromTemplate([
+      { label: "打开 AutumnFlow", click: () => openMainWindow() },
+      { type: "separator" },
+      {
+        label: "空闲后自动退出",
+        submenu: IDLE_EXIT_CHOICES.map((minutes) => ({
+          label: minutes === 0 ? "不自动退出" : `${minutes} 分钟`,
+          type: "radio" as const,
+          checked: backgroundSettings.idleExitMinutes === minutes,
+          click: () => {
+            backgroundSettings = { ...backgroundSettings, idleExitMinutes: minutes };
+            writeBackgroundSettings(backgroundDir(), backgroundSettings);
+            backgroundKeeper.updateSettings(backgroundSettings);
+            refreshTrayMenu();
+          },
+        })),
+      },
+      { type: "separator" },
+      { label: "退出 AutumnFlow", click: () => quitApp() },
+    ])
+  );
+}
+
+function showTray(): void {
+  if (tray) return;
+  const image = trayImage();
+  if (!image) {
+    console.warn("[Electron] 托盘图标缺失，后台常驻将没有托盘入口");
+    return;
+  }
+  tray = new Tray(image);
+  tray.setToolTip("AutumnFlow · 任务仍在后台运行");
+  refreshTrayMenu();
+  tray.on("double-click", () => openMainWindow());
+}
+
+function enterBackground(reason: string): void {
+  if (tray || backgroundTimer) return;
+  backgroundKeeper.begin();
+  showTray();
+  backgroundTimer = setInterval(() => void pollBackground(), 4000);
+  void pollBackground();
+  if (!backgroundHintShown) {
+    backgroundHintShown = true;
+    notifyBackground("AutumnFlow 仍在后台运行", "关闭窗口不会中断任务。双击托盘图标可以重新打开，或从托盘菜单退出。");
+  }
+  console.log(`[Electron] 窗口已关闭但保留后台运行（${reason}）`);
+}
+
+function leaveBackground(): void {
+  if (!tray && !backgroundTimer) return;
+  backgroundKeeper.end();
+  if (backgroundTimer) clearInterval(backgroundTimer);
+  backgroundTimer = null;
+  if (tray) {
+    tray.destroy();
+    tray = null;
+  }
+}
+
+/**
+ * One background sample. A dead/unreachable host means the tray would point at
+ * nothing, so residency ends there instead of lingering.
+ */
+async function pollBackground(): Promise<void> {
+  if (backgroundPollInFlight || quitting) return;
+  backgroundPollInFlight = true;
+  try {
+    const work = await inspectActiveWork();
+    if (!work) {
+      console.warn("[Electron] 后台巡检拿不到 active-work，停止常驻");
+      leaveBackground();
+      quitApp();
+      return;
+    }
+    if (tray) tray.setToolTip(`AutumnFlow · ${work.count > 0 ? `${work.count} 项任务进行中` : "空闲中"}`);
+    if (!backgroundKeeper.markWork(work.count)) {
+      leaveBackground();
+      quitApp();
+    }
+  } finally {
+    backgroundPollInFlight = false;
+  }
+}
+
+/** window-all-closed：有活跃工作才常驻，否则保持原来的“关窗即退出”。 */
+async function exitOrStayResident(): Promise<void> {
+  if (quitting || activeWorkConfirmed) {
+    app.quit();
+    return;
+  }
+  if (!isDev && gateway && backgroundSettings.enabled) {
+    const work = await inspectActiveWork();
+    if (work && work.count > 0) {
+      enterBackground(work.summary || `${work.count} 项进行中`);
+      return;
+    }
+  }
+  app.quit();
+}
+
+let hostRestarts = 0;
+let hostRecovering = false;
+const HOST_RESTART_DELAYS = [1000, 3000, 8000];
+
+/**
+ * A long-lived shell must not go silent when the host dies: a tray icon with no
+ * backend is worse than a crashed window. Restart with backoff, reload windows.
+ */
+async function handleHostLoss(child: ChildProcess, kind: string, error: Error): Promise<void> {
+  if (hostRecovering) return;
+  if (gateway && gateway.child !== child) return; // superseded by a newer host
+  hostRecovering = true;
+  try {
+    gateway = null;
+    gatewayReady = false;
+    const attempt = hostRestarts;
+    if (quitting || attempt >= HOST_RESTART_DELAYS.length) {
+      leaveBackground();
+      dialog.showErrorBox(
+        "AutumnFlow 后端已退出",
+        `${error.message.split("\n")[0]}\n\n已尝试自动恢复 ${attempt} 次。诊断日志已写入用户数据目录。`
+      );
+      quitApp();
+      return;
+    }
+    hostRestarts += 1;
+    const delay = HOST_RESTART_DELAYS[attempt];
+    console.warn(`[Electron] 后端${kind}异常，${delay}ms 后第 ${hostRestarts} 次自动恢复`);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+    if (quitting) return;
+    try {
+      await startGateway();
+    } catch (err) {
+      const next = err instanceof Error ? err : new Error(String(err));
+      recordCrash("child", "running", next);
+      hostRecovering = false;
+      await handleHostLoss(child, "重启失败", next);
+      return;
+    }
+    // A host that stays up for a minute resets the backoff budget.
+    setTimeout(() => {
+      hostRestarts = 0;
+    }, 60_000).unref?.();
+    for (const w of windows) {
+      if (!w.isDestroyed()) w.webContents.reload();
+    }
+    if (windows.size === 0) notifyBackground("后端已重启", "后台服务已恢复；正在运行的轮次已中断。");
+  } finally {
+    hostRecovering = false;
+  }
+}
+
 async function startGateway() {
   // 本函数只在 !isDev 时被调用：确保 token 已生成并进入进程环境，
   // 同一机器前后端共享同一 token。
@@ -299,10 +521,7 @@ async function startGateway() {
         if (!settled) {
           settle(error);
         } else {
-          gateway = null;
-          gatewayReady = false;
-          dialog.showErrorBox("AutumnFlow 后端异常", `${message.error || "Gateway host crashed"}`);
-          app.quit();
+          void handleHostLoss(child, "fatal", error);
         }
       }
     });
@@ -314,11 +533,8 @@ async function startGateway() {
         return;
       }
       if (!hostShuttingDown) {
-        gateway = null;
-        gatewayReady = false;
         recordCrash("child", "running", error);
-        dialog.showErrorBox("AutumnFlow 后端已退出", `${error.message.split("\n")[0]}\n\n诊断日志已写入用户数据目录。`);
-        app.quit();
+        void handleHostLoss(child, "退出", error);
       }
     });
   });
@@ -434,6 +650,8 @@ function assertOurSender(e: Electron.IpcMainInvokeEvent, channel: string): void 
 }
 
 async function createWindow(cwd?: string) {
+  // A visible window means the tray is no longer the only entry point.
+  leaveBackground();
   const isMac = process.platform === "darwin";
   const appIcon = getAppIcon();
   const initialOverlay = getSavedOverlayConfig();
@@ -464,11 +682,16 @@ async function createWindow(cwd?: string) {
   // 先登记再加载页面：渲染端一启动就会通过 gateway:getToken 校验“是否本应用窗口”
   windows.add(w);
   win = w;
-  w.webContents.on("console-message", (_event, details) => {
-    if (details.level >= 3) {
-      rendererConsole.push(`[${new Date().toISOString()}] ${details.message}`);
-    }
-  });
+  // Electron ≥35 passes (event, details); older builds passed
+  // (event, level, message, line, sourceId). Accept both so renderer warnings
+  // keep reaching crash reports on either shape.
+  w.webContents.on("console-message", ((...args: any[]) => {
+    const details = args[1];
+    const level = typeof details === "number" ? details : details?.level;
+    const message = typeof details === "number" ? String(args[2] ?? "") : String(details?.message ?? "");
+    const severe = typeof level === "number" ? level >= 3 : level === "error" || level === "warning";
+    if (severe) rendererConsole.push(`[${new Date().toISOString()}] ${message}`);
+  }) as never);
   w.webContents.on("render-process-gone", (_event, details) => {
     recordCrash(
       "renderer",
@@ -484,6 +707,9 @@ async function createWindow(cwd?: string) {
   let closeCheckInFlight = false;
   w.on("close", (event) => {
     if (allowClose || !gateway || activeWorkConfirmed || windows.size > 1) return;
+    // 常驻模式：关窗不再等于退出，也不该弹“仍有任务在运行”的阻断对话框。
+    // 缩到托盘还是直接退出，统一由 window-all-closed 的 active-work 巡检决定。
+    if (backgroundSettings.enabled && !isDev) return;
     event.preventDefault();
     if (closeCheckInFlight) return;
     closeCheckInFlight = true;
@@ -727,6 +953,7 @@ if (!app.requestSingleInstanceLock()) {
   app.quit();
 } else {
   app.on("second-instance", (_e, argv) => {
+    leaveBackground();
     // 第二次启动带了目录参数（如 `acp-studio .`）→ 新窗口打开该目录；否则聚焦已有窗口
     const dir = argv.slice(1).reverse().find((a) => !a.startsWith("-") && fs.existsSync(a) && fs.statSync(a).isDirectory());
     if (dir) {
@@ -745,7 +972,7 @@ if (!app.requestSingleInstanceLock()) {
     if (!isDev) await startGateway();
     buildAppMenu(menuActions, { isDev });
     await createWindow();
-    initUpdater({ beforeInstall: () => confirmActiveWork("install") });
+    initUpdater({ beforeInstall: () => confirmActiveWork("install"), onOpenWindow: () => openMainWindow() });
   }).catch(reportStartupFailure);
 
   app.on("activate", () => {
@@ -753,7 +980,7 @@ if (!app.requestSingleInstanceLock()) {
   });
 
   app.on("window-all-closed", () => {
-    if (process.platform !== "darwin") app.quit();
+    if (process.platform !== "darwin") void exitOrStayResident();
   });
 
   let quitAfterHostShutdown = false;
@@ -766,18 +993,33 @@ if (!app.requestSingleInstanceLock()) {
   let quitCheckInFlight = false;
   app.on("before-quit", (event) => {
     if (quitAfterHostShutdown) return;
+    quitting = true;
+    leaveBackground();
     if (gateway && !activeWorkConfirmed && !quitCheckInFlight) {
       event.preventDefault();
       quitCheckInFlight = true;
       void confirmActiveWork("quit")
         .then((ok) => {
           quitCheckInFlight = false;
-          if (ok) app.quit();
+          if (ok) {
+            app.quit();
+            return;
+          }
+          // User chose to keep working: put the tray back that quitting removed.
+          quitting = false;
+          if (windows.size === 0 && !isDev && gateway && backgroundSettings.enabled) {
+            enterBackground("已取消退出");
+          } else if (windows.size === 0) {
+            // Residency is off, so a cancelled quit would otherwise leave a
+            // window-less app: hand the user a window back.
+            openMainWindow();
+          }
         })
         .catch((err) => {
           console.error("[Electron] active-work quit check failed:", err);
           quitCheckInFlight = false;
           activeWorkConfirmed = true;
+          quitting = true;
           app.quit();
         });
       return;

@@ -118,6 +118,7 @@
     "dev:client": "vite",
     "acp:stdio": "bunx @yitom/agy-acp-map@latest",
     "build": "tsc && vite build",
+    "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.desktop.json",
     "build:electron": "bun desktop/build.ts",
     "stage:desktop": "bun desktop/stage.ts",
     "package:win": "bun desktop/stage.ts win32 && bunx electron-builder --win nsis dir --publish never",

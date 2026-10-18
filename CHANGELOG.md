@@ -10,11 +10,21 @@
 ## [Unreleased]
 
 ### Fixed
+- 修复取消后立刻重发导致 prompt 互斥锁失效：`session/cancel` 只是通知，被取消 turn 的 `finally` 会释放**下一个** turn 刚拿到的锁，使同一会话出现并发 prompt（409 保护形同虚设）。改为带租约令牌的 `PromptLock`：旧 turn 只能释放自己的租约，取消时按抢占处理；Agent 进程退出时重置全部租约，崩溃后不会留下永久 409 的会话。
+- 修复 per-session 内存只增不减：`sessionCommands` / `childUpdates`（每子会话最多 200 条 update）/ `childStates` / `childParents` / `releasedTerminals` 原先只在进程断开时清理，长跑 Host 下随会话数持续增长。现由 `SessionState` 单一所有者持有，`session/close`、`session/delete` 时连同子智能体会话一起回收。
+- 修复关闭窗口时仍弹「仍有任务在运行」阻断框：常驻模式下关窗不再等于退出，改为由 `window-all-closed` 的 active-work 巡检决定缩到托盘还是正常退出；显式「退出」与安装更新仍保留原确认。
+- 修复渲染端 console 事件在 Electron ≥35 下取不到内容：`console-message` 第二参数已从 `level` 变为 `details` 对象，崩溃报告里的 error 级日志因此一直为空；两种签名都兼容。
+- 修复 `desktop/host.ts` 与 `desktop/main.ts` 在 Electron 44 类型下的两处编译错误，桌面端自此纳入类型检查。
 - 修复发行版点击「新会话」/「点击加载模型」时 `e.trim is not a function` 崩溃：新会话按钮把 React 点击事件当作 `targetCwd` 传入 `setWorkspace`，现已在 UI 接线、hook 入口与路径工具三层做类型收口。
 - 修复跨智能体会话串绑：切换 Agent 时清空上一 Agent 的 live session/messages，并丢弃 `session/new`、`resume`、`fork`、模型发现等迟到结果；历史线程按 Agent 隔离恢复。
 - 修复失效会话把 UI 卡在历史视图：resume 失败后清除 live `sessionId`（历史记录仍保留），「点击加载模型」会强制新建会话并载入模型；无效/过期 session id 不再被裸绑定，重复失败会保留 stale 标记。
 
+### Changed
+- 内部拆分（对外行为不变）：`UniversalAgentConnection` 拆成四个单一职责模块——`AcpTransport`（进程 / NDJSON 流 / initialize / 退出）、`SessionService`（new/load/resume/fork/list/close/delete 与会话元数据回收）、`PromptTurn`（prompt 租约、取消、首轮兼容块）、`SessionState`（per-session 内存的唯一回收点），facade 从 1005 行降到约 620 行，只保留 permission / fs / terminal / subagent / quota 语义与广播，HTTP 路由与对外 API 完全不变。桌面端同时纳入类型检查：新增 `tsconfig.desktop.json` 与 `bun run typecheck`，Electron 主进程/preload/host 与 server/shared 一起过 `tsc`。
+
 ### Added
+- 后台常驻（混合策略）：关闭最后一个窗口时，若仍有运行中的 turn / 终端 / 待确认权限 / 子任务，则缩到托盘继续跑（首个窗口关闭时提示一次）；任务全部结束发系统通知；空闲 30 分钟自动退出（托盘菜单可改 5/15/60 分钟或永不）；双击托盘、托盘菜单、第二实例启动都会重新创建窗口并自动 `GET /chat/:turnId/follow` 接回仍在跑的那一轮。
+- 后端崩溃自动恢复：Host 异常退出时按 1s/3s/8s 退避重启（最多 3 次），成功后重载窗口，稳定 1 分钟后重置预算；托盘常驻期间恢复失败会结束常驻并报错，不再出现「图标还在、后端已死」。
 - 会话列表与顶栏显示人类可读的会话名称：优先使用 Agent `session/list` / `session_info_update` 提供的标题，回退到首条用户消息生成的标题；不再把裸 session id 当作会话名展示（id 仅保留在悬停提示与检索中）。
 - 空会话自动收敛：已知无用户/助手内容的空会话立即从列表隐藏，并在闲置后 best-effort 删除；另每分钟对 Agent 侧默认标题且超过 5 分钟未活动的空会话做一次保守清理，保留当前会话、已有内容和自定义标题。
 - 多终端浮动窗口：每个窗口独立 xterm + PTY/WebSocket，可同时开多个 shell；标题栏「+」新建窗口、点击置顶、窗口位置分别持久化，关闭单个窗口不影响其他终端。
