@@ -14,6 +14,7 @@ import {
   claudeAdapter,
   opencodeAdapter,
   cursorAdapter,
+  deepseekAdapter,
 } from "@yitom/acp-client";
 import type { AgentProfile, PendingElicitation, PendingPermission } from "./types";
 import {
@@ -155,6 +156,11 @@ export class UniversalAgentConnection {
         q = (await opencodeAdapter.probeQuota?.()) ?? null;
       } else if (id === "cursor-cli") {
         q = (await cursorAdapter.probeQuota?.()) ?? null;
+      } else if (id === "deepseek") {
+        // DSH's ACP surface has no account/quota channel; the adapter probes the
+        // official /user/balance endpoint with DEEPSEEK_API_KEY (no rate windows).
+        q = (await deepseekAdapter.probeQuota?.()) ?? null;
+        if (q) q.runtimeId = "deepseek";
       }
       if (q) {
         this.lastQuota = q;

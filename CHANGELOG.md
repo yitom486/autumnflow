@@ -23,6 +23,7 @@
 - 内部拆分（对外行为不变）：`UniversalAgentConnection` 拆成四个单一职责模块——`AcpTransport`（进程 / NDJSON 流 / initialize / 退出）、`SessionService`（new/load/resume/fork/list/close/delete 与会话元数据回收）、`PromptTurn`（prompt 租约、取消、首轮兼容块）、`SessionState`（per-session 内存的唯一回收点），facade 从 1005 行降到约 620 行，只保留 permission / fs / terminal / subagent / quota 语义与广播，HTTP 路由与对外 API 完全不变。桌面端同时纳入类型检查：新增 `tsconfig.desktop.json` 与 `bun run typecheck`，Electron 主进程/preload/host 与 server/shared 一起过 `tsc`。
 
 ### Added
+- DeepSeek 账户额度：配额卡片可以显示 DSH 登录账户的余额与身份（邮箱/昵称）。优先读取 `dsh` 自己维护的平台登录凭据（`$DSH_HOME/.credentials.yaml`，只读、不写、不记日志）查询平台钱包，其次用 `DEEPSEEK_API_KEY` 查官方 `/user/balance`；DeepSeek 没有公开的速率窗口，因此只展示余额，不伪造 5h/周额度。
 - 后台常驻（混合策略）：关闭最后一个窗口时，若仍有运行中的 turn / 终端 / 待确认权限 / 子任务，则缩到托盘继续跑（首个窗口关闭时提示一次）；任务全部结束发系统通知；空闲 30 分钟自动退出（托盘菜单可改 5/15/60 分钟或永不）；双击托盘、托盘菜单、第二实例启动都会重新创建窗口并自动 `GET /chat/:turnId/follow` 接回仍在跑的那一轮。
 - 后端崩溃自动恢复：Host 异常退出时按 1s/3s/8s 退避重启（最多 3 次），成功后重载窗口，稳定 1 分钟后重置预算；托盘常驻期间恢复失败会结束常驻并报错，不再出现「图标还在、后端已死」。
 - 会话列表与顶栏显示人类可读的会话名称：优先使用 Agent `session/list` / `session_info_update` 提供的标题，回退到首条用户消息生成的标题；不再把裸 session id 当作会话名展示（id 仅保留在悬停提示与检索中）。
