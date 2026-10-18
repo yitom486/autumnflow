@@ -10,6 +10,8 @@ import { sdkValue } from "../acp-sdk";
 import { universalRegistry } from "../registry";
 import { anyBody, gatewayError, json, jsonBody, optStr } from "./shared";
 import { probeLiveAgyQuota } from "../runtimes/agy-quota";
+import { readDeepseekCredentialState, saveDeepseekApiKey } from "../runtimes/deepseek-credentials";
+import { turnRegistry } from "../turn-registry";
 import { studioSessions } from "../session-index";
 
 export const agentsRouter = new Hono();
@@ -114,6 +116,51 @@ agentsRouter.get("/:agentId/status", (c) => {
     return json({ ok: true, status: conn.status(), init: conn.getInitResult() });
   } catch (err) {
     return json({ ok: false, error: (err as Error).message }, 404);
+  }
+});
+
+/**
+ * DeepSeek 凭据：ACP 没有“写凭据”的方法（DSH 的 authMethods 为空），所以这里
+ * 补一个受网关鉴权保护的入口，写入 DSH 自己的 user-env 层（`$DSH_HOME/.env`），
+ * 由 DSH 在下次 spawn 时读取。托管凭据仓库优先级更高，不会被这里覆盖。
+ */
+agentsRouter.get("/:agentId/credentials", (c) => {
+  const agentId = c.req.param("agentId");
+  if (agentId !== "deepseek") return json({ ok: false, error: "该智能体不支持在客户端配置凭据" }, 400);
+  try {
+    return json({ ok: true, ...readDeepseekCredentialState() });
+  } catch (err) {
+    return json({ ok: false, error: (err as Error).message }, 500);
+  }
+});
+
+const credentialsBody = z.looseObject({ apiKey: z.string().min(1).max(512) });
+agentsRouter.post("/:agentId/credentials", jsonBody(credentialsBody), (c) => {
+  const agentId = c.req.param("agentId");
+  if (agentId !== "deepseek") return json({ ok: false, error: "该智能体不支持在客户端配置凭据" }, 400);
+  const body = c.get("body") as { apiKey: string };
+  try {
+    const state = saveDeepseekApiKey(body.apiKey);
+    return json({ ok: true, ...state, restartRequired: true });
+  } catch (err) {
+    return json({ ok: false, error: (err as Error).message }, 400);
+  }
+});
+
+/** 让新写入的环境变量生效：先断开再重连；有运行中的轮次时拒绝。 */
+agentsRouter.post("/:agentId/reconnect", async (c) => {
+  const agentId = c.req.param("agentId");
+  try {
+    const running = turnRegistry.listRunning().filter((turn) => turn.agentId === agentId);
+    if (running.length > 0) {
+      return json({ ok: false, error: `该智能体还有 ${running.length} 个运行中的对话，结束或取消后再重连` }, 409);
+    }
+    const conn = universalRegistry.connFor(agentId);
+    await conn.disconnect().catch((err: Error) => console.debug(`[agents] reconnect disconnect failed ${agentId}:`, err));
+    await conn.connect();
+    return json({ ok: true, status: conn.status() });
+  } catch (err) {
+    return json({ ok: false, error: (err as Error).message }, 500);
   }
 });
 

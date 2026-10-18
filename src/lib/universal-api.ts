@@ -926,6 +926,43 @@ export async function agentQuota(agentId: string) {
   return res.json();
 }
 
+export interface AgentCredentialState {
+  ok: boolean;
+  configured: boolean;
+  source: "env" | "file" | "none";
+  /** DSH user-env 文件路径，便于界面展示来源。 */
+  path?: string;
+  restartRequired?: boolean;
+}
+
+/** 读取某智能体在本地 DSH 中的凭据状态（不回传密钥本身）。 */
+export async function getAgentCredentials(agentId: string): Promise<AgentCredentialState> {
+  const res = await apiFetch(`/api/universal/agents/${encodeURIComponent(agentId)}/credentials`);
+  const data = (await res.json()) as AgentCredentialState & { error?: string };
+  if (!data.ok) throwGatewayError(data, "credentials read failed", res.status);
+  return data;
+}
+
+/** 保存 API Key 到 DSH 的 user-env（`$DSH_HOME/.env`），下次 spawn 生效。 */
+export async function saveAgentApiKey(agentId: string, apiKey: string): Promise<AgentCredentialState> {
+  const res = await apiFetch(`/api/universal/agents/${encodeURIComponent(agentId)}/credentials`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ apiKey }),
+  });
+  const data = (await res.json()) as AgentCredentialState & { error?: string };
+  if (!data.ok) throwGatewayError(data, "credentials save failed", res.status);
+  return data;
+}
+
+/** 断开并重连，让新的环境变量生效；有运行中的轮次时服务端返回 409。 */
+export async function reconnectAgent(agentId: string) {
+  const res = await apiFetch(`/api/universal/agents/${encodeURIComponent(agentId)}/reconnect`, { method: "POST" });
+  const data = await res.json();
+  if (!data.ok) throwGatewayError(data, "reconnect failed", res.status);
+  return data.status;
+}
+
 export interface EmptyCleanupResult {
   deleted: string[];
   kept: number;

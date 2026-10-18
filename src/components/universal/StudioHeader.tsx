@@ -19,10 +19,12 @@ import {
   Info,
   ChevronDown,
   Terminal,
+  KeyRound,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { agentQuota, type AgentSummary } from "@/lib/universal-api";
+import { DeepSeekCredentialsDialog } from "./DeepSeekCredentialsDialog";
 import { WorkspaceDropdown } from "./WorkspaceDropdown";
 import { GatewayDot } from "./GatewayDot";
 import { useStudioStore, type RecentWorkspace } from "@/stores/useStudioStore";
@@ -92,6 +94,7 @@ export const AgentStatusChip: React.FC<{
 }> = ({ agents, activeAgentId, onSelectAgent, onConnect, connecting, onOpenAuth, onLogout, authOk, sessionId }) => {
   const [open, setOpen] = useState(false);
   const [refreshingQuota, setRefreshingQuota] = useState(false);
+  const [deepseekCredOpen, setDeepseekCredOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const storeQuota = useStudioStore((s) => s.quota);
@@ -266,10 +269,26 @@ export const AgentStatusChip: React.FC<{
                   <LogOut className="w-3 h-3" /> 退出登录
                 </Button>
               )}
+              {activeAgentId === "deepseek" && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onClick={() => { setOpen(false); setDeepseekCredOpen(true); }}
+                  className="h-7 px-2.5 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+                >
+                  <KeyRound className="w-3 h-3" /> DeepSeek 凭据
+                </Button>
+              )}
             </div>
           </div>
         </div>
       )}
+      <DeepSeekCredentialsDialog
+        isOpen={deepseekCredOpen}
+        onClose={() => setDeepseekCredOpen(false)}
+        agentId={activeAgentId}
+        onChanged={handleRefreshQuota}
+      />
     </div>
   );
 };
