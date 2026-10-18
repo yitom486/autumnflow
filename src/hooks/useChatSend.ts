@@ -48,7 +48,11 @@ export interface UseChatSendOptions {
 }
 
 const DEFAULT_RETRY = {
-  max: 2,
+  // Ride out a gateway/host restart (production) or a dev hot reload: the
+  // ledger replays the turn from the journal on the next attempt, and a turn
+  // that is still running is re-attached with GET follow instead of re-prompted.
+  // 1s/2s/4s/8s keeps the wait bounded at ~15s before surfacing an error.
+  max: 4,
   delayMs: (attempt: number) => 1000 * 2 ** (attempt - 1),
 };
 
@@ -361,13 +365,24 @@ export function useChatSend({
           // only fires when even that failed.
           const isStaleSession =
             typeof err?.message === "string" && /unknown session|session\b[^\n]*(?:not found|expired)/i.test(err.message);
+          // Raised by the ledger when a host restart cut the turn off; the
+          // prompt is never re-sent (that would double-charge), so the honest
+          // action is a manual retry.
+          const isGatewayRestart =
+            typeof err?.message === "string" && /gateway restarted before this turn finished/i.test(err.message);
+          const isExpiredTurn =
+            typeof err?.message === "string" && /unknown or expired turn|turn\b[^\n]*(?:expired|not found)/i.test(err.message);
           const diagnosticHint = isToolCallDesync
             ? "\n\n> 💡 **会话上下文失步诊断**：智能体在工具调用异常后遗漏了回包（Tool Call 状态断裂），导致上游模型服务拒绝了当前历史记录。建议点击**新建会话**以开启干净上下文继续任务。"
             : isDeepseekKeyMissing
               ? "\n\n> 💡 **DeepSeek 凭据未配置**：当前模型走 `deepseek-official`（API Key 路由），但 DSH 里没有 `DEEPSEEK_API_KEY`。\n> 1. 打开模型菜单，切换到 **DeepSeek Account** 分组里的同名模型（复用你已登录的平台账户）；\n> 2. 或在 DSH 设置（`dsh --profile web` → 设置 → 模型）里保存 API Key，或在启动 AutumnFlow 前 `export DEEPSEEK_API_KEY=…`。"
-              : isStaleSession
-                ? "\n\n> 💡 **会话已失效**：Agent 侧已经没有这个会话（更换运行时或历史被清理时会出现）。已自动尝试接回并退化为新建会话；如果反复出现，请点标题栏的**新会话**再发送。"
-                : "";
+              : isGatewayRestart
+                ? "\n\n> 💡 **本轮被网关重启中断**：Host 进程在回答过程中重启（开发时改服务端代码会触发热重载；正式版则是 Host 崩溃或更新）。为避免重复计费，这一轮不会自动重发 prompt——**重新发送即可**。想避免开发时打断任务，请用打包版验证。"
+                : isExpiredTurn
+                  ? "\n\n> 💡 **服务端已没有这一轮**：turn 已超过保留期（15 分钟）或 Host 已重启。重新发送本条消息即可；长任务建议改在打包版里跑。"
+                  : isStaleSession
+                    ? "\n\n> 💡 **会话已失效**：Agent 侧已经没有这个会话（更换运行时或历史被清理时会出现）。已自动尝试接回并退化为新建会话；如果反复出现，请点标题栏的**新会话**再发送。"
+                    : "";
           c2.patchMessage(assistantId, (m) => ({
             ...m,
             content: stripRetryNotes(m.content) + `\n\n> ❌ [${agentId}] ${err.message}${diagnosticHint}`,
