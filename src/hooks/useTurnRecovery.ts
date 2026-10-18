@@ -116,6 +116,34 @@ export async function recoverActiveTurn(turn: ActiveTurn, assistantId: string): 
                 return { ...m, toolCalls: calls };
               });
             },
+            onPermissionRequest: (permission) => {
+              if (isCurrent()) useStudioStore.getState().addPermission(permission);
+            },
+            onElicitationRequest: (elicitation) => {
+              if (isCurrent()) useStudioStore.getState().addElicitation(elicitation);
+            },
+            onElicitationClosed: (id) => {
+              if (isCurrent()) useStudioStore.getState().removeElicitation(id);
+            },
+            onPlan: (entries) => {
+              if (isCurrent()) {
+                useStudioStore.getState().patchMessage(assistantId, (m) => ({ ...m, plan: entries }));
+              }
+            },
+            onUsage: (usage) => {
+              if (!isCurrent()) return;
+              useStudioStore.getState().setUsage(usage);
+              useStudioStore.getState().patchMessage(assistantId, { usage });
+            },
+            onAvailableCommands: (commands) => {
+              if (isCurrent()) useStudioStore.getState().setAvailableCommands(commands);
+            },
+            onConfigOptions: (options) => {
+              if (isCurrent()) useStudioStore.getState().setConfigOptions(options);
+            },
+            onConfigUpdate: (option) => {
+              if (isCurrent()) useStudioStore.getState().patchConfigOption(option);
+            },
             onReset: (reset) => {
               gap = true;
               // The server lost the requested prefix; clear the partial view
