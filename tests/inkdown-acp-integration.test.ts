@@ -276,7 +276,7 @@ describe("@yitom/acp-client integration in antigravity-acp", () => {
     await client.disconnect();
   });
 
-  it("verifies that omitting env drops mcpServers under strict ACP v1 Zod validation", async () => {
+  it("rejects an invalid stdio MCP entry instead of silently dropping it (0.1.14 contract)", async () => {
     const mockAgentScript = path.resolve(__dirname, "fixtures/mock-acp-agent.ts");
     const mockRuntime: AcpRuntimeInfo = {
       id: "mock-acp-agent",
@@ -285,23 +285,17 @@ describe("@yitom/acp-client integration in antigravity-acp", () => {
       args: ["run", mockAgentScript],
     };
 
-    let sessionReport = "";
     const client = new AcpClient({
       runtime: mockRuntime,
       workspaceRoot: path.resolve(__dirname, ".."),
-      callbacks: {
-        onSessionUpdate: (u: any) => {
-          const upd = u?.update ?? u;
-          if (upd?.sessionUpdate === "agent_message_chunk" && upd?.content?.type === "text") {
-            sessionReport += upd.content.text;
-          }
-        },
-      },
+      callbacks: { onSessionUpdate: () => {} },
     });
 
     await client.connect();
 
-    // Invalid stdio server: missing 'env' field (fails zMcpServerStdio, caught by vecSkipError)
+    // Invalid stdio server (missing env). acp-client 0.1.14 sets
+    // preserveMcpOnRetry, so the rejected MCP list is no longer silently
+    // dropped: session/new fails loudly instead of starting without tools.
     const invalidMcpServers = [
       {
         name: "invalid-calc",
@@ -311,17 +305,9 @@ describe("@yitom/acp-client integration in antigravity-acp", () => {
     ];
 
     const sessionRes = await client.createSession({ mcpServers: invalidMcpServers });
-    expect(sessionRes.ok).toBe(true);
-    if (!sessionRes.ok) return;
-
-    const session = sessionRes.value;
-    await session.prompt("trigger_inspect_session");
-
-    // session/update 通知是异步派发的，可能晚于 prompt 的响应到达：等它落地再解析。
-    await vi.waitFor(() => expect(sessionReport).not.toBe(""), { timeout: 2000 });
-    const parsed = JSON.parse(sessionReport);
-    // ACP SDK silently strips non-conforming entries due to vecSkipError
-    expect(parsed.mcpServers).toEqual([]);
+    expect(sessionRes.ok).toBe(false);
+    if (sessionRes.ok) return;
+    expect(sessionRes.error.code).toBe("ACP_PROTOCOL_ERROR");
 
     await client.disconnect();
   });

@@ -26,9 +26,8 @@
 
 ### Changed
 - 内部拆分（对外行为不变）：`UniversalAgentConnection` 拆成四个单一职责模块——`AcpTransport`（进程 / NDJSON 流 / initialize / 退出）、`SessionService`（new/load/resume/fork/list/close/delete 与会话元数据回收）、`PromptTurn`（prompt 租约、取消、首轮兼容块）、`SessionState`（per-session 内存的唯一回收点），facade 从 1005 行降到约 620 行，只保留 permission / fs / terminal / subagent / quota 语义与广播，HTTP 路由与对外 API 完全不变。桌面端同时纳入类型检查：新增 `tsconfig.desktop.json` 与 `bun run typecheck`，Electron 主进程/preload/host 与 server/shared 一起过 `tsc`。
-
-### Changed
 - Codex 默认使用应用独占的 `CODEX_HOME`（默认 `~/.acp-studio/codex-home`，可用 `ACP_CODEX_HOME` 或 `ACP_STUDIO_HOME` 覆盖，不写死机器路径）：首次连接从用户 `~/.codex` 复制 `auth.json` 与 `config.toml`，并合并 `[features] code_mode = true` 后启动；不再写入全局 `~/.codex`。复制或创建失败时自动回退用户目录并告警，不影响 Codex 可用性。
+- 升级 `@yitom/acp-client` 到 0.1.14：Codex 隔离 home 改为复用 SDK 的 `provisionCodexCodeModeHome`，并新增会话级 code mode 的 wire 测试（mock Agent 声明 `_meta.toolsMode` 时收到 `ptc`，未声明时不发）。注意 0.1.14 的 `preserveMcpOnRetry`：agent 拒绝 `mcpServers`（例如 stdio 条目缺 `env`）时不再静默降级为无 MCP 会话，而是让 `session/new` 直接失败（`ACP_PROTOCOL_ERROR`）。
 
 ### Added
 - 会话级 Code mode（PTC）：智能体面板新增 `Code mode` 开关，仅在 Agent 的 `initialize` 声明 `agentCapabilities._meta.toolsMode` 时显示；开关按线程持久化。开启后新建/恢复会话会带上 `_meta.toolsMode = 'ptc'`，Agent 只下发 `run_code`，并把该会话的全部工具（含 studio-ui MCP）渲染成 `tools.<name>()`。未声明的运行时（codex/claude/opencode/agy）忽略该请求——OpenCode 的 code mode 本来就由 MCP 目录驱动，无需开关。

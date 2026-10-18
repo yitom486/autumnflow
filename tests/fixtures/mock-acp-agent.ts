@@ -18,6 +18,7 @@ let sessSeq = 0;
 const cancelledSessions = new Set<string>();
 const sessionCwds = new Map<string, string>();
 const sessionMcpServers = new Map<string, unknown[]>();
+const sessionMeta = new Map<string, unknown>();
 const sessionAdditionalDirs = new Map<string, string[]>();
 
 
@@ -30,6 +31,10 @@ const app = acp
         promptCapabilities: { image: true, audio: false },
         sessionCapabilities: { list: {}, close: {}, fork: {}, resume: {}, load: {}, additionalDirectories: {} },
         mcpCapabilities: { http: process.env.MOCK_MCP_HTTP !== "0" },
+        // Session-level PTC declaration; MOCK_TOOLS_MODE=0 hides it.
+        _meta: process.env.MOCK_TOOLS_MODE === "0"
+          ? undefined
+          : { toolsMode: { values: ["native", "ptc"] } },
         loadSession: true,
         providers: true,
       },
@@ -45,6 +50,7 @@ const app = acp
     const sessionId = `mock-session-${++sessSeq}`;
     sessionCwds.set(sessionId, ctx.params.cwd);
     sessionMcpServers.set(sessionId, ctx.params.mcpServers || []);
+  sessionMeta.set(sessionId, ctx.params._meta);
     sessionAdditionalDirs.set(sessionId, ctx.params.additionalDirectories || []);
     return {
       sessionId,
@@ -150,6 +156,7 @@ const app = acp
               cwd: sessionCwds.get(sessionId),
               mcpServers: sessionMcpServers.get(sessionId),
               additionalDirectories: sessionAdditionalDirs.get(sessionId) || [],
+              meta: sessionMeta.get(sessionId),
             }),
           },
         },
