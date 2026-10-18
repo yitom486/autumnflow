@@ -6,13 +6,10 @@
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, shell } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
-import type { Server } from "node:http";
-import { serve } from "@hono/node-server";
-import { setupEnv, buildApp, shutdownBridges } from "../server/gateway";
+import { fork, type ChildProcess } from "node:child_process";
 import { resolveRuntimeConfig } from "../shared/runtime-config";
 import { assertPortAvailable } from "../server/port-availability";
 import { ensureGatewayToken, gatewayTokenPreview } from "../server/universal/security";
-import { attachPtyUpgrade } from "../server/universal/pty";
 import { initUpdater, checkForUpdatesFromMenu } from "./updater";
 import { buildAppMenu, type MenuActions } from "./menu";
 import { addRecent, loadRecent } from "./recent";
@@ -25,8 +22,6 @@ import {
   type CrashReportPhase,
   type CrashReportSource,
 } from "./crash-report";
-import { setTrashImpl } from "../server/universal/http/files";
-import { startMcpUiServer, stopMcpUiServer } from "../server/universal/mcp-ui-server";
 
 const isDev = !app.isPackaged && process.env.ELECTRON_DEV === "1";
 const runtime = resolveRuntimeConfig(process.env, process.argv, isDev ? "development" : "production");
@@ -54,7 +49,6 @@ try {
 /** 所有窗口；每个窗口一个工作区（渲染端按窗口用 sessionStorage 隔离“当前工作区”）。 */
 const windows = new Set<BrowserWindow>();
 let win: BrowserWindow | null = null; // 最近聚焦的窗口
-let gateway: { close: (cb?: () => void) => void } | null = null;
 
 const rendererConsole = new RendererConsoleTail();
 const crashReportDir = () => path.join(app.getPath("userData"), "logs", "crashes");
@@ -90,62 +84,178 @@ function recordCrash(source: CrashReportSource, phase: CrashReportPhase, error: 
   }
 }
 
+interface GatewayHandle {
+  child: ChildProcess;
+  close: () => Promise<void>;
+}
+
+let gateway: GatewayHandle | null = null;
+let gatewayReady = false;
+let hostShuttingDown = false;
+let hostStderr = "";
+
+function hostScriptPath(): string {
+  const candidates = app.isPackaged
+    ? [
+        path.join(process.resourcesPath, "app.asar.unpacked", "electron-dist", "host.cjs"),
+        path.join(process.resourcesPath, "app.asar.unpacked", "host.cjs"),
+      ]
+    : [
+        // `electron electron-dist/main.cjs` makes appPath = .../electron-dist.
+        path.join(app.getAppPath(), "electron-dist", "host.cjs"),
+        path.join(app.getAppPath(), "host.cjs"),
+        path.join(app.getAppPath(), "..", "electron-dist", "host.cjs"),
+      ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return candidates[0];
+}
+
+function resolvePublicDir(): string {
+  if (process.env.ACP_PUBLIC_DIR) return process.env.ACP_PUBLIC_DIR;
+  const candidates = [
+    path.join(app.getAppPath(), "dist"),
+    path.join(app.getAppPath(), "..", "dist"),
+    path.join(__dirname, "..", "dist"),
+    path.join(process.cwd(), "dist"),
+  ];
+  for (const cand of candidates) {
+    if (fs.existsSync(path.join(cand, "index.html"))) return cand;
+  }
+  return path.join(app.getAppPath(), "dist");
+}
+
+function appendHostStderr(chunk: Buffer | string): void {
+  const text = String(chunk);
+  hostStderr = (hostStderr + text).slice(-16 * 1024);
+  for (const line of text.split(/\r?\n/)) {
+    if (line.trim()) console.error(`[Host] ${line}`);
+  }
+}
+
+async function closeGateway(): Promise<void> {
+  const handle = gateway;
+  if (!handle) return;
+  gateway = null;
+  gatewayReady = false;
+  hostShuttingDown = true;
+  const child = handle.child;
+  if (child.exitCode !== null || child.killed) return;
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  try {
+    child.send({ type: "shutdown" });
+  } catch (err) {
+    console.warn("[Electron] could not send host shutdown:", err);
+  }
+  await Promise.race([exited, new Promise<void>((resolve) => setTimeout(resolve, 5000))]);
+  if (child.exitCode === null) {
+    try {
+      child.kill();
+    } catch (err) {
+      console.warn("[Electron] host kill failed:", err);
+    }
+  }
+}
+
 async function startGateway() {
-  setupEnv();
   // 本函数只在 !isDev 时被调用：确保 token 已生成并进入进程环境，
-  // createWindow 在其之后执行，同一机器前后端共享同一 token。
+  // 同一机器前后端共享同一 token。
   const token = ensureGatewayToken();
   if (!process.env.ACP_GATEWAY_TOKEN) process.env.ACP_GATEWAY_TOKEN = token;
   await assertPortAvailable(PORT);
 
-  // 启动专用的 Studio UI MCP Server (自动层叠端口 13920+)
-  await startMcpUiServer(runtime.mcpPort).catch((err) => {
-    console.warn(`[Electron] 启动 MCP UI 端口服务失败: ${(err as Error)?.message || err}`);
+  const publicDir = resolvePublicDir();
+  process.env.ACP_PUBLIC_DIR = publicDir;
+  try {
+    process.chdir(app.getPath("home"));
+  } catch {}
+
+  const hostScript = hostScriptPath();
+  if (!fs.existsSync(hostScript)) {
+    throw new Error(`Gateway host entry is missing: ${hostScript}`);
+  }
+  hostStderr = "";
+  hostShuttingDown = false;
+  const child = fork(hostScript, [], {
+    execPath: process.execPath,
+    cwd: app.getPath("home"),
+    env: {
+      ...process.env,
+      ELECTRON_RUN_AS_NODE: "1",
+      ACP_RUNTIME_MODE: "production",
+      PORT: String(PORT),
+      MCP_PORT: String(runtime.mcpPort),
+      ACP_PUBLIC_DIR: publicDir,
+      ACP_GATEWAY_TOKEN: token,
+    },
+    stdio: ["ignore", "pipe", "pipe", "ipc"],
+    windowsHide: true,
+  });
+  gateway = { child, close: closeGateway };
+  child.stdout?.on("data", (chunk) => process.stdout.write(`[Host] ${String(chunk)}`));
+  child.stderr?.on("data", appendHostStderr);
+  child.on("error", (err) => {
+    console.error("[Electron] host process error:", err);
+  });
+  child.on("message", (message: any) => {
+    if (message?.type !== "trash" || typeof message.path !== "string") return;
+    void shell
+      .trashItem(message.path)
+      .then(() => child.send({ type: "trash-result", id: message.id, ok: true }))
+      .catch((err) => {
+        child.send({ type: "trash-result", id: message.id, ok: false, error: err?.message || String(err) });
+      });
   });
 
-  // Packaged layout: frontend lives under <app>/dist, not cwd.
-  // Runner era: agents spawn via bunx/npx directly (windowsHide, no shim);
-  // only an explicit AGY_HEADLESS_LAUNCHER env opts back into shimmed spawn.
-  if (!isDev) {
-    if (!process.env.ACP_PUBLIC_DIR) {
-      const candidates = [
-        path.join(app.getAppPath(), "dist"),
-        path.join(app.getAppPath(), "..", "dist"),
-        path.join(__dirname, "..", "dist"),
-        path.join(process.cwd(), "dist"),
-      ];
-      for (const cand of candidates) {
-        if (fs.existsSync(path.join(cand, "index.html"))) {
-          process.env.ACP_PUBLIC_DIR = cand;
-          break;
+  await new Promise<void>((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error(`Gateway host did not become ready within 30s.\n${hostStderr}`));
+    }, 30_000);
+    const settle = (error?: Error) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      if (error) reject(error);
+      else resolve();
+    };
+    child.on("message", (message: any) => {
+      if (message?.type === "ready") {
+        gatewayReady = true;
+        console.log(`[Electron] gateway host ready at http://127.0.0.1:${PORT} (token ${gatewayTokenPreview()})`);
+        settle();
+      } else if (message?.type === "fatal") {
+        const error = new Error(`Gateway host fatal: ${message.error || "unknown"}\n${hostStderr}`);
+        recordCrash("child", gatewayReady ? "running" : "startup", error);
+        if (!settled) {
+          settle(error);
+        } else {
+          gateway = null;
+          gatewayReady = false;
+          dialog.showErrorBox("AutumnFlow 后端异常", `${message.error || "Gateway host crashed"}`);
+          app.quit();
         }
       }
-      if (!process.env.ACP_PUBLIC_DIR) {
-        process.env.ACP_PUBLIC_DIR = path.join(app.getAppPath(), "dist");
+    });
+    child.once("exit", (code, signal) => {
+      const error = new Error(`Gateway host exited before ready (code=${code}, signal=${signal}).\n${hostStderr}`);
+      if (!settled) {
+        recordCrash("child", "startup", error);
+        settle(error);
+        return;
       }
-    }
-    try {
-      process.chdir(app.getPath("home"));
-    } catch {}
-  }
-  const honoApp = buildApp();
-  // hostname 127.0.0.1：只绑回环（ACP_PUBLIC_DIR 逻辑不动）。
-  let srv!: Server;
-  await new Promise<void>((resolve, reject) => {
-    srv = serve({ fetch: honoApp.fetch, port: PORT, hostname: "127.0.0.1" }, () => {
-      console.log(`[Electron] gateway listening at http://127.0.0.1:${PORT} (token ${gatewayTokenPreview()})`);
-      resolve();
-    }) as Server;
-    srv.once("error", reject);
+      if (!hostShuttingDown) {
+        gateway = null;
+        gatewayReady = false;
+        recordCrash("child", "running", error);
+        dialog.showErrorBox("AutumnFlow 后端已退出", `${error.message.split("\n")[0]}\n\n诊断日志已写入用户数据目录。`);
+        app.quit();
+      }
+    });
   });
-  // Never cut long-lived SSE streams.
-  srv.requestTimeout = 0;
-  srv.headersTimeout = 0;
-  // 真 PTY 的 WS 升级（与 server/node.ts 同源；Bun dev 网关无此挂载）。
-  void attachPtyUpgrade(srv as never);
-  gateway = srv;
-  // 删除文件走系统回收站
-  setTrashImpl((abs) => shell.trashItem(abs));
 }
 
 async function loadURLWithRetry(targetWin: BrowserWindow, url: string, maxRetries = 30, intervalMs = 500) {
@@ -553,34 +663,35 @@ if (!app.requestSingleInstanceLock()) {
     if (windows.size === 0) void createWindow().catch(reportStartupFailure);
   });
 
-  app.on("window-all-closed", async () => {
-    try {
-      gateway?.close();
-    } catch (err) {
-      // 关闭已关的 server 属确定性无害，留痕即可。
-      console.warn(`[Electron] 关闭网关时异常（已忽略）：${(err as Error).message}`);
-    }
-    await shutdownBridges().catch((err) => {
-      console.warn(`[Electron] 关闭 agent 桥接失败：${(err as Error)?.message || err}`);
-    });
-    await stopMcpUiServer().catch(() => {});
+  app.on("window-all-closed", () => {
     if (process.platform !== "darwin") app.quit();
   });
 
-  app.on("before-quit", async () => {
-    await shutdownBridges().catch((err) => {
-      console.warn(`[Electron] 退出前关闭桥接失败：${(err as Error)?.message || err}`);
+  let quitAfterHostShutdown = false;
+  let hostClosePromise: Promise<void> | null = null;
+  const shutdownHost = () => {
+    if (!hostClosePromise) hostClosePromise = closeGateway();
+    return hostClosePromise;
+  };
+
+  app.on("before-quit", (event) => {
+    if (quitAfterHostShutdown || (!gateway && !hostClosePromise)) return;
+    event.preventDefault();
+    void shutdownHost().finally(() => {
+      quitAfterHostShutdown = true;
+      app.quit();
     });
-    await stopMcpUiServer().catch(() => {});
   });
 
   const handleSignal = () => {
-    try {
-      gateway?.close();
-    } catch {}
-    app.quit();
+    void shutdownHost().finally(() => app.quit());
   };
   process.on("SIGINT", handleSignal);
   process.on("SIGTERM", handleSignal);
+  process.on("exit", () => {
+    try {
+      gateway?.child.kill();
+    } catch {}
+  });
 }
 

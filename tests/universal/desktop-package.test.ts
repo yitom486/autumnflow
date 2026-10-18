@@ -21,6 +21,7 @@ function fixture() {
   write("dist/fonts/math.woff2", "font bytes");
   write("electron-dist/main.cjs", 'require("electron");require("node-pty")');
   write("electron-dist/preload.cjs", 'require("electron")');
+  write("electron-dist/host.cjs", 'require("node-pty")');
   write("LICENSE", "project license");
   write("node_modules/mermaid/package.json", JSON.stringify({ name: "mermaid", version: "1.0.0", license: "MIT" }));
   write("node_modules/mermaid/LICENSE", "Mermaid attribution");
@@ -51,7 +52,7 @@ describe("desktop release app", () => {
     const pkg = JSON.parse(fs.readFileSync(path.join(app, "package.json"), "utf8"));
     expect(pkg.dependencies).toEqual({ "node-pty": "1.1.0" });
     expect(pkg.main).toBe("electron-dist/main.cjs");
-    for (const file of ["dist/index.html", "dist/assets/chat.js", "dist/assets/mermaid.js", "dist/fonts/math.woff2", "electron-dist/main.cjs"]) {
+    for (const file of ["dist/index.html", "dist/assets/chat.js", "dist/assets/mermaid.js", "dist/fonts/math.woff2", "electron-dist/main.cjs", "electron-dist/preload.cjs", "electron-dist/host.cjs"]) {
       expect(fs.readFileSync(path.join(app, file))).toEqual(fs.readFileSync(path.join(root, file)));
     }
     expect(fs.existsSync(path.join(app, "node_modules/mermaid"))).toBe(false);

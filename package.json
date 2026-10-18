@@ -67,7 +67,8 @@
     },
     "asarUnpack": [
       "**/*.node",
-      "node_modules/node-pty/**/*"
+      "node_modules/node-pty/**/*",
+      "electron-dist/host.cjs"
     ],
     "npmRebuild": false,
     "electronLanguages": ["en-US", "zh-CN", "zh-TW"],

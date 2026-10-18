@@ -1,19 +1,26 @@
 # ACP Studio Desktop (Electron)
 
-桌面客户端：Electron 窗口 + 进程内 Node 网关（Hono），前端 `dist` 由网关同源 served，
+桌面客户端：Electron 窗口 + 独立 Gateway Host 子进程（Hono），前端 `dist` 由 Host 同源 served，
 无需浏览器、无需常驻终端。
 
 ## 架构
 
 ```text
 Electron main (Node, electron-dist/main.cjs)
- └─ in-process gateway (server/gateway.ts, Hono, WinterCG Request/Response)
+ ├─ 窗口 / 菜单 / 更新 / 原生对话框 / IPC 边界
+ └─ Gateway Host child (ELECTRON_RUN_AS_NODE, electron-dist/host.cjs)
      ├─ /api/universal/*  → 通用 Agent stdio 适配器（codex / antigravity / opencode / …）
-     └─ /*                → dist/ 前端静态文件（ACP_PUBLIC_DIR 覆盖，见下）
+     ├─ /*                → dist/ 前端静态文件（ACP_PUBLIC_DIR 覆盖，见下）
+     ├─ MCP UI server     → studio-ui（13920+ 层叠端口）
+     └─ PTY WebSocket     → node-pty（真交互终端）
 ```
 
-`server/index.ts`（Bun）与 `server/node.ts`（Node）是同一 Hono app 的两种入口，
-日常开发继续 `bun run dev` 即可，桌面端行为一致。
+主进程只等待 Host 的 `ready`，不直接持有 HTTP/PTY 或 Agent 子进程；Host 崩溃不会带走窗口，
+退出时主进程先发 `shutdown`、等待 Host 关闭 agent 桥接后再退出。开发模式仍由外部
+`bun run dev` 同时起 Vite + 网关，`dev:desktop` 不启动 Host。
+
+`server/index.ts`（Bun）与 `server/node.ts`（Node）是同一 Hono app 的两种独立入口；
+生产桌面端改由 `desktop/host.ts` 启动同一个 app。
 
 ## 开发
 
@@ -50,7 +57,7 @@ Windows 下启动器直接管理 Vite 和网关，不为后台服务创建独立
 
 ```bash
 bun run build && bun run build:electron
-electron electron-dist/main.cjs   # main 内起网关并打开窗口
+electron electron-dist/main.cjs   # main 启动 Gateway Host 子进程并打开窗口
 ```
 
 ## 打包
@@ -62,7 +69,9 @@ electron electron-dist/main.cjs   # main 内起网关并打开窗口
 Mermaid、Markdown、数学公式等前端依赖已编译进 `dist`，不再额外复制其 npm 原始包。
 `bun run stage:desktop` 可以单独检查发布目录；不要跳过 staging 直接调用 builder。
 发布构建压缩主进程与 preload，KaTeX CSS 只引用 WOFF2 字体（不打包重复的
-WOFF/TTF）。界面和开发演示共用 `public/icon.png`；高清猫咪原图保存在
+WOFF/TTF）。`electron-dist/host.cjs` 会按 `asarUnpack` 解包到
+`resources/app.asar.unpacked/electron-dist/host.cjs`；主进程从该路径 fork Host，
+不要把 Host 留在 asar 内。界面和开发演示共用 `public/icon.png`；高清猫咪原图保存在
 `build/acp-studio-cat.png`，不复制到前端发布目录。
 原生终端使用系统 ConPTY（显式 `useConptyDll: false`），保留 WinPTY 回退文件；
 发布目录不带实验版 `conpty.dll` / `OpenConsole.exe` 和仅用于编译的
@@ -88,7 +97,7 @@ WOFF/TTF）。界面和开发演示共用 `public/icon.png`；高清猫咪原图
   必须解包）；打包机上 electron-builder 默认 `npmRebuild` 会按 Electron ABI
   重编（需配好编译工具链：Windows 要 VS Build Tools）。dev 下 Bun 网关无
   PTY（回落单次执行），要真 PTY 请用 `dev:server:node`（Node 网关）或
-  Electron 内置网关。
+  Electron 内置 Host 进程。
   例外：`npmRebuild` 已关（`false`）——node-pty 是 N-API 模块，prebuild
   跨 Node/Electron ABI 通用，源码重编纯属浪费（且本机缺 Spectre 库会编
   失败，见 MSB8040）；只有换 node-pty 大版本或缺对应平台 prebuild 时才
