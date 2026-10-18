@@ -10,7 +10,7 @@ import { CommandPalette } from "@/components/workbench/CommandPalette";
 import { WorkspacePickerModal } from "@/components/universal/WorkspacePickerModal";
 import { GatewayTokenGate } from "@/components/GatewayTokenGate";
 import { installGlobalErrorCapture, reportError } from "@/lib/error-bus";
-import { bootstrapGatewayToken, verifyGatewayToken } from "@/lib/gateway-auth";
+import { bootstrapGatewayToken, isCookieAuth, verifyGatewayToken } from "@/lib/gateway-auth";
 import "@/index.css";
 
 installGlobalErrorCapture();
@@ -191,7 +191,7 @@ async function boot() {
     renderGate("error", `读取网关令牌失败：${(err as Error)?.message || err}`);
     return;
   }
-  if (!token) {
+  if (!token && !isCookieAuth()) {
     renderGate("missing");
     return;
   }

@@ -11,8 +11,10 @@
  * - 鉴权：gateway.ts 与 universal 路由入口都直接（静态）导入 `requireAuth`，
  *   任何 /api/universal/* 请求（含 terminal/exec）没有有效 token 一律 401；
  *   PTY WebSocket 升级用 `gatewayAuthHeaders(req, { allowQueryToken: true })`。
- * - 前端拿 token：Electron 经 preload `acpStudio.getGatewayToken()`；浏览器模式
- *   打开网关启动日志里打印的 `/?token=...` 链接（前端存进 localStorage 后从地址栏抹掉），
+ * - 前端拿 token：生产 Electron Host 在 HTML 响应上设置 HttpOnly
+ *   `acp_gateway_session` Cookie，渲染端不再持有 token；开发外部网关仍经
+ *   preload `acpStudio.getGatewayToken()`，浏览器模式可打开网关启动日志里
+ *   打印的 `/?token=...` 链接（前端存进 localStorage 后从地址栏抹掉），
  *   或在令牌页手动粘贴 `~/.acp-studio/.gateway-token` 的内容。见 src/lib/gateway-auth.ts。
  * - CORS：`corsHeaders(req)` 回显可信本地 Origin，不返回 `*`。
  * - 工作区：智能体写文件前调 `isPathAllowed(p, extraRoots)`，不在允许根内直接拒绝
@@ -175,6 +177,29 @@ export interface GatewayAuthOptions {
   allowQueryToken?: boolean;
 }
 
+/** HttpOnly session cookie used by the local desktop page (no token in JS). */
+export const GATEWAY_SESSION_COOKIE = "acp_gateway_session";
+
+export function gatewaySessionCookie(): string {
+  return `${GATEWAY_SESSION_COOKIE}=${encodeURIComponent(ensureGatewayToken())}; Path=/; HttpOnly; SameSite=Strict; Max-Age=604800`;
+}
+
+/** Read the HttpOnly cookie; ordinary HTTP auth accepts it in addition to Bearer. */
+function cookiePresentedToken(req: Request): string {
+  const raw = req.headers.get("cookie") || "";
+  for (const part of raw.split(";")) {
+    const eq = part.indexOf("=");
+    if (eq < 0) continue;
+    if (part.slice(0, eq).trim() !== GATEWAY_SESSION_COOKIE) continue;
+    try {
+      return decodeURIComponent(part.slice(eq + 1).trim());
+    } catch {
+      return "";
+    }
+  }
+  return "";
+}
+
 /** 常量时间比较，避免按字节提前返回泄露 token 前缀。 */
 function tokenEquals(presented: string, expected: string): boolean {
   const a = Buffer.from(presented, "utf8");
@@ -183,22 +208,27 @@ function tokenEquals(presented: string, expected: string): boolean {
   return timingSafeEqual(a, b);
 }
 
-function presentedToken(req: Request, opts: GatewayAuthOptions): { token: string; malformed: boolean } {
+function presentedToken(
+  req: Request,
+  opts: GatewayAuthOptions,
+): { token: string; malformed: boolean; source: "header" | "cookie" | "query" | "none" } {
   const auth = (req.headers.get("authorization") || "").trim();
   if (auth) {
     const m = /^Bearer\s+(.+)$/i.exec(auth);
     const t = (m ? m[1] : "").trim();
-    return { token: t, malformed: !t };
+    return { token: t, malformed: !t, source: "header" };
   }
+  const cookie = cookiePresentedToken(req);
+  if (cookie) return { token: cookie, malformed: false, source: "cookie" };
   if (opts.allowQueryToken) {
     try {
       const t = (new URL(req.url).searchParams.get("token") || "").trim();
-      return { token: t, malformed: false };
+      return { token: t, malformed: false, source: "query" };
     } catch (err) {
       console.warn(`[Security] 解析请求 URL 失败，按缺少 token 处理: ${(err as Error).message}`);
     }
   }
-  return { token: "", malformed: false };
+  return { token: "", malformed: false, source: "none" };
 }
 
 /**
@@ -212,10 +242,29 @@ function presentedToken(req: Request, opts: GatewayAuthOptions): { token: string
  *    没有 Origin/Referer（curl、Electron 主进程、同源 GET）不额外拒绝，但第 1 关照样要过。
  */
 export function gatewayAuthHeaders(req: Request, opts: GatewayAuthOptions = {}): GatewayAuthResult {
-  const { token, malformed } = presentedToken(req, opts);
+  const { token, malformed, source } = presentedToken(req, opts);
   if (malformed) return { ok: false, reason: "bad-bearer" };
   if (!token) return { ok: false, reason: "missing-token" };
   if (!tokenEquals(token, ensureGatewayToken())) return { ok: false, reason: "bad-token" };
+
+  // Cookie auth is ambient. Reject cross-origin browser requests so another
+  // loopback page cannot ride the desktop session (Bearer remains explicit).
+  if (source === "cookie") {
+    const origin = (req.headers.get("origin") || "").trim();
+    if (origin) {
+      try {
+        if (new URL(origin).origin !== new URL(req.url).origin) {
+          return { ok: false, reason: "cookie-cross-origin" };
+        }
+      } catch {
+        return { ok: false, reason: "cookie-bad-origin" };
+      }
+    }
+    const site = (req.headers.get("sec-fetch-site") || "").trim().toLowerCase();
+    if (site && site !== "same-origin" && site !== "none") {
+      return { ok: false, reason: `cookie-cross-site:${site}` };
+    }
+  }
 
   const host = requestHost(req);
   if (host && !isLoopbackHost(host)) {

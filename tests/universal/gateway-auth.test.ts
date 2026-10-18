@@ -12,7 +12,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { buildApp, shutdownBridges } from "../../server/gateway";
 import { handleUniversal } from "../../server/universal/routes";
-import { gatewayAuthHeaders, gatewayBootstrapUrl } from "../../server/universal/security";
+import { gatewayAuthHeaders, gatewayBootstrapUrl, GATEWAY_SESSION_COOKIE } from "../../server/universal/security";
 import { attachPtyUpgrade } from "../../server/universal/pty";
 import { TEST_GATEWAY_TOKEN, authedRequest } from "../helpers/gateway-auth";
 import { rmTempDir } from "../helpers/tmp-cleanup";
@@ -70,6 +70,40 @@ describe("gateway auth: token is mandatory", () => {
       const res = await app.fetch(new Request(`http://127.0.0.1:3004${p}`));
       expect(res.status, p).toBe(401);
     }
+  });
+
+  it("accepts the desktop HttpOnly session cookie and rejects a wrong one", async () => {
+    const good = await app.fetch(
+      new Request("http://127.0.0.1:3004/api/universal/agents", {
+        headers: { cookie: `${GATEWAY_SESSION_COOKIE}=${encodeURIComponent(TEST_GATEWAY_TOKEN)}` },
+      })
+    );
+    expect(good.status).toBe(200);
+    const bad = await app.fetch(
+      new Request("http://127.0.0.1:3004/api/universal/agents", {
+        headers: { cookie: `${GATEWAY_SESSION_COOKIE}=wrong` },
+      })
+    );
+    expect(bad.status).toBe(401);
+
+    const crossOrigin = await app.fetch(
+      new Request("http://127.0.0.1:3004/api/universal/agents", {
+        headers: {
+          cookie: `${GATEWAY_SESSION_COOKIE}=${encodeURIComponent(TEST_GATEWAY_TOKEN)}`,
+          origin: "http://127.0.0.1:9999",
+        },
+      })
+    );
+    expect(crossOrigin.status).toBe(401);
+    const sameOrigin = await app.fetch(
+      new Request("http://127.0.0.1:3004/api/universal/agents", {
+        headers: {
+          cookie: `${GATEWAY_SESSION_COOKIE}=${encodeURIComponent(TEST_GATEWAY_TOKEN)}`,
+          origin: "http://127.0.0.1:3004",
+        },
+      })
+    );
+    expect(sameOrigin.status).toBe(200);
   });
 
   it("accepts the correct token and actually executes", async () => {

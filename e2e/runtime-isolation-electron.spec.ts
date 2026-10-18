@@ -72,7 +72,10 @@ for (const order of ["development-first", "release-first"] as const) {
         await expect(launched.page.locator("textarea").first()).toBeVisible();
         const result = await launched.page.evaluate(async () => {
           const token = await window.acpStudio!.getGatewayToken!();
-          const response = await fetch("/api/universal/agents", { headers: { Authorization: `Bearer ${token}` } });
+          const response = await fetch(
+            "/api/universal/agents",
+            token ? { headers: { Authorization: `Bearer ${token}` } } : {},
+          );
           return (await response.json()).agents.find((agent: { id: string }) => agent.id === "e2e-agent").title;
         });
         expect(result).toBe(launched === development ? "Development Test Agent" : "E2E Test Agent");

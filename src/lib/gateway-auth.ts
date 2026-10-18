@@ -122,6 +122,15 @@ function readStored(): string | null {
   }
 }
 
+/** True when the desktop host authenticates via its HttpOnly session cookie. */
+export function isCookieAuth(): boolean {
+  return (
+    typeof window !== "undefined" &&
+    window.acpStudio?.authMode === "cookie" &&
+    getGatewayBase() === ""
+  );
+}
+
 /** 当前 token（未拿到时为 null；按基址隔离，防串到别的网关）。 */
 export function getGatewayToken(): string | null {
   const b = getGatewayBase();
@@ -154,6 +163,7 @@ export function clearGatewayToken(): void {
  * 地址栏里的 token 读完立刻用 history.replaceState 抹掉。
  */
 export async function bootstrapGatewayToken(): Promise<string | null> {
+  if (isCookieAuth()) return null;
   if (typeof window !== "undefined" && window.acpStudio?.getGatewayToken) {
     const t = await window.acpStudio.getGatewayToken();
     setGatewayToken(t, false);
@@ -176,6 +186,7 @@ export async function bootstrapGatewayToken(): Promise<string | null> {
 
 /** 给 fetch init 补上 Authorization 头（调用方自带的头保留）。 */
 export function withGatewayAuth(init?: RequestInit): RequestInit {
+  if (isCookieAuth()) return init ?? {};
   const t = getGatewayToken();
   if (!t) return init ?? {};
   const headers = new Headers(init?.headers);
@@ -190,6 +201,7 @@ export function apiFetch(input: string, init?: RequestInit): Promise<Response> {
 
 /** WebSocket 发不了自定义头：把 token 拼进查询串（网关只在 PTY 升级路径接受）。 */
 export function withTokenQuery(url: string): string {
+  if (isCookieAuth()) return url;
   const t = getGatewayToken();
   if (!t) return url;
   return `${url}${url.includes("?") ? "&" : "?"}token=${encodeURIComponent(t)}`;

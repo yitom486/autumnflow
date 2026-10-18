@@ -6,7 +6,7 @@
 import { Hono } from "hono";
 import { handleUniversal } from "./universal/routes";
 import { universalRegistry } from "./universal/registry";
-import { corsHeaders as secureCorsHeaders, ensureGatewayToken, requireAuth } from "./universal/security";
+import { corsHeaders as secureCorsHeaders, ensureGatewayToken, gatewaySessionCookie, requireAuth } from "./universal/security";
 import { resolveRuntimeConfig } from "../shared/runtime-config";
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -14,8 +14,7 @@ import * as os from "node:os";
 import { staticFileResponse } from "./static-files";
 import { stopMcpUiServer } from "./universal/mcp-ui-server";
 
-export function setupEnv() {
-  // 生成/复用网关 token 并注入进程环境，同一机器前后端共享（详见 universal/security.ts）。
+export function setupEnv() {  // 生成/复用网关 token 并注入进程环境，同一机器前后端共享（详见 universal/security.ts）。
   const token = ensureGatewayToken();
   if (!process.env.ACP_GATEWAY_TOKEN) process.env.ACP_GATEWAY_TOKEN = token;
 
@@ -70,6 +69,14 @@ const MIME: Record<string, string> = {
   ".ttf": "font/ttf",
 };
 
+/** Attach the HttpOnly local-desktop session cookie to HTML responses. */
+function withDesktopSession(res: Response): Response {
+  if (res.status !== 200) return res;
+  const headers = new Headers(res.headers);
+  headers.append("Set-Cookie", gatewaySessionCookie());
+  return new Response(res.body, { status: res.status, statusText: res.statusText, headers });
+}
+
 export function buildApp() {
   const app = new Hono();
 
@@ -112,7 +119,8 @@ export function buildApp() {
     try {
       if (fs.existsSync(file) && fs.statSync(file).isFile()) {
         const ext = path.extname(file).toLowerCase();
-        return staticFileResponse(c.req.raw, file, rel, MIME[ext] || "application/octet-stream");
+        const res = staticFileResponse(c.req.raw, file, rel, MIME[ext] || "application/octet-stream");
+        return ext === ".html" ? withDesktopSession(res) : res;
       }
     } catch (err) {
       // 静态文件读取失败 → 回落 SPA index.html；此处 console.warn 留痕（loud 失败原则）。
@@ -120,7 +128,7 @@ export function buildApp() {
     }
     const index = path.join(DIST, "index.html");
     if (fs.existsSync(index)) {
-      return staticFileResponse(c.req.raw, index, "index.html", "text/html; charset=utf-8");
+      return withDesktopSession(staticFileResponse(c.req.raw, index, "index.html", "text/html; charset=utf-8"));
     }
     return new Response("Not Found", { status: 404, headers: corsHeaders(c.req.raw) });
   });

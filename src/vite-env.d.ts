@@ -3,6 +3,7 @@
 interface Window {
   acpStudio?: {
     platform: string;
+    authMode?: "token" | "cookie";
     versions: Record<string, string | undefined>;
     getGatewayToken?: () => Promise<string>;
     openDirectory?: (opts?: { defaultPath?: string }) => Promise<string | null>;

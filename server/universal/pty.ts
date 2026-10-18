@@ -400,6 +400,7 @@ export async function attachPtyUpgrade(server: http.Server): Promise<void> {
           ...(req.headers.host ? { host: req.headers.host } : {}),
           ...(req.headers.origin ? { origin: req.headers.origin as string } : {}),
           ...(req.headers.authorization ? { authorization: req.headers.authorization as string } : {}),
+          ...(req.headers.cookie ? { cookie: req.headers.cookie as string } : {}),
         },
       }),
       { allowQueryToken: true }

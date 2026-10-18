@@ -60,6 +60,24 @@ describe("gateway token bootstrap", () => {
   it("returns null when no source has a token", async () => {
     expect(await bootstrapGatewayToken()).toBeNull();
   });
+
+  it("cookie mode never reads the preload token or injects Authorization/query", async () => {
+    (window as any).acpStudio = {
+      platform: "win32",
+      authMode: "cookie",
+      versions: {},
+      getGatewayToken: async () => "must-not-be-used",
+    };
+    expect(await bootstrapGatewayToken()).toBeNull();
+    const spy = vi.fn(async () => new Response("{}"));
+    globalThis.fetch = spy as unknown as typeof fetch;
+    await apiFetch("/api/universal/agents");
+    const init = (spy.mock.calls[0] as unknown as [string, RequestInit])[1];
+    expect(new Headers(init.headers).get("Authorization")).toBeNull();
+    expect(withTokenQuery("ws://h/api/universal/terminal/pty?ptyId=1")).toBe(
+      "ws://h/api/universal/terminal/pty?ptyId=1"
+    );
+  });
 });
 
 describe("token injection", () => {

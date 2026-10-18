@@ -32,6 +32,17 @@ describe("static cache policy", () => {
       expect(staticCacheControl(file)).toBe("no-cache");
     }
   });
+  it("sets the HttpOnly desktop session cookie on HTML responses only", async () => {
+    const page = await app.fetch(request("/"));
+    const cookie = page.headers.get("Set-Cookie") || "";
+    expect(cookie).toContain("acp_gateway_session=");
+    expect(cookie).toContain("HttpOnly");
+    expect(cookie).toContain("SameSite=Strict");
+    expect(page.headers.get("Set-Cookie")).not.toBeNull();
+    const asset = await app.fetch(request("/assets/app-Abc12_-Z.js"));
+    expect(asset.headers.get("Set-Cookie")).toBeNull();
+  });
+
   it("sends the asset once and returns an empty 304 for matching validators through the gateway", async () => {
     const first = await app.fetch(request("/assets/app-Abc12_-Z.js"));
     expect(first.status).toBe(200);

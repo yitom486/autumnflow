@@ -4,7 +4,7 @@ import { useWorkbenchStore, type SettingsTab } from "@/stores/useWorkbenchStore"
 import { useUpdateStore } from "@/stores/useUpdateStore";
 import { useThemeStore, THEMES, type ThemeId } from "@/stores/useThemeStore";
 import { useStudioStore } from "@/stores/useStudioStore";
-import { getGatewayBase, getGatewayToken, isLoopbackBase, setGatewayBase, setGatewayToken, verifyGatewayToken } from "@/lib/gateway-auth";
+import { getGatewayBase, getGatewayToken, isCookieAuth, isLoopbackBase, setGatewayBase, setGatewayToken, verifyGatewayToken } from "@/lib/gateway-auth";
 import { cn } from "@/lib/utils";
 
 const CHANGELOG_URL = "https://github.com/yitom486/acp-studio/blob/master/CHANGELOG.md";
@@ -188,7 +188,13 @@ const GatewayPanel: React.FC = () => {
       </Row>
       <Row
         title="该网关的令牌"
-        desc={getGatewayToken() ? "已设置（按基址隔离保存，不回显）。" : "未设置：粘贴该网关本机 ~/.acp-studio/.gateway-token。"}
+        desc={
+          isCookieAuth()
+            ? "桌面网关使用 HttpOnly SameSite=Strict 会话 Cookie，页面 JS 无需持有令牌。"
+            : getGatewayToken()
+              ? "已设置（按基址隔离保存，不回显）。"
+              : "未设置：粘贴该网关本机 ~/.acp-studio/.gateway-token。"
+        }
       >
         <div className="flex gap-2">
           <input

@@ -44,6 +44,18 @@ permission/elicitation 和子任务。有任务时弹原生确认框：取消会
 取消安装，继续才关闭 Host/进入更新。Host 不可达时普通退出不阻塞，但更新
 会被取消并报错，避免在未知状态下重启。
 
+## 页面认证
+
+生产 Host 在 HTML 响应上设置 `acp_gateway_session` Cookie
+（HttpOnly、SameSite=Strict、Path=/）。渲染端在 `authMode=cookie` 时不再读取
+preload token；同源 HTTP 与 PTY WebSocket 自动携带 Cookie。服务端对 Cookie
+请求额外要求同源 Origin（或 `Sec-Fetch-Site: same-origin`），其他回环端口
+页面不能借用该会话。
+
+开发模式（外部 Vite + 网关）和远端网关仍使用 Bearer token：前者由 preload
+提供，后者在设置页手动保存。生产环境的 `gateway:getToken` 返回空字符串，
+避免 renderer JS 直接拿到 token。
+
 ## 开发
 
 ```bash

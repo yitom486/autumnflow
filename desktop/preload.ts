@@ -6,6 +6,10 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
  */
 contextBridge.exposeInMainWorld("acpStudio", {
   platform: process.platform,
+  // Production Gateway host sets an HttpOnly SameSite=Strict cookie on the
+  // document response; the renderer never needs the raw token. Dev still uses
+  // the external Vite/gateway pair and the preload token path.
+  authMode: process.env.ELECTRON_DEV === "1" ? "token" : "cookie",
   versions: {
     node: process.versions.node,
     chrome: process.versions.chrome,

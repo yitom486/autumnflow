@@ -696,6 +696,10 @@ const menuActions: MenuActions = {
 // 只响应本应用自己加载的页面（主窗口），其他 webContents 拿不到。
 ipcMain.handle("gateway:getToken", (event) => {
   assertOurSender(event, "gateway:getToken");
+  // Production host authentication is the HttpOnly cookie; do not expose the
+  // raw token to renderer JS. Dev uses the external gateway and still needs
+  // the preload token path.
+  if (!isDev) return "";
   return process.env.ACP_GATEWAY_TOKEN || ensureGatewayToken();
 });
 
