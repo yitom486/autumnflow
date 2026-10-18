@@ -1,5 +1,11 @@
 /** Deterministic agent outputs; exercised through ACP + the actual studio-ui MCP. */
 export const editorialCases = [
+  { kind: "mindmap", title: "E2E MCP 思维导图", labels: ["项目规划", "界面层", "表单交互", "字段校验", "服务层"], data: {
+    root: { label: "项目规划", children: [
+      { label: "界面层", children: [{ label: "表单交互", children: [{ label: "字段校验" }] }] },
+      { label: "服务层", children: [{ label: "权限校验" }] },
+    ] },
+  } },
   { kind: "architecture", title: "E2E 分层架构", labels: ["入口网关", "业务服务", "数据库"], data: {
     layers: [
       { id: "edge", title: "入口层", nodes: [{ id: "gateway", label: "入口网关", highlighted: true }] },
@@ -32,3 +38,19 @@ export const mermaidCases = [
   { kind: "sequence", code: 'sequenceDiagram\n  participant C as 客户端\n  participant S as 服务端\n  C->>S: 提交请求\n  S-->>C: 返回结果', labels: ["客户端", "服务端", "返回结果"] },
   { kind: "state", code: 'stateDiagram-v2\n  [*] --> Pending\n  Pending --> Running: start\n  Running --> Complete: finish\n  Complete --> [*]', labels: ["Pending", "Running", "Complete"] },
 ] as const;
+
+export const mindmapCode = `mindmap
+  root((项目规划))
+    ui[界面层]
+      form[表单交互]
+        validation[字段校验]
+        feedback[提交反馈]
+    server[服务层]
+      auth[权限校验]`;
+
+export const flowJoinCase = { kind: "flowchart", title: "E2E 汇合与循环流程", data: {
+  nodes: [{ id: "start", label: "开始" }, { id: "left", label: "路径 A" }, { id: "right", label: "路径 B" },
+    { id: "join", label: "共享汇合" }, { id: "loop", label: "循环处理" }],
+  edges: [{ from: "start", to: "left" }, { from: "start", to: "right" }, { from: "left", to: "join" },
+    { from: "right", to: "join" }, { from: "join", to: "loop" }, { from: "loop", to: "join" }],
+} } as const;

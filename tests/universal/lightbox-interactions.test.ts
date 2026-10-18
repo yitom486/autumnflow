@@ -6,6 +6,7 @@ import AcpMermaidDiagram from "../../src/components/assistant/AcpMermaidDiagram"
 
 vi.mock("mermaid", () => ({ default: {
   initialize: vi.fn(),
+  mermaidAPI: { getDiagramFromText: vi.fn(async () => ({ db: {} })) },
   render: vi.fn(async () => ({ svg: '<svg xmlns="http://www.w3.org/2000/svg"><text>Diagram</text></svg>' })),
 } }));
 

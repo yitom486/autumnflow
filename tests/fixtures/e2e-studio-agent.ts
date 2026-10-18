@@ -2,7 +2,7 @@ import { Readable, Writable } from "node:stream";
 import * as acp from "@agentclientprotocol/sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
-import { editorialCases, mermaidCases } from "./diagram-cases";
+import { editorialCases, mermaidCases, mindmapCode, flowJoinCase } from "./diagram-cases";
 
 // Model decisions are scripted; MCP discovery and tool execution use the real server.
 const sessions = new Map<string, { mcpServers: any[]; presented?: string; title?: string; parentID?: string }>();
@@ -63,9 +63,50 @@ const app = acp.agent({ name: "e2e-agent" })
       .map((block: any) => String(block.text || ""))
       .filter((t: string) => !t.trimStart().startsWith("<acp-compat-context"))
       .join(" ");
+    if (fullText.startsWith("E2E_PERMISSION")) {
+      // A real reverse ACP request. No command executes in this fixture.
+      const result = await ctx.client.request(acp.methods.client.session.requestPermission, {
+        sessionId,
+        toolCall: { toolCallId: `approval-${sessionId}`, title: "E2E 安全操作", kind: "execute" },
+        options: [
+          { optionId: "once", name: "仅允许本次", kind: "allow_once" },
+          { optionId: "always", name: "本会话始终允许", kind: "allow_always" },
+          { optionId: "reject", name: "拒绝本次操作", kind: "reject_once" },
+        ],
+      });
+      await text(ctx, sessionId, `ACP_PERMISSION_RESULT session=${sessionId} ${JSON.stringify(result)}`);
+      return { stopReason: "end_turn" };
+    }
+    if (fullText === "E2E_URL_ELICITATION") {
+      const elicitationId = `external-${sessionId}`;
+      const result = await ctx.client.request(acp.methods.client.elicitation.create, {
+        sessionId, mode: "url", message: "E2E 外部授权", elicitationId, url: "https://accounts.example.org/connect",
+      });
+      await text(ctx, sessionId, `ACP_URL_RESULT ${JSON.stringify(result)}`);
+      if (acp.CreateElicitationResponse.isAccept(result)) {
+        // Complete outside the chat SSE lifetime to verify snapshot recovery too.
+        setTimeout(() => { void ctx.client.notify(acp.methods.client.elicitation.complete, { elicitationId }); }, 3000);
+      }
+      return { stopReason: "end_turn" };
+    }
+    if (fullText.startsWith("E2E_ELICITATION")) {
+      const result = await ctx.client.request(acp.methods.client.elicitation.create, {
+        sessionId, mode: "form", message: "E2E 部署问询",
+        requestedSchema: {
+          type: "object",
+          properties: {
+            environment: { type: "string", title: "部署环境", enum: ["staging", "production"] },
+            replicas: { type: "integer", title: "副本数量", description: "输入期望副本数" },
+          },
+          required: ["environment", "replicas"],
+        },
+      });
+      await text(ctx, sessionId, `ACP_ELICITATION_RESULT session=${sessionId} ${JSON.stringify(result)}`);
+      return { stopReason: "end_turn" };
+    }
     if (fullText.startsWith("E2E_DIAGRAM:")) {
       const kind = fullText.slice("E2E_DIAGRAM:".length).trim();
-      const scenario = editorialCases.find(item => item.kind === kind);
+      const scenario = kind === "flow-join" ? flowJoinCase : editorialCases.find(item => item.kind === kind);
       if (!scenario) throw new Error(`Unknown diagram case: ${kind}`);
       const rawOutput = await callStudio(sessionId, "render_editorial_diagram", {
         title: scenario.title, diagramType: scenario.kind, data: scenario.data, theme: "system", accent: "blue",
@@ -77,9 +118,25 @@ const app = acp.agent({ name: "e2e-agent" })
       await text(ctx, sessionId, `图表生成完成：${scenario.kind}`);
       return { stopReason: "end_turn" };
     }
+    if (fullText === "E2E_REASONING_CHUNKS") {
+      // DeepSeek-style delivery: arbitrary packet IDs, blank lines and
+      // pauses straddling 200ms. Packet boundaries are not semantic phases.
+      for (let i = 0; i < 40; i++) {
+        await ctx.client.notify(acp.methods.client.session.update, { sessionId, update: {
+          sessionUpdate: "agent_thought_chunk", messageId: `reasoning-packet-${i}`,
+          content: { type: "text", text: `推理段落 ${i}：分析约束并验证假设。\n\n下一行仍属于同一次思考。\n` },
+        } });
+        if (i % 8 === 0) await new Promise(resolve => setTimeout(resolve, 230));
+      }
+      await new Promise(resolve => setTimeout(resolve, 800));
+      await text(ctx, sessionId, "推理分包验证完成。");
+      return { stopReason: "end_turn" };
+    }
     if (fullText.startsWith("E2E_MERMAID:")) {
       const kind = fullText.slice("E2E_MERMAID:".length).trim();
-      const codes = kind === "multiple" ? mermaidCases.map(item => item.code)
+      const codes = kind === "mindmap" ? [mindmapCode]
+        : kind === "mindmap-multiple" ? [mindmapCode, mindmapCode]
+        : kind === "multiple" ? mermaidCases.map(item => item.code)
         : kind === "invalid" ? ["flowchart TD\n A[broken --> B"]
         : [mermaidCases.find(item => item.kind === kind)?.code];
       if (codes.some(code => !code)) throw new Error(`Unknown Mermaid case: ${kind}`);

@@ -5,14 +5,17 @@ import { cn } from "@/lib/utils";
 import { Maximize2, ZoomIn, ZoomOut, RotateCcw, Copy, Check, X, SunMedium, Moon } from "lucide-react";
 import { useLightboxViewport } from "@/hooks/useLightboxViewport";
 import { useThemeStore, THEMES } from "@/stores/useThemeStore";
+import { MermaidSvg, readMindmapBranch, type MindmapBranch } from "./MermaidSvg";
 
 /**
  * Mermaid diagram renderer — lives behind React.lazy so the ~MB
  * mermaid+d3 dependency graph only loads when a mermaid fence appears.
  * Security: `securityLevel: "strict"` (DOMPurify-sanitized SVG, no scripts/
- * clicks); errors fall back to the classic code fence, never a blank box.
+ * authored callbacks); local mindmap controls are attached after sanitization.
+ * Errors fall back to the classic code fence, never a blank box.
  */
 let lastMermaidTheme: string | null = null;
+let renderQueue: Promise<unknown> = Promise.resolve();
 function ensureInit(isDark: boolean) {
   const targetTheme = isDark ? "dark" : "default";
   if (lastMermaidTheme === targetTheme) return;
@@ -26,12 +29,29 @@ function ensureInit(isDark: boolean) {
   lastMermaidTheme = targetTheme;
 }
 
+function renderDiagram(code: string, id: string, isDark: boolean) {
+  // Mermaid configuration and diagram databases are shared. Keep parsing,
+  // hierarchy capture and rendering together, including across themed cards.
+  const result = renderQueue.then(async () => {
+    ensureInit(isDark);
+    const diagram = await mermaid.mermaidAPI.getDiagramFromText(code);
+    const db = diagram.db as { getMindmap?: () => unknown };
+    const hierarchy = typeof db.getMindmap === "function" ? readMindmapBranch(db.getMindmap()) : null;
+    return { ...await mermaid.render(id, code), hierarchy };
+  });
+  renderQueue = result.catch(() => undefined);
+  return result;
+}
+
 interface MermaidLightboxProps {
   svg: string;
   code: string;
   isDark: boolean;
   onToggleTheme: () => void;
   onClose: () => void;
+  tree: MindmapBranch | null;
+  collapsed: ReadonlySet<string>;
+  onToggle: (id: string) => void;
 }
 
 const MermaidLightbox: React.FC<MermaidLightboxProps> = ({
@@ -40,6 +60,7 @@ const MermaidLightbox: React.FC<MermaidLightboxProps> = ({
   isDark,
   onToggleTheme,
   onClose,
+  tree, collapsed, onToggle,
 }) => {
   const { canvasRef, scale, setScale, position, isDragging, reset, pointerHandlers } = useLightboxViewport(onClose);
   const [copied, setCopied] = useState(false);
@@ -142,13 +163,13 @@ const MermaidLightbox: React.FC<MermaidLightboxProps> = ({
         onDoubleClick={reset}
         onClick={(e) => e.stopPropagation()}
       >
-        <div
+        <MermaidSvg
+          svg={svg} tree={tree} collapsed={collapsed} onToggle={onToggle}
           className={cn("select-none flex items-center justify-center p-8 max-w-none", isDragging ? "transition-none" : "transition-transform duration-75 ease-out")}
           style={{
             transform: `translate(${position.x}px, ${position.y}px) scale(${scale})`,
             transformOrigin: "center center",
           }}
-          dangerouslySetInnerHTML={{ __html: svg }}
         />
       </div>
     </div>,
@@ -161,6 +182,14 @@ export default function AcpMermaidDiagram({ code }: { code: string }) {
   const [error, setError] = useState<string | null>(null);
   const [lightboxOpen, setLightboxOpen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [tree, setTree] = useState<MindmapBranch | null>(null);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  useEffect(() => { setCollapsed(new Set()); }, [code]);
+  const toggleBranch = (id: string) => setCollapsed(current => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  });
   const rawId = useId().replace(/[^a-zA-Z0-9_-]/g, "");
 
   const appTheme = useThemeStore((s) => s.theme);
@@ -182,11 +211,9 @@ export default function AcpMermaidDiagram({ code }: { code: string }) {
     let cancelled = false;
     setSvg(null);
     setError(null);
-    ensureInit(effectiveIsDark);
-    mermaid
-      .render(id, code)
-      .then(({ svg }) => {
-        if (!cancelled) setSvg(svg);
+    renderDiagram(code, id, effectiveIsDark)
+      .then(({ svg, hierarchy }) => {
+        if (!cancelled) { setTree(hierarchy); setSvg(svg); }
       })
       .catch((e: unknown) => {
         if (!cancelled) setError(e instanceof Error ? e.message : String(e));
@@ -236,6 +263,7 @@ export default function AcpMermaidDiagram({ code }: { code: string }) {
         data-mermaid-diagram
         className="group/mmd relative my-2 overflow-hidden rounded-lg border border-border bg-background/60 p-3 hover:border-primary/40 transition-colors"
       >
+        {tree && <div className="mb-2 pr-24 text-[11px] text-muted-foreground">点击带 + / − 标记的节点展开或折叠分支</div>}
         {/* 右上角快捷操作条 */}
         <div className="absolute top-2 right-2 flex items-center gap-1 opacity-0 group-hover/mmd:opacity-100 transition-opacity bg-card/90 border border-border/80 rounded-md p-0.5 shadow-sm z-10 backdrop-blur-xs">
           <button
@@ -269,11 +297,11 @@ export default function AcpMermaidDiagram({ code }: { code: string }) {
         </div>
 
         {/* 图表内容，点击可直接打开全屏弹窗 */}
-        <div
+        <MermaidSvg
+          svg={svg} tree={tree} collapsed={collapsed} onToggle={toggleBranch}
           className="overflow-x-auto cursor-zoom-in [&_svg]:mx-auto [&_svg]:max-w-full [&_svg]:h-auto"
           onClick={() => setLightboxOpen(true)}
           title="点击放大查看"
-          dangerouslySetInnerHTML={{ __html: svg }}
         />
       </div>
 
@@ -284,6 +312,7 @@ export default function AcpMermaidDiagram({ code }: { code: string }) {
           isDark={effectiveIsDark}
           onToggleTheme={handleToggleTheme}
           onClose={() => setLightboxOpen(false)}
+          tree={tree} collapsed={collapsed} onToggle={toggleBranch}
         />
       )}
     </>

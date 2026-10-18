@@ -20,8 +20,10 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useThemeStore, THEMES } from "@/stores/useThemeStore";
+import { branchControls, visibleFlowNodes, MindmapDiagramSvg, type DiagramFolding } from "./InteractiveDiagram";
 
 export type DiagramType =
+  | "mindmap"
   | "architecture"
   | "sequence"
   | "flowchart"
@@ -121,6 +123,7 @@ const DIAGRAM_TYPE_META: Record<
   { label: string; icon: React.FC<{ className?: string }> }
 > = {
   architecture: { label: "系统架构分层", icon: Layers },
+  mindmap: { label: "交互式思维导图", icon: Layers },
   sequence: { label: "交互时序图", icon: ArrowRightLeft },
   flowchart: { label: "流程与状态机", icon: GitCommit },
   quadrant: { label: "四象限决策矩阵", icon: Grid },
@@ -138,6 +141,14 @@ export const EditorialDiagramCard: React.FC<EditorialDiagramCardProps> = ({
   const [zoom, setZoom] = useState(1);
   const [isFullscreen, setIsFullscreen] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [collapsed, setCollapsed] = useState<ReadonlySet<string>>(() => new Set());
+  const sourceKey = JSON.stringify(data);
+  useEffect(() => { setCollapsed(new Set()); }, [sourceKey, diagramType]);
+  const folding: DiagramFolding = { collapsed, toggle: id => setCollapsed(current => {
+    const next = new Set(current);
+    if (next.has(id)) next.delete(id); else next.add(id);
+    return next;
+  }) };
   const containerRef = useRef<HTMLDivElement>(null);
   const fullscreenButtonRef = useRef<HTMLButtonElement>(null);
 
@@ -166,7 +177,7 @@ export const EditorialDiagramCard: React.FC<EditorialDiagramCardProps> = ({
         setIsFullscreen(false);
       } else if (event.key === "Tab") {
         const dialog = containerRef.current?.closest('[role="dialog"]');
-        const buttons = Array.from(dialog?.querySelectorAll<HTMLButtonElement>("button") || []);
+        const buttons = Array.from(dialog?.querySelectorAll<HTMLElement>('button:not([disabled]), [tabindex="0"]') || []);
         const index = buttons.indexOf(document.activeElement as HTMLButtonElement);
         if (buttons.length && (index < 0 || (event.shiftKey ? index === 0 : index === buttons.length - 1))) {
           event.preventDefault();
@@ -213,6 +224,7 @@ export const EditorialDiagramCard: React.FC<EditorialDiagramCardProps> = ({
 
   const card = (
     <div
+      data-editorial-diagram={diagramType}
       role={isFullscreen ? "dialog" : undefined}
       aria-modal={isFullscreen ? true : undefined}
       aria-label={isFullscreen ? `${title} 全屏预览` : undefined}
@@ -351,14 +363,15 @@ export const EditorialDiagramCard: React.FC<EditorialDiagramCardProps> = ({
           className="w-fit min-w-full flex justify-center py-1 mx-auto"
         >
           {diagramType === "architecture" && (
-            <ArchitectureDiagramSvg data={data} accent={accent} isDark={effectiveIsDark} />
+            <ArchitectureDiagramSvg data={data} accent={accent} isDark={effectiveIsDark} folding={folding} />
           )}
           {diagramType === "sequence" && (
             <SequenceDiagramSvg data={data} accent={accent} isDark={effectiveIsDark} />
           )}
           {diagramType === "flowchart" && (
-            <FlowchartDiagramSvg data={data} accent={accent} isDark={effectiveIsDark} />
+            <FlowchartDiagramSvg data={data} accent={accent} isDark={effectiveIsDark} folding={folding} />
           )}
+          {diagramType === "mindmap" && <MindmapDiagramSvg data={data} color={accentStyles.stroke} isDark={effectiveIsDark} folding={folding} />}
           {diagramType === "quadrant" && (
             <QuadrantDiagramSvg data={data} accent={accent} isDark={effectiveIsDark} />
           )}
@@ -381,10 +394,12 @@ function ArchitectureDiagramSvg({
   data,
   accent,
   isDark = true,
+  folding,
 }: {
   data: Record<string, any>;
   accent: AccentColor;
   isDark?: boolean;
+  folding: DiagramFolding;
 }) {
   const accentStyles = ACCENT_MAP[accent] || ACCENT_MAP.emerald;
   const layers = Array.isArray(data.layers) ? data.layers : [];
@@ -638,7 +653,11 @@ function ArchitectureDiagramSvg({
             </text>
 
             {/* 容器内的节点卡片 */}
-            {nodes.map((node: any, nodeIdx: number) => {
+            {nodes.length > 0 && <g {...branchControls(`layer:${layerIdx}`, String(layer.title || layer.name || `Layer ${layerIdx + 1}`), folding)}>
+              <rect x="490" y="3" width="110" height="24" rx="5" fill={isDark ? "#181e28" : "#ffffff"} stroke={accentStyles.stroke} />
+              <text x="545" y="19" textAnchor="middle" fontSize="11" fill={isDark ? "#f8fafc" : "#0f172a"}>{folding.collapsed.has(`layer:${layerIdx}`) ? `＋ 展开 ${nodes.length} 个节点` : "− 折叠节点"}</text>
+            </g>}
+            {!folding.collapsed.has(`layer:${layerIdx}`) && nodes.map((node: any, nodeIdx: number) => {
               const geo = getNodeGeometry(nodes.length, nodeIdx);
               const ny = 28;
               const isHighlighted = Boolean(node.highlighted || node.focus);
@@ -704,6 +723,8 @@ function ArchitectureDiagramSvg({
 
       {/* 精准层间 / 节点间连接线：支持居中对齐中轴、外侧旁路防穿透轨道以及标签气泡衬底 */}
       {parsedConnections.map(({ conn, idx, fromEp, toEp }) => {
+        if ((fromEp.type === "node" && folding.collapsed.has(`layer:${fromEp.layerIdx}`)) ||
+            (toEp.type === "node" && folding.collapsed.has(`layer:${toEp.layerIdx}`))) return null;
         const isSameLayer = fromEp.layerIdx === toEp.layerIdx;
         const isCrossLayer = Math.abs(toEp.layerIdx - fromEp.layerIdx) > 1;
         const isDownward = toEp.layerIdx >= fromEp.layerIdx;
@@ -1054,10 +1075,12 @@ function FlowchartDiagramSvg({
   data,
   accent,
   isDark = true,
+  folding,
 }: {
   data: Record<string, any>;
   accent: AccentColor;
   isDark?: boolean;
+  folding: DiagramFolding;
 }) {
   const accentStyles = ACCENT_MAP[accent] || ACCENT_MAP.emerald;
   const steps: any[] = Array.isArray(data.steps)
@@ -1081,6 +1104,11 @@ function FlowchartDiagramSvg({
     }
     return [];
   }, [rawConns, steps]);
+
+  const indexOf = (id: unknown) => steps.findIndex((step, i) => step.id === id || i === id);
+  const edges: Array<[number, number]> = connections.map(conn => [indexOf(conn.from ?? conn.source), indexOf(conn.to ?? conn.target)] as [number, number])
+    .filter(([from, to]) => from >= 0 && to >= 0);
+  const visible = visibleFlowNodes(steps.length, edges, folding.collapsed);
 
   const width = 640;
   const cardWidth = 140;
@@ -1124,6 +1152,7 @@ function FlowchartDiagramSvg({
         const toId = conn.to ?? conn.target;
         const fromIdx = steps.findIndex((s: any, i: number) => s.id === fromId || i === fromId);
         const toIdx = steps.findIndex((s: any, i: number) => s.id === toId || i === toId);
+        if (!visible.has(fromIdx) || !visible.has(toIdx) || folding.collapsed.has(`step:${fromIdx}`)) return null;
         if (fromIdx >= 0 && toIdx >= 0) {
           const s1 = getStepCoord(fromIdx);
           const s2 = getStepCoord(toIdx);
@@ -1135,6 +1164,7 @@ function FlowchartDiagramSvg({
           return (
             <line
               key={idx}
+              data-flow-edge={`${fromIdx}:${toIdx}`}
               x1={x1}
               y1={y1}
               x2={x2}
@@ -1150,11 +1180,14 @@ function FlowchartDiagramSvg({
 
       {/* 渲染各步骤卡片 */}
       {steps.map((step: any, idx: number) => {
+        if (!visible.has(idx)) return null;
         const { x, y } = getStepCoord(idx);
         const isCurrent = Boolean(step.isCurrent || step.active || step.highlighted);
 
         return (
-          <g key={step.id || idx} transform={`translate(${x}, ${y})`}>
+          <g key={step.id || idx} transform={`translate(${x}, ${y})`}
+            data-flow-node={String(step.id ?? idx)}
+            {...(edges.some(([from]) => from === idx) ? branchControls(`step:${idx}`, String(step.label || step.name || `Step ${idx + 1}`), folding) : {})}>
             <rect
               x="0"
               y="0"
@@ -1197,6 +1230,7 @@ function FlowchartDiagramSvg({
                 fill={accentStyles.fill}
               />
             )}
+            {edges.some(([from]) => from === idx) && <text aria-hidden="true" x={cardWidth - 13} y="45" fill={accentStyles.fill} fontSize="16">{folding.collapsed.has(`step:${idx}`) ? "+" : "−"}</text>}
           </g>
         );
       })}

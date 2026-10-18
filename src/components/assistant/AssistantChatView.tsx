@@ -35,6 +35,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { AcpMarkdownText, AcpStandaloneMarkdown } from "@/components/assistant/AcpMarkdown";
+import { AcpContentBlocks, AcpSessionArtifacts } from "./AcpSessionArtifacts";
+import { AcpToolContents } from "./AcpToolContents";
 import { AcpImagePart } from "@/components/assistant/AcpMedia";
 import { TurnChanges } from "@/components/assistant/TurnChanges";
 import { TurnDiffViewer } from "@/components/assistant/TurnDiffViewer";
@@ -620,7 +622,7 @@ const AssistantMessageView: React.FC<{
         ),
         defaultExpanded: true,
         fullContent: (
-          <div className="relative mt-1 pl-3 border-l-2 border-primary/40 text-[12.5px] leading-relaxed text-muted-foreground font-sans break-words max-h-[300px] overflow-y-auto overscroll-contain select-text">
+          <div data-reasoning-trace={messageId} className="relative mt-1 pl-3 border-l-2 border-primary/40 text-[12.5px] leading-relaxed text-muted-foreground font-sans break-words max-h-[300px] overflow-y-auto overscroll-contain select-text">
             <AcpStandaloneMarkdown content={acp.thought} />
           </div>
         ),
@@ -721,8 +723,9 @@ const AssistantMessageView: React.FC<{
           </div>
         ),
         expandedContent:
-          hasDetails || isToolActive(tc.status) || tc.status === "failed" ? (
+          hasDetails || tc.content?.length || isToolActive(tc.status) || tc.status === "failed" ? (
             <div className="space-y-1 mt-1">
+              <AcpToolContents content={tc.content} />
               {(output || err) && (
                 <div className="rounded-control border border-line bg-inset/70 overflow-hidden font-mono text-[11px]">
                   {output && (
@@ -845,7 +848,7 @@ const AssistantMessageView: React.FC<{
   // 首 token 到达前：无正文、无思考、无工具调用。
   // 不渲染整张卡（空卡会被骨架屏撑成又高又窄），只给一行紧凑状态胶囊。
   const awaitingFirstToken =
-    running && Boolean(acp) && !acp?.content && !acp?.thought && !(acp?.toolCalls && acp.toolCalls.length > 0) && !(acp?.images && acp.images.length > 0);
+    running && Boolean(acp) && !acp?.content && !acp?.thought && !acp?.artifacts?.length && !acp?.contentBlocks?.length && !(acp?.toolCalls && acp.toolCalls.length > 0) && !(acp?.images && acp.images.length > 0);
 
   if (awaitingFirstToken) {
     return (
@@ -875,6 +878,8 @@ const AssistantMessageView: React.FC<{
     !running &&
     !acp.content &&
     !acp.thought &&
+    !acp.artifacts?.length &&
+    !acp.contentBlocks?.length &&
     !(acp.toolCalls && acp.toolCalls.length > 0) &&
     !(acp.images && acp.images.length > 0);
 
@@ -1035,6 +1040,8 @@ const AssistantMessageView: React.FC<{
           )}
           <GenerativeActionContext.Provider value={onGenerativeAction}>
             <AssistantMessageBody />
+            <AcpContentBlocks blocks={acp.contentBlocks} />
+            <AcpSessionArtifacts entries={acp.artifacts} />
           </GenerativeActionContext.Provider>
           {citations.length > 0 && <Citations citations={citations} idPrefix={`msg-${messageId}`} />}
           {acp?.content && /Reasoning Cache Expired|referenced reasoning item .* expired/i.test(acp.content) && (

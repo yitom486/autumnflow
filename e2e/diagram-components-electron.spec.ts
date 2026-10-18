@@ -69,7 +69,7 @@ test.describe("Diagram components through real Electron, ACP and MCP", () => {
       const title = page.getByText(scenario.title, { exact: true });
       await expect(title).toBeVisible({ timeout: 20000 });
       const card = title.locator("xpath=../../..");
-      const svg = card.locator('svg[viewBox^="0 0 640 "]');
+      const svg = card.locator('svg[viewBox]:not([viewBox="0 0 24 24"])');
       await assertSvg(svg, scenario.labels);
       if (["architecture", "flowchart", "sequence"].includes(scenario.kind)) {
         expect(await svg.locator("[marker-end]").count()).toBeGreaterThan(0);
@@ -182,6 +182,65 @@ test.describe("Diagram components through real Electron, ACP and MCP", () => {
     await expect(launched.page.locator("[data-mermaid-diagram]")).toHaveCount(0);
     await prompt("E2E_MERMAID:flowchart");
     await assertSvg(launched.page.locator('[data-mermaid-diagram] svg[id^="aui-mmd-"]'), mermaidCases[0].labels);
+    expect(errors).toEqual([]);
+  });
+
+  for (const theme of ["light", "dark"]) test(`Mermaid mindmap: ${theme} nested collapse, keyboard and shared preview state`, async ({}, info) => {
+    const { page } = launched;
+    await page.evaluate(theme => localStorage.setItem("acp_studio_theme_v1", theme), theme);
+    await page.reload();
+    await prompt("E2E_MERMAID:mindmap");
+    const diagram = page.locator("[data-mermaid-diagram]");
+    const forms = () => diagram.getByRole("button", { name: "折叠：表单交互", exact: true });
+    await expect(forms()).toBeVisible({ timeout: 25000 });
+    await expect(diagram.locator('[id$="-node_3"]')).toBeVisible();
+    await expect(diagram.locator('[id$="-edge_2_3"]')).toHaveCount(1);
+    await expect(diagram.locator('[id$="-node_3"]')).not.toHaveAttribute("role", "button");
+    await forms().click();
+    await expect(diagram.getByRole("button", { name: "展开：表单交互", exact: true })).toHaveAttribute("aria-expanded", "false");
+    await expect(diagram.locator('[id$="-node_3"]')).toBeHidden();
+    await expect(diagram.locator('[id$="-edge_2_3"]')).toBeHidden();
+    await expect(page.getByRole("dialog")).toHaveCount(0);
+    await diagram.getByRole("button", { name: "折叠：界面层", exact: true }).click();
+    await expect(diagram.locator('[id$="-node_2"]')).toBeHidden();
+    await expect(diagram.locator('[id$="-node_6"]')).toBeVisible();
+    const ui = diagram.getByRole("button", { name: "展开：界面层", exact: true });
+    await ui.focus(); await page.keyboard.press("Enter");
+    await expect(diagram.getByRole("button", { name: "展开：表单交互", exact: true })).toBeVisible();
+    await expect(diagram.locator('[id$="-node_3"]')).toBeHidden();
+    await diagram.hover();
+    await diagram.getByTitle("放大查看 / 全屏预览", { exact: true }).click();
+    const dialog = page.getByRole("dialog", { name: "Mermaid 图表放大预览" });
+    await expect(dialog.locator('[id$="-node_3"]')).toBeHidden();
+    await dialog.getByTitle("放大 (+)", { exact: true }).click();
+    await expect(dialog.getByText("125%", { exact: true })).toBeVisible();
+    await dialog.getByRole("button", { name: "展开：表单交互", exact: true }).click();
+    await expect(dialog.locator('[id$="-node_3"]')).toBeVisible();
+    await expect(diagram.locator('[id$="-node_3"]')).toBeVisible();
+    const branch = dialog.getByRole("button", { name: "折叠：界面层", exact: true });
+    await branch.focus(); await page.keyboard.press("ArrowLeft");
+    await expect(dialog.locator('[id$="-node_2"]')).toBeHidden();
+    await page.keyboard.press("ArrowRight");
+    await expect(dialog.locator('[id$="-node_2"]')).toBeVisible();
+    await page.keyboard.press("Space");
+    await expect(dialog.locator('[id$="-node_2"]')).toBeHidden();
+    await page.keyboard.press("Escape");
+    await diagram.hover();
+    await diagram.getByTitle(/切换为.*主题/).click();
+    await expect(diagram.getByRole("button", { name: "展开：界面层", exact: true })).toBeVisible();
+    await expect(diagram.locator('[id$="-node_2"]')).toBeHidden();
+    await info.attach(`mindmap-${theme}`, { body: await diagram.screenshot(), contentType: "image/png" });
+    expect(errors).toEqual([]);
+  });
+
+  test("Mermaid mindmaps keep duplicate node IDs isolated between diagrams", async () => {
+    const { page } = launched;
+    await prompt("E2E_MERMAID:mindmap-multiple");
+    const diagrams = page.locator("[data-mermaid-diagram]");
+    await expect(diagrams).toHaveCount(2, { timeout: 25000 });
+    await diagrams.first().getByRole("button", { name: "折叠：界面层", exact: true }).click();
+    await expect(diagrams.first().locator('[id$="-node_2"]')).toBeHidden();
+    await expect(diagrams.last().locator('[id$="-node_2"]')).toBeVisible();
     expect(errors).toEqual([]);
   });
 });

@@ -241,9 +241,9 @@ export function createMcpUiServer(): McpServer {
         title: z.string().describe("图表主标题"),
         description: z.string().optional().describe("图表副标题或背景说明"),
         diagramType: z
-          .enum(["architecture", "sequence", "flowchart", "quadrant", "timeline"])
+          .enum(["architecture", "sequence", "flowchart", "quadrant", "timeline", "mindmap"])
           .describe(
-            "图表类型：architecture(系统架构与分层容器)、sequence(交互时序图)、flowchart(流程与状态机)、quadrant(四象限技术选型/决策矩阵)、timeline(演进里程碑)"
+            "图表类型：mindmap(可折叠思维导图)、architecture(系统架构与分层容器)、sequence(交互时序图)、flowchart(流程与状态机)、quadrant(四象限技术选型/决策矩阵)、timeline(演进里程碑)"
           ),
         theme: z
           .enum(["light", "dark", "system"])
@@ -256,7 +256,7 @@ export function createMcpUiServer(): McpServer {
         data: z
           .record(z.string(), z.unknown())
           .describe(
-            "结构化图表数据：例如 architecture 包含 layers 和 connections；sequence 包含 participants 和 messages；flowchart 包含 steps 和 connections；quadrant 包含 xAxis、yAxis 和 items；timeline 包含 milestones"
+            "结构化图表数据：mindmap 使用 root: {label, description?, children: [...] } 递归树，分支支持点击折叠展开；例如 architecture 包含 layers 和 connections；sequence 包含 participants 和 messages；flowchart 包含 steps 和 connections；quadrant 包含 xAxis、yAxis 和 items；timeline 包含 milestones"
           ),
       },
     },

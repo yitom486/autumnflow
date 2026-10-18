@@ -9,7 +9,7 @@ function render(kind: DiagramType, data: Record<string, unknown>) {
   const markup = renderToStaticMarkup(createElement(EditorialDiagramCard, { title: "测试图表", diagramType: kind, data }));
   const container = document.createElement("div");
   container.innerHTML = markup;
-  const svg = container.querySelector<SVGSVGElement>('svg[viewBox^="0 0 640 "]')!;
+  const svg = container.querySelector<SVGSVGElement>('svg[viewBox]:not([viewBox="0 0 24 24"])')!;
   expect(svg).not.toBeNull();
   expect(svg.outerHTML).not.toMatch(/NaN|Infinity|undefined/);
   return svg;
@@ -20,7 +20,7 @@ describe("Structured diagram payload contracts", () => {
     it(`${scenario.kind} preserves the agent's labels and valid SVG geometry`, () => {
       const svg = render(scenario.kind, scenario.data);
       for (const label of scenario.labels) expect(svg.textContent).toContain(label);
-      expect(svg.getAttribute("viewBox")).toMatch(/^0 0 640 \d+$/);
+      expect(svg.getAttribute("viewBox")).toMatch(/^0 0 \d+ \d+$/);
     });
     it(`${scenario.kind} handles empty collections without invalid SVG coordinates`, () => {
       render(scenario.kind, {});
@@ -82,7 +82,7 @@ describe("Structured diagram payload contracts", () => {
     const overflow = document.body.style.overflow;
     try {
       await act(async () => root.render(createElement(EditorialDiagramCard, {
-        title: "全屏回归", diagramType: "flowchart", data: editorialCases[2].data,
+        title: "全屏回归", diagramType: "flowchart", data: editorialCases.find(item => item.kind === "flowchart")!.data,
       })));
       await act(async () => host.querySelector<HTMLButtonElement>('[aria-label="全屏放大"]')!.click());
       const dialog = document.querySelector('[role="dialog"][aria-label="全屏回归 全屏预览"]')!;
