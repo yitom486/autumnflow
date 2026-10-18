@@ -105,15 +105,15 @@ export class FsGuard {
     return resolved;
   }
 
-  async handleReadFile(params: { sessionId?: string; path: string; line?: number; limit?: number }): Promise<unknown> {
+  async handleReadFile(params: acp.ReadTextFileRequest): Promise<acp.ReadTextFileResponse> {
     const sid = params.sessionId || "";
     this.emitActivity(sid, "fs_read", { path: params.path, line: params.line, limit: params.limit });
     const resolved = this.checkFsPath(params.path, sid, "read_text_file", "read");
     try {
       const content = await fsp.readFile(resolved, "utf8");
       const lines = content.split("\n");
-      if (params.line != null) {
-        const start = Math.max(0, params.line - 1);
+      if (params.line != null || params.limit != null) {
+        const start = Math.max(0, (params.line ?? 1) - 1);
         const end = params.limit != null ? start + params.limit : undefined;
         return { content: lines.slice(start, end).join("\n") };
       }
@@ -123,7 +123,7 @@ export class FsGuard {
     }
   }
 
-  async handleWriteFile(params: { sessionId?: string; path: string; content: string }): Promise<unknown> {
+  async handleWriteFile(params: acp.WriteTextFileRequest): Promise<acp.WriteTextFileResponse> {
     const sid = params.sessionId || "";
     this.emitActivity(sid, "fs_write", { path: params.path, bytes: Buffer.byteLength(params.content || "") });
     const resolved = this.checkFsPath(params.path, sid, "write_text_file", "write");

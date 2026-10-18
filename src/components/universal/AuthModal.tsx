@@ -1,9 +1,12 @@
-import React, { useState } from "react";
-import { X, ShieldCheck, LogOut, RefreshCw, Key } from "lucide-react";
+import React, { useEffect, useState } from "react";
+import { X, ShieldCheck, LogOut, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { AgentSummary } from "@/lib/universal-api";
 import { authenticateAgent } from "@/lib/universal-api";
+import { useStudioStore } from "@/stores/useStudioStore";
+import { AcpAuthTerminal } from "./AcpAuthTerminal";
+import { ElicitationCard, type ElicitationCardProps } from "./ElicitationCard";
 
 export interface UniversalAuthModalProps {
   isOpen: boolean;
@@ -13,14 +16,17 @@ export interface UniversalAuthModalProps {
   onLogout: () => void;
   /** Local-auth probe result from App (session/list without authenticate). */
   authOk?: boolean | null;
+  onElicitationRespond?: ElicitationCardProps["onRespond"];
 }
 
-export const UniversalAuthModal: React.FC<UniversalAuthModalProps> = ({ isOpen, onClose, agent, onAuthenticated, onLogout, authOk }) => {
+export const UniversalAuthModal: React.FC<UniversalAuthModalProps> = ({ isOpen, onClose, agent, onAuthenticated, onLogout, authOk, onElicitationRespond }) => {
   const [methodId, setMethodId] = useState("");
-  const [extraJson, setExtraJson] = useState("{}");
-  const [apiKey, setApiKey] = useState("");
+  const [terminal, setTerminal] = useState<{ ptyId: string; cwd: string } | null>(null);
+  const pending = useStudioStore(state => state.pendingElic);
+  const respondingId = useStudioStore(state => state.respondingId);
   const [busy, setBusy] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
+  useEffect(() => { if (!isOpen) setTerminal(null); }, [isOpen]);
 
   if (!isOpen) return null;
   const methods = agent?.status?.authMethods || [];
@@ -34,19 +40,8 @@ export const UniversalAuthModal: React.FC<UniversalAuthModalProps> = ({ isOpen, 
     setBusy(true);
     setMsg(null);
     try {
-      let extra: Record<string, unknown> = {};
-      // convenience: api-key method + key input -> try common shapes
-      if (apiKey.trim()) {
-        extra = { apiKey: apiKey.trim(), api_key: apiKey.trim(), key: apiKey.trim(), token: apiKey.trim() };
-      }
-      if (extraJson.trim() && extraJson.trim() !== "{}") {
-        try {
-          extra = { ...extra, ...JSON.parse(extraJson) };
-        } catch {
-          throw new Error("附加参数不是合法 JSON");
-        }
-      }
-      await authenticateAgent(agent.id, activeMethod, extra);
+      const result = await authenticateAgent(agent.id, activeMethod);
+      if (result?.terminal) { setTerminal(result.terminal); return; }
       setMsg("认证成功，可以开始会话。");
       onAuthenticated();
     } catch (e: any) {
@@ -58,7 +53,7 @@ export const UniversalAuthModal: React.FC<UniversalAuthModalProps> = ({ isOpen, 
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80">
-      <div className="w-full max-w-lg rounded-2xl border border-border bg-card p-6 text-foreground space-y-4">
+      <div role="dialog" aria-modal="true" aria-label="智能体认证" className="w-full max-w-lg max-h-[90vh] overflow-y-auto rounded-2xl border border-border bg-card p-6 text-foreground space-y-4">
         <div className="flex items-center justify-between border-b border-border pb-3">
           <div className="flex items-center gap-2">
             <ShieldCheck className="w-5 h-5 text-success" />
@@ -98,41 +93,27 @@ export const UniversalAuthModal: React.FC<UniversalAuthModalProps> = ({ isOpen, 
                 <div>
                   <div className="font-semibold text-foreground">{m.name || m.id} <span className="font-mono text-muted-foreground">{m.id}</span></div>
                   {m.description && <div className="text-muted-foreground">{m.description}</div>}
-                  {m.type && <Badge variant="outline" className="mt-1 text-[10px] font-mono">type: {m.type}</Badge>}
+                  {"type" in m && <Badge variant="outline" className="mt-1 text-[10px] font-mono">{m.type === "terminal" ? "终端登录" : m.type}</Badge>}
                 </div>
               </label>
             ))}
           </div>
         )}
 
-        <div className="space-y-2 text-xs">
-          <div className="flex items-center gap-1.5 text-muted-foreground font-semibold"><Key className="w-3.5 h-3.5" /> API Key 快捷填写（可选，适用于 api-key 方式）</div>
-          <input
-            type="password"
-            value={apiKey}
-            onChange={(e) => setApiKey(e.target.value)}
-            placeholder="sk-... / CODEX_API_KEY"
-            className="w-full rounded-lg bg-background border border-border px-3 py-1.5 text-xs outline-none focus:border-primary"
-          />
-          <div className="text-muted-foreground">附加参数 JSON（可选，高级）</div>
-          <textarea
-            value={extraJson}
-            onChange={(e) => setExtraJson(e.target.value)}
-            rows={2}
-            spellCheck={false}
-            className="w-full rounded-lg bg-background border border-border px-3 py-1.5 font-mono text-[11px] outline-none focus:border-primary"
-          />
-        </div>
+        {terminal && agent && <AcpAuthTerminal key={terminal.ptyId} agentId={agent.id} {...terminal}
+          onComplete={() => { setTerminal(null); setMsg("认证完成，已重新连接智能体。"); onAuthenticated(); }}
+          onError={message => { setTerminal(null); setMsg(message); }} />}
+        {onElicitationRespond && pending.filter(item => item.agentId === agent?.id).map(item => <ElicitationCard key={item.elicitationId} e={item} onRespond={onElicitationRespond} busy={respondingId === item.elicitationId} />)}
 
         {msg && <div className="text-xs p-2.5 rounded-xl bg-background border border-border text-muted-foreground">{msg}</div>}
 
         <div className="flex justify-between pt-2 border-t border-border">
-          <Button size="sm" variant="outline" onClick={onLogout} className="text-xs gap-1.5">
+          <Button size="sm" variant="outline" onClick={onLogout} disabled={!agent?.status.agentCapabilities?.auth?.logout || busy || !!terminal} className="text-xs gap-1.5">
             <LogOut className="w-3.5 h-3.5" /> logout
           </Button>
           <div className="flex gap-2">
             <Button size="sm" variant="secondary" onClick={onClose} className="text-xs">关闭</Button>
-            <Button size="sm" variant="default" onClick={runAuth} disabled={busy} className="text-xs gap-1.5">
+            <Button size="sm" variant="default" onClick={runAuth} disabled={busy || !!terminal || !activeMethod} className="text-xs gap-1.5">
               <RefreshCw className={`w-3.5 h-3.5 ${busy ? "animate-spin" : ""}`} /> {busy ? "认证中..." : "authenticate"}
             </Button>
           </div>

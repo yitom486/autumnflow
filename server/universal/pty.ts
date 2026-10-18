@@ -44,6 +44,7 @@ export interface PtySession {
   resize: (cols: number, rows: number) => void;
   onData: (cb: (data: string) => void) => void;
   onExit: (cb: (code: number) => void) => void;
+  initialOutput?: () => string;
 }
 
 export type PtySpawner = (shell: string, args: string[], opts: Record<string, unknown>) => {
@@ -187,12 +188,13 @@ export function createPtySession(
   id: string,
   cwd: string,
   size: PtySize,
-  spawnFn?: PtySpawner | null
+  spawnFn?: PtySpawner | null,
+  launch?: { command: string; args: string[]; env: NodeJS.ProcessEnv },
 ): PtySession {
   const spawn = spawnFn ?? defaultSpawner();
   if (!spawn) throw new Error("pty-unavailable");
   // WSL 工作区（\\wsl$\...）：子进程 cwd 不能是 UNC，改走 wsl.exe --cd（见 wsl.ts）。
-  const plan = ptySpawnForCwd(process.platform, cwd, process.cwd());
+  const plan = launch ? { shell: launch.command, args: launch.args, spawnCwd: cwd } : ptySpawnForCwd(process.platform, cwd, process.cwd());
   const size0 = clampPtySize(size.cols, size.rows);
   const child = spawn(plan.shell, plan.args, {
     // Use the OS ConPTY implementation; release packages omit node-pty's
@@ -203,7 +205,7 @@ export function createPtySession(
     cols: size0.cols,
     rows: size0.rows,
     // 全量继承：Windows 丢 SystemRoot 会导致 PowerShell 启动失败（8009001d）。
-    env: { ...process.env, TERM: "xterm-256color" },
+    env: { ...process.env, TERM: "xterm-256color", ...launch?.env },
   });
   const session: PtySession = {
     id,
@@ -322,6 +324,8 @@ interface UpgradeHead {
  * 旧端的 close）因 attachedWs 已换新，不会误杀。
  */
 function wirePtySocket(id: string, session: PtySession, ws: WebSocket): void {
+  const initial = session.initialOutput?.();
+  if (initial && ws.readyState === ws.OPEN) ws.send(initial);
   session.onData((data) => {
     if (ws.readyState === ws.OPEN) ws.send(data);
   });
@@ -412,6 +416,15 @@ export async function attachPtyUpgrade(server: http.Server): Promise<void> {
         } catch {
           // 关闭中：忽略
         }
+        return;
+      }
+      // Auth terminals are prepared by the server; never replace an exited or
+      // cancelled login process with an unrelated interactive shell.
+      if (ptyId.startsWith("acp-auth-")) {
+        const previous = getPtySession(ptyId);
+        const initial = previous?.initialOutput?.();
+        if (initial) ws.send(initial);
+        ws.close(1000, `exited-${previous?.exitCode ?? "unknown"}`);
         return;
       }
       let session: PtySession;
