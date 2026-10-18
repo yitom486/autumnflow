@@ -158,6 +158,72 @@ async function closeGateway(): Promise<void> {
   }
 }
 
+interface ActiveWorkSnapshot {
+  count: number;
+  summary: string;
+  active: {
+    turns: Array<{ turnId: string; agentId: string; sessionId: string; ageMs: number }>;
+    ptys: Array<{ id: string; cwd: string }>;
+    permissions: Array<{ agentId: string; sessionId: string; title: string }>;
+    elicitations: Array<{ agentId: string; sessionId: string; message: string }>;
+    subagents: Array<{ agentId: string; sessionId: string }>;
+  };
+}
+
+let activeWorkConfirmed = false;
+
+async function inspectActiveWork(): Promise<ActiveWorkSnapshot | null> {
+  if (!gatewayReady || !gateway) return null;
+  try {
+    const token = ensureGatewayToken();
+    const res = await fetch(`http://127.0.0.1:${PORT}/api/universal/active-work`, {
+      headers: { Authorization: `Bearer ${token}` },
+      signal: AbortSignal.timeout(2500),
+    });
+    if (!res.ok) {
+      console.warn(`[Electron] active-work inspection failed: HTTP ${res.status}`);
+      return null;
+    }
+    const data = (await res.json()) as { ok?: boolean } & ActiveWorkSnapshot;
+    return data?.ok ? data : null;
+  } catch (err) {
+    console.warn("[Electron] active-work inspection unavailable:", err);
+    return null;
+  }
+}
+
+async function confirmActiveWork(action: "quit" | "install"): Promise<boolean> {
+  const work = await inspectActiveWork();
+  if (!work) {
+    if (action === "install") {
+      dialog.showErrorBox("无法检查运行中的任务", "后端未响应，更新已取消。请稍后重试。");
+      return false;
+    }
+    // A dead/unreachable host must not trap the user in a quit loop.
+    activeWorkConfirmed = true;
+    return true;
+  }
+  if (work.count === 0) {
+    activeWorkConfirmed = true;
+    return true;
+  }
+  const choice = dialog.showMessageBoxSync({
+    type: "warning",
+    title: "仍有任务在运行",
+    message: `检测到 ${work.count} 个进行中的项`,
+    detail: `${work.summary || "对话、终端或待确认请求"}。\n\n${
+      action === "install" ? "继续安装会中断这些任务并重启应用。" : "继续退出会中断这些任务。"
+    }`,
+    buttons: [action === "install" ? "继续安装并重启" : "继续退出", "取消"],
+    defaultId: 1,
+    cancelId: 1,
+    noLink: true,
+  });
+  if (choice !== 0) return false;
+  activeWorkConfirmed = true;
+  return true;
+}
+
 async function startGateway() {
   // 本函数只在 !isDev 时被调用：确保 token 已生成并进入进程环境，
   // 同一机器前后端共享同一 token。
@@ -414,6 +480,25 @@ async function createWindow(cwd?: string) {
   w.once("ready-to-show", () => {
     if (!w.isDestroyed()) { w.show(); w.focus(); }
   });
+  let allowClose = false;
+  let closeCheckInFlight = false;
+  w.on("close", (event) => {
+    if (allowClose || !gateway || activeWorkConfirmed || windows.size > 1) return;
+    event.preventDefault();
+    if (closeCheckInFlight) return;
+    closeCheckInFlight = true;
+    void confirmActiveWork("quit")
+      .then((ok) => {
+        closeCheckInFlight = false;
+        if (!ok || w.isDestroyed()) return;
+        allowClose = true;
+        w.close();
+      })
+      .catch((err) => {
+        closeCheckInFlight = false;
+        console.error("[Electron] active-work close check failed:", err);
+      });
+  });
   w.on("closed", () => {
     windows.delete(w);
     if (win === w) win = [...windows][0] || null;
@@ -656,7 +741,7 @@ if (!app.requestSingleInstanceLock()) {
     if (!isDev) await startGateway();
     buildAppMenu(menuActions, { isDev });
     await createWindow();
-    initUpdater();
+    initUpdater({ beforeInstall: () => confirmActiveWork("install") });
   }).catch(reportStartupFailure);
 
   app.on("activate", () => {
@@ -674,8 +759,26 @@ if (!app.requestSingleInstanceLock()) {
     return hostClosePromise;
   };
 
+  let quitCheckInFlight = false;
   app.on("before-quit", (event) => {
-    if (quitAfterHostShutdown || (!gateway && !hostClosePromise)) return;
+    if (quitAfterHostShutdown) return;
+    if (gateway && !activeWorkConfirmed && !quitCheckInFlight) {
+      event.preventDefault();
+      quitCheckInFlight = true;
+      void confirmActiveWork("quit")
+        .then((ok) => {
+          quitCheckInFlight = false;
+          if (ok) app.quit();
+        })
+        .catch((err) => {
+          console.error("[Electron] active-work quit check failed:", err);
+          quitCheckInFlight = false;
+          activeWorkConfirmed = true;
+          app.quit();
+        });
+      return;
+    }
+    if (!gateway && !hostClosePromise) return;
     event.preventDefault();
     void shutdownHost().finally(() => {
       quitAfterHostShutdown = true;

@@ -139,6 +139,11 @@ export class UniversalRegistry {
     return c;
   }
 
+  /** Live connections only; used by the native quit/update active-work guard. */
+  listConnections(): UniversalAgentConnection[] {
+    return [...this.conns.values()];
+  }
+
   statuses(): AgentStatus[] {
     return [...this.profiles.keys()].map((id) => {
       const c = this.conns.get(id);

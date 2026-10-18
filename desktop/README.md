@@ -36,6 +36,14 @@ turn。没有 finish 的 turn 视为中断，恢复时只追加一次 terminal e
 **不会把 prompt 再发给 Agent**。写盘按 50ms 合并，turn 结束和 Host 退出时
 强制 flush；默认保留 7 天或最近 500 个 turn。
 
+## 退出/更新保护
+
+主进程在关闭最后一个窗口、普通退出和安装更新前请求
+`GET /api/universal/active-work`，检查运行中的 turn、PTY、待确认
+permission/elicitation 和子任务。有任务时弹原生确认框：取消会保留窗口并
+取消安装，继续才关闭 Host/进入更新。Host 不可达时普通退出不阻塞，但更新
+会被取消并报错，避免在未知状态下重启。
+
 ## 开发
 
 ```bash

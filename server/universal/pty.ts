@@ -253,6 +253,25 @@ export function getPtySession(id: string): PtySession | undefined {
   return sessions.get(id);
 }
 
+/** Read-only inventory for the quit/update guard. */
+export function listPtySessions(): Array<{
+  id: string;
+  cwd: string;
+  exited: boolean;
+  exitCode: number | null;
+  attached: boolean;
+  grace: boolean;
+}> {
+  return [...sessions.values()].map((session) => ({
+    id: session.id,
+    cwd: session.cwd,
+    exited: session.exited,
+    exitCode: session.exitCode,
+    attached: attachedWs.has(session.id),
+    grace: graceTimers.has(session.id),
+  }));
+}
+
 export function destroyPtySession(id: string): void {
   clearGraceTimer(id);
   attachedWs.delete(id);

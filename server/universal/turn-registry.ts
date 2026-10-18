@@ -77,6 +77,11 @@ export class TurnRegistry {
     return this.turns.get(id);
   }
 
+  /** Turns whose prompt is still executing (used by quit/update guards). */
+  listRunning(): TurnRecord[] {
+    return [...this.turns.values()].filter((turn) => turn.status === "running");
+  }
+
   /**
    * Rebuild a turn from the persistent journal. A file without a finish line
    * is an interrupted turn: append a terminal error instead of prompting the

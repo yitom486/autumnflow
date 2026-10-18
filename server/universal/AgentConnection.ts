@@ -240,6 +240,24 @@ export class UniversalAgentConnection {
     return this.interaction.listPendingElicitations(sessionId);
   }
 
+  /** Snapshot used by the quit/update guard; no tool output or file contents. */
+  inspectActiveWork() {
+    const subagents = [...this.childStates.entries()]
+      .map(([sessionId, state]) => ({
+        sessionId,
+        title: String((state as any)?.title || (state as any)?.name || ""),
+        status: String((state as any)?.status || ""),
+      }))
+      .filter((subagent) => !subagent.status || /running|pending|started|in_progress/i.test(subagent.status));
+    return {
+      agentId: this.profile.id,
+      runningSessions: [...this.promptLocks],
+      permissions: this.listPendingPermissions(),
+      elicitations: this.listPendingElicitations(),
+      subagents,
+    };
+  }
+
   resolvePermission(permissionId: string, outcome: unknown): boolean {
     return this.interaction.resolvePermission(permissionId, outcome);
   }

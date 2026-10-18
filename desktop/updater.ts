@@ -71,7 +71,12 @@ export function checkForUpdatesFromMenu() {
   void doCheck(true);
 }
 
-export function initUpdater() {
+export interface UpdaterOptions {
+  /** Native confirmation before quitting into an update; false cancels install. */
+  beforeInstall?: () => Promise<boolean>;
+}
+
+export function initUpdater(options: UpdaterOptions = {}) {
   const enabled = app.isPackaged && process.env.ACP_DISABLE_UPDATES !== "1";
   const autoInstall = canAutoInstall();
   let settings = loadSettings();
@@ -117,8 +122,16 @@ export function initUpdater() {
     }
     await autoUpdater.downloadUpdate().catch((e) => broadcast({ type: "error", message: String(e?.message || e) }));
   });
-  ipcMain.handle("update:install", () => {
+  ipcMain.handle("update:install", async () => {
     if (!enabled) return;
+    if (options.beforeInstall) {
+      try {
+        if (!(await options.beforeInstall())) return;
+      } catch (e: any) {
+        broadcast({ type: "error", message: `无法检查运行中的任务: ${String(e?.message || e)}`, manual: true });
+        return;
+      }
+    }
     // isSilent=true → 安装器带 /S 静默运行，沿用注册表 InstallLocation 的原目录；isForceRunAfter=true → 装完重新打开
     setImmediate(() => autoUpdater.quitAndInstall(true, true));
   });
