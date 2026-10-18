@@ -4,6 +4,7 @@ import { requestAgent, sdkRequest, sdkValue, requireAgentCapability } from "./ac
 import { applyArtifactUpdate } from "../../shared/acp-session-state";
 import { TerminalAuthentication } from "./terminal-auth";
 import { AcpTransport, type AcpClientHandlers } from "./acp-transport";
+import { isCodexProfile, provisionCodexCodeModeHome } from "./codex-code-mode-home";
 import { SessionService } from "./session-service";
 import {
   QuotaCache,
@@ -90,7 +91,26 @@ export class UniversalAgentConnection {
   constructor(profile: AgentProfile) {
     this.profile = profile;
     this.transport = new AcpTransport(() => this.profile, {
-      prepareEnv: ({ cwd, resolvedCommand, env }) => this.resources.prepare(profile.id, cwd, resolvedCommand, env),
+      prepareEnv: async ({ cwd, resolvedCommand, env }) => {
+        const prepared = await this.resources.prepare(profile.id, cwd, resolvedCommand, env);
+        if (!isCodexProfile(profile) || profile.env?.CODEX_HOME?.trim()) return prepared;
+        // Codex runs against an app-owned CODEX_HOME seeded from the user's
+        // home (auth + config, copied once), so `features.code_mode` is on
+        // without writing ~/.codex. Any failure falls back to the user's home.
+        try {
+          const home = await provisionCodexCodeModeHome();
+          for (const warning of home.warnings) {
+            console.warn(`[UniversalACP:${profile.id}] codex home: ${warning}`);
+          }
+          return { ...(prepared ?? {}), CODEX_HOME: home.home };
+        } catch (error) {
+          console.warn(
+            `[UniversalACP:${profile.id}] code-mode home unavailable; using the user's Codex home`,
+            error,
+          );
+          return prepared;
+        }
+      },
       terminalAuthAvailable: (resolvedCommand) => this.terminalAuth.available(resolvedCommand),
       onInitialized: (init) => {
         this.resources.handshake(init.agentInfo?.version || "");

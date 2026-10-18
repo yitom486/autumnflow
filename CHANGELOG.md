@@ -27,6 +27,9 @@
 ### Changed
 - 内部拆分（对外行为不变）：`UniversalAgentConnection` 拆成四个单一职责模块——`AcpTransport`（进程 / NDJSON 流 / initialize / 退出）、`SessionService`（new/load/resume/fork/list/close/delete 与会话元数据回收）、`PromptTurn`（prompt 租约、取消、首轮兼容块）、`SessionState`（per-session 内存的唯一回收点），facade 从 1005 行降到约 620 行，只保留 permission / fs / terminal / subagent / quota 语义与广播，HTTP 路由与对外 API 完全不变。桌面端同时纳入类型检查：新增 `tsconfig.desktop.json` 与 `bun run typecheck`，Electron 主进程/preload/host 与 server/shared 一起过 `tsc`。
 
+### Changed
+- Codex 默认使用应用独占的 `CODEX_HOME`（默认 `~/.acp-studio/codex-home`，可用 `ACP_CODEX_HOME` 或 `ACP_STUDIO_HOME` 覆盖，不写死机器路径）：首次连接从用户 `~/.codex` 复制 `auth.json` 与 `config.toml`，并合并 `[features] code_mode = true` 后启动；不再写入全局 `~/.codex`。复制或创建失败时自动回退用户目录并告警，不影响 Codex 可用性。
+
 ### Added
 - 会话级 Code mode（PTC）：智能体面板新增 `Code mode` 开关，仅在 Agent 的 `initialize` 声明 `agentCapabilities._meta.toolsMode` 时显示；开关按线程持久化。开启后新建/恢复会话会带上 `_meta.toolsMode = 'ptc'`，Agent 只下发 `run_code`，并把该会话的全部工具（含 studio-ui MCP）渲染成 `tools.<name>()`。未声明的运行时（codex/claude/opencode/agy）忽略该请求——OpenCode 的 code mode 本来就由 MCP 目录驱动，无需开关。
 - DeepSeek 凭据面板：智能体面板新增「DeepSeek 凭据」入口。可在应用内把 `DEEPSEEK_API_KEY` 写入 DSH 的 user-env（`$DSH_HOME/.env`，原子写入、保留其它变量与注释、写前备份 `.env.bak`、不回显密钥），保存后点「重连」让新的 `dsh` 进程读取；重连在有运行中对话时拒绝（409）。面板同时给出「改用 DeepSeek Account 模型分组」和 `dsh --profile web` 设置页两条替代路径。
