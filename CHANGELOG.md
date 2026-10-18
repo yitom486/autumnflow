@@ -9,7 +9,18 @@
 
 ## [Unreleased]
 
+### Fixed
+- 修复发行版点击「新会话」/「点击加载模型」时 `e.trim is not a function` 崩溃：新会话按钮把 React 点击事件当作 `targetCwd` 传入 `setWorkspace`，现已在 UI 接线、hook 入口与路径工具三层做类型收口。
+- 修复跨智能体会话串绑：切换 Agent 时清空上一 Agent 的 live session/messages，并丢弃 `session/new`、`resume`、`fork`、模型发现等迟到结果；历史线程按 Agent 隔离恢复。
+- 修复失效会话把 UI 卡在历史视图：resume 失败后清除 live `sessionId`（历史记录仍保留），「点击加载模型」会强制新建会话并载入模型；无效/过期 session id 不再被裸绑定，重复失败会保留 stale 标记。
+
 ### Added
+- 会话列表与顶栏显示人类可读的会话名称：优先使用 Agent `session/list` / `session_info_update` 提供的标题，回退到首条用户消息生成的标题；不再把裸 session id 当作会话名展示（id 仅保留在悬停提示与检索中）。
+- 空会话自动收敛：已知无用户/助手内容的空会话立即从列表隐藏，并在闲置后 best-effort 删除；另每分钟对 Agent 侧默认标题且超过 5 分钟未活动的空会话做一次保守清理，保留当前会话、已有内容和自定义标题。
+- 多终端浮动窗口：每个窗口独立 xterm + PTY/WebSocket，可同时开多个 shell；标题栏「+」新建窗口、点击置顶、窗口位置分别持久化，关闭单个窗口不影响其他终端。
+- 终端 shell 自动探测：优先用户本机的 PowerShell 7 (`pwsh.exe`)，再回落 Windows PowerShell、`%COMSPEC%`/cmd、`$SHELL`/常见 POSIX shell；支持 `ACP_TERMINAL_SHELL` 显式覆盖，状态接口与终端标题显示实际 shell（例如 PowerShell 7+），不再硬编码 PowerShell 5。
+- 模型目录冷启动缓存：按 Agent 持久化上一次 `models` / `configOptions`（含 OpenCode 的 100+ 模型选项），启动或切换 Agent 时先立即恢复模型选择器，再由新的 `session/new` 后台刷新；避免每次重启都要等 OpenCode 冷启动数秒才看到 OpenCode Go 模型。
+
 <!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 
 ## [0.1.11] - 2026-10-18

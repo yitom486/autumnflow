@@ -59,4 +59,17 @@ describe("application session references", () => {
     expect(() => index.list("a")).toThrow();
     expect(fs.readFileSync(file, "utf8")).toBe("broken");
   });
+  it("merges Agent titles into existing references without auto-importing rows", () => {
+    const { index } = fixture();
+    index.remember("a", "s1", "created", { cwd: "D:/app" });
+    index.updateMany("a", [
+      { sessionId: "s1", title: "  PyQt 看板选型  ", updatedAt: "2026-10-18T00:00:00.000Z" },
+      { sessionId: "external", title: "不应导入", updatedAt: "2026-10-18T00:00:00.000Z" },
+    ]);
+    expect(index.get("a", "s1")).toMatchObject({
+      title: "PyQt 看板选型",
+      updatedAt: "2026-10-18T00:00:00.000Z",
+    });
+    expect(index.get("a", "external")).toBeUndefined();
+  });
 });

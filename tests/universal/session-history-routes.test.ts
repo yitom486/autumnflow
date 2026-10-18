@@ -20,6 +20,13 @@ describe("managed conversation routes", () => {
     expect((await response.json()).result.sessions.map((row: any) => row.sessionId)).toEqual(["ours"]);
     expect(connect).not.toHaveBeenCalled(); expect(listSessions).not.toHaveBeenCalled();
   });
+  it("refreshes Agent-provided titles for an already-connected agent", async () => {
+    studioSessions.remember("opencode", "titled", "created", { cwd: "D:/app" });
+    const listSessions = vi.fn().mockResolvedValue({ sessions: [] });
+    vi.spyOn(universalRegistry, "connFor").mockReturnValue({ connected: true, listSessions } as any);
+    await request("history");
+    expect(listSessions).toHaveBeenCalledWith({});
+  });
   it("imports a selected reference and refuses to promote or resume a known child", async () => {
     const connect = vi.fn();
     vi.spyOn(universalRegistry, "connFor").mockReturnValue({ connect } as any);

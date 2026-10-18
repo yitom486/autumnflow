@@ -27,6 +27,7 @@ import {
   hasGenerativeToolPlaceholder,
 } from "@/components/assistant/toolkit";
 import { resolveToolDisplayTitle } from "@/components/assistant/tool-widget-utils";
+import { titleForThread } from "@/lib/threads";
 
 export interface UseChatSendOptions {
   qc: QueryClient;
@@ -202,7 +203,12 @@ export function useChatSend({
           return;
         }
         turnStarted = true;
+        const wasEmpty = !current.messages.some((m) => m.role === "user" && m.content.trim());
         current.appendMessage({ id: "user-" + Date.now(), role: "user", content: display, timestamp: now(), ...(sentImages.length ? { images: sentImages } : {}) });
+        if (wasEmpty) {
+          const title = titleForThread({ messages: [{ role: "user", content: display } as any] });
+          if (title) current.setSessionInfo({ ...(current.sessionInfo || {}), title });
+        }
         current.appendMessage({
           id: assistantId,
           role: "assistant",

@@ -44,8 +44,10 @@ function fakeSpawner(log: string[]): PtySpawner {
 }
 
 describe("pty helpers (真终端服务端)", () => {
-  it("selects shell per platform", () => {
-    expect(shellForPlatform("win32").shell).toBe("powershell.exe");
+  it("selects a real shell per platform", () => {
+    const win = shellForPlatform("win32");
+    expect(win.shell).toBeTruthy();
+    expect(Array.isArray(win.args)).toBe(true);
     expect(shellForPlatform("linux").shell).toBeTruthy();
   });
 

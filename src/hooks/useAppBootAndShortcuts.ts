@@ -42,7 +42,12 @@ export function useAppBootAndShortcuts({
   useEffect(() => {
     agentsRef.current = agents;
     if (agents.length > 0 && !agents.find((a) => a.id === activeAgentId)) {
-      setActiveAgentId(agents[0].id);
+      const next = agents[0].id;
+      // setActiveAgentId clears the previous agent's live session/messages.
+      // Restore (or create) the target agent's own thread immediately so the
+      // fallback never leaves agent A's transcript under agent B's id.
+      setActiveAgentId(next);
+      if (!restoreThread(next)) newThread(next);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents]);

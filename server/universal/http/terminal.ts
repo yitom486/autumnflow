@@ -16,8 +16,17 @@ export const terminalRouter = new Hono();
 
 terminalRouter.get("/pty/status", async () => {
   const { isPtyAvailable, ptyUnavailableReason } = await import("../pty");
+  const { resolveInteractiveShell } = await import("../platform/shell");
   const available = isPtyAvailable();
-  return json({ ok: true, available, reason: available ? null : ptyUnavailableReason() });
+  const shell = resolveInteractiveShell();
+  return json({
+    ok: true,
+    available,
+    reason: available ? null : ptyUnavailableReason(),
+    shell: shell.shell,
+    shellKind: shell.kind,
+    shellLabel: shell.label,
+  });
 });
 
 const numLike = z.union([z.number(), z.string()]).nullish();

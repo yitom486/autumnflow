@@ -38,7 +38,7 @@ export const ProjectSessionsModal: React.FC<ProjectSessionsModalProps> = ({
 
   const query = filter.trim().toLowerCase();
   const filtered = query
-    ? sessions.filter((s) => (s.title || s.sessionId).toLowerCase().includes(query))
+    ? sessions.filter((s) => `${s.title || ""} ${s.sessionId}`.toLowerCase().includes(query))
     : sessions;
 
   return (

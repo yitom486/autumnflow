@@ -127,7 +127,7 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
   const projectGroups = useMemo(() => {
     const query = searchQuery.trim().toLowerCase();
     const filtered = query
-      ? p.sessions.filter((s) => (s.title || s.sessionId).toLowerCase().includes(query))
+      ? p.sessions.filter((s) => `${s.title || ""} ${s.sessionId}`.toLowerCase().includes(query))
       : p.sessions;
 
     const isPosix = isPosixEnvironment();
@@ -357,7 +357,7 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
 
       const sessionChildren: SidebarResource[] = visibleItems.map((s) => ({
         id: s.sessionId,
-        label: s.title || `会话 ${s.sessionId.slice(0, 8)}`,
+        label: s.title || "未命名会话",
         kind: "session",
         metadata: { session: s, project: grp },
         badge: (

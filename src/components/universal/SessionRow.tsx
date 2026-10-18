@@ -59,7 +59,7 @@ export const SessionRow = React.memo<SessionRowProps>(
   ({ session, active, supportsFork, onOpen, onFork, onDelete }) => {
     const time = compactTimeAgo(session.updatedAt);
     const [hovered, setHovered] = useState(false);
-    const sessionTitle = session.title || session.sessionId;
+    const sessionTitle = session.title || "未命名会话";
 
     return (
       <ContextMenu>
@@ -81,7 +81,7 @@ export const SessionRow = React.memo<SessionRowProps>(
             {/* 彻底去除原生 title 属性，告别生硬白底遮挡 tooltip */}
             <div className="min-w-0 flex-1 pr-1.5 flex items-center gap-1.5 overflow-hidden">
               <MarqueeLabel active={hovered || active} className="text-xs">
-                {session.title || session.sessionId.slice(0, 16)}
+                {sessionTitle}
               </MarqueeLabel>
             </div>
 

@@ -76,6 +76,8 @@ export class UniversalAgentConnection {
   private connectInFlight: Promise<unknown> | null = null;
   private sessionSinks = new Map<string, Set<SseSend>>();
   private sessionCommands = new Map<string, unknown[]>();
+  /** Short-lived first-page session/list cache: sidebar polls history every 5s. */
+  private listedSessionsCache: { at: number; result: unknown } | null = null;
   private childParents = new Map<string, string>();
   private childUpdates = new Map<string, unknown[]>();
   private childStates = new Map<string, acp.SubagentUpdate>();
@@ -675,6 +677,15 @@ export class UniversalAgentConnection {
         await new Promise((r) => setTimeout(r, 25));
         if (replayed.length === n) break;
       }
+      // session/load replay is the authoritative place to recover the title
+      // when session/list is unavailable or hasn't polled yet. Read it after
+      // the grace window so a trailing session_info_update is not missed.
+      const titleUpdate = [...replayed].reverse().find(
+        (update: any) => update?.sessionUpdate === "session_info_update" && typeof update.title === "string" && update.title.trim(),
+      ) as { title?: string } | undefined;
+      if (titleUpdate?.title && sessionId) {
+        studioSessions.update(this.profile.id, sessionId, { title: titleUpdate.title });
+      }
       return { result, replayed };
     } finally {
       unsub();
@@ -751,14 +762,35 @@ export class UniversalAgentConnection {
   async listSessions(args: Record<string, unknown> = {}): Promise<unknown> {
     const conn = this.ensureConn();
     requireAgentCapability("session.list", this.initResult?.agentCapabilities?.sessionCapabilities?.list);
+    const firstPage = !args.cursor;
+    if (firstPage && this.listedSessionsCache && Date.now() - this.listedSessionsCache.at < 15_000) {
+      return this.listedSessionsCache.result;
+    }
     const result = await requestAgent(conn, acp.methods.agent.session.list, sdkRequest(acp.methods.agent.session.list, args));
-    for (const row of result.sessions || []) {
+    const rows = Array.isArray(result.sessions) ? result.sessions : [];
+    // Pull Agent-provided titles/timestamps into the app's own reference rows.
+    // Only existing rows are touched, so opening the sidebar never imports
+    // unrelated sessions from the agent's store.
+    const known = new Set(studioSessions.list(this.profile.id).map(row => row.sessionId));
+    studioSessions.updateMany(
+      this.profile.id,
+      rows
+        .filter(row => known.has(String(row.sessionId || "")))
+        .map(row => ({
+          sessionId: String(row.sessionId || ""),
+          ...(typeof row.title === "string" && row.title.trim() ? { title: row.title } : {}),
+          ...(typeof row.updatedAt === "string" && row.updatedAt ? { updatedAt: row.updatedAt } : {}),
+          ...(typeof row.cwd === "string" && row.cwd ? { cwd: row.cwd } : {}),
+        })),
+    );
+    for (const row of rows) {
       const association = childAssociation("", row);
       if (association) {
         studioSessions.linkChild(this.profile.id, association.parentSessionId, association.sessionId, association.title);
         this.childParents.set(association.sessionId, association.parentSessionId);
       }
     }
+    if (firstPage) this.listedSessionsCache = { at: Date.now(), result };
     return result;
   }
 
@@ -785,6 +817,7 @@ export class UniversalAgentConnection {
   async deleteSession(args: Record<string, unknown>): Promise<unknown> {
     const conn = this.ensureConn();
     const sid = typeof args.sessionId === "string" ? args.sessionId : "";
+    this.listedSessionsCache = null;
     if (sid) {
       this.sessionTurnCounts.delete(sid);
     }
@@ -798,6 +831,7 @@ export class UniversalAgentConnection {
   async closeSession(args: Record<string, unknown>): Promise<unknown> {
     const conn = this.ensureConn();
     const sid = typeof args.sessionId === "string" ? args.sessionId : "";
+    this.listedSessionsCache = null;
     if (sid) {
       this.sessionTurnCounts.delete(sid);
     }

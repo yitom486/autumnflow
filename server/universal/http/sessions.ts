@@ -52,7 +52,19 @@ sessionsRouter.post("/:agentId/session/:action", jsonBody(sessionBody), async (c
   try {
     const agentId = c.req.param("agentId");
     const conn = universalRegistry.connFor(agentId);
-    if (action === "history") return json({ ok: true, result: { sessions: studioSessions.list(agentId).filter(row => row.kind === "main") } });
+    if (action === "history") {
+      // Reference list stays app-owned, but pull Agent-provided titles while
+      // connected so the sidebar can show names instead of raw ids. Cached at
+      // the connection layer (15s); failures never break history.
+      if (conn.connected) {
+        // Fire-and-forget: history must stay fast even if an Agent is slow to
+        // answer session/list. The title cache lands on the next 5s poll.
+        void conn.listSessions({}).catch((err: Error) => {
+          console.debug(`[Universal] history title refresh skipped: ${err?.message || err}`);
+        });
+      }
+      return json({ ok: true, result: { sessions: studioSessions.list(agentId).filter(row => row.kind === "main") } });
+    }
     if (action === "children") return json({ ok: true, result: { sessions: studioSessions.children(agentId, String(body.sessionId || "")) } });
     if (action === "import") {
       const sessionId = String(body.sessionId || "");

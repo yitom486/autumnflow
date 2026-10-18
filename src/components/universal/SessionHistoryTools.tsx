@@ -58,7 +58,7 @@ export function ExternalHistoryDialog({ agentId, onClose, onOpen }: {
               } catch (error) { setError((error as Error).message); }
               finally { setImporting(null); }
             }}>
-            <span className="min-w-0 flex-1"><span className="block truncate">{row.title || row.sessionId}</span><span className="block truncate text-xs text-muted-foreground">{row.cwd}</span></span>
+            <span className="min-w-0 flex-1"><span className="block truncate">{row.title || "未命名会话"}</span><span className="block truncate text-xs text-muted-foreground">{row.cwd}</span></span>
             <span className="shrink-0 text-xs text-muted-foreground">{row.origin ? "已添加" : importing === row.sessionId ? "正在添加…" : "导入"}</span>
           </button>)}
       </div>
@@ -94,7 +94,7 @@ export function SubagentMenu({ agentId, sessionId }: { agentId: string; sessionI
     </button>
     {open && <div className="absolute right-0 top-full z-50 mt-1 max-h-64 w-64 overflow-y-auto rounded-lg border border-border bg-popover p-1 shadow-lg">
       {children.map(child => <button key={child.sessionId} type="button" onClick={() => { setSelected(child); setOpen(false); }}
-        className="block w-full truncate rounded p-2 text-left text-xs hover:bg-muted" title={child.sessionId}>{child.title || child.sessionId}</button>)}
+        className="block w-full truncate rounded p-2 text-left text-xs hover:bg-muted" title={child.sessionId}>{child.title || "子会话"}</button>)}
     </div>}
     {selected && <SubagentViewer key={`${agentId}:${selected.sessionId}`} agentId={agentId} child={selected} onClose={() => setSelected(null)} />}
   </div>;

@@ -41,7 +41,7 @@ export const SessionControls: React.FC<SessionControlsProps> = (p) => {
           </span>
         )}
         <div className="flex-1" />
-        <Button size="sm" variant="outline" onClick={p.onNewSession} disabled={p.busy} className="h-6 text-[11px] gap-1"><PlusCircle className="w-3 h-3" />new</Button>
+        <Button size="sm" variant="outline" onClick={() => p.onNewSession()} disabled={p.busy} className="h-6 text-[11px] gap-1"><PlusCircle className="w-3 h-3" />new</Button>
         {p.supportsFork && (
           <Button size="sm" variant="outline" onClick={p.onForkSession} disabled={p.busy || !p.sessionId} title="Fork 当前会话" className="h-6 text-[11px] gap-1"><GitFork className="w-3 h-3" />fork</Button>
         )}

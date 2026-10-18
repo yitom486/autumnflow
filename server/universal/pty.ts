@@ -22,6 +22,7 @@ import type { Socket } from "node:net";
 import type { WebSocket } from "ws";
 import { gatewayAuthHeaders } from "./security";
 import { parseWslCwd, ptySpawnForCwd } from "./wsl";
+import { resolveInteractiveShell } from "./platform/shell";
 
 export const PTY_PATH = "/api/universal/terminal/pty";
 export const PTY_MIN_COLS = 20;
@@ -56,10 +57,10 @@ export type PtySpawner = (shell: string, args: string[], opts: Record<string, un
   readonly process: string;
 };
 
-/** 按平台选 shell（纯函数，可测）：Windows 走 ConPTY + PowerShell。 */
+/** 按平台选 shell（纯函数，可测）：优先用户本机 pwsh（PowerShell 7+），再回落。 */
 export function shellForPlatform(platform: string): { shell: string; args: string[] } {
-  if (platform === "win32") return { shell: "powershell.exe", args: ["-NoLogo"] };
-  return { shell: process.env.SHELL || "/bin/sh", args: [] };
+  const resolved = resolveInteractiveShell({ platform: platform as NodeJS.Platform });
+  return { shell: resolved.shell, args: resolved.args };
 }
 
 /** 钳制终端尺寸（纯函数，可测）。 */

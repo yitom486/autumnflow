@@ -360,11 +360,11 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
       <div className={cn("hidden @3xl:flex items-center gap-2 min-w-0 flex-1 justify-center max-w-lg", compact && "!hidden")}>
         {sessionId ? (
           <div className="flex items-center gap-2 min-w-0 px-2 py-1">
-            <span className="text-[13px] font-medium text-foreground truncate max-w-[160px] sm:max-w-[260px]">
+            <span
+              className="text-[13px] font-medium text-foreground truncate max-w-[260px] sm:max-w-[360px]"
+              title={`会话 ${sessionId}`}
+            >
               {sessionTitle || "当前会话"}
-            </span>
-            <span className="font-mono text-[11px] text-muted-foreground hidden md:inline">
-              {sessionId.slice(0, 8)}
             </span>
             {usage && (
               <span className="items-center gap-1 font-mono text-[10px] text-muted-foreground hidden lg:inline-flex pl-1 border-l border-border/60">
@@ -431,7 +431,7 @@ export const StudioHeader: React.FC<StudioHeaderProps> = ({
         {/* Primary New Session Button (Monochromatic High-Contrast) */}
         <button
           type="button"
-          onClick={onNewSession}
+          onClick={() => onNewSession()}
           disabled={isStreaming || busy}
           title="新会话（可设置工作目录与 MCP）"
           className={`h-7 px-2.5 text-xs gap-1.5 font-medium rounded-md flex items-center cursor-pointer transition-colors disabled:opacity-50 ${

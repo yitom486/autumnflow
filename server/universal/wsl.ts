@@ -8,6 +8,8 @@
  * 前端无需改协议：服务端从 cwd 自动识别 WSL（`\\wsl$\` 或 `\\wsl.localhost\` 前缀）。
  */
 
+import { execArgsFor, resolveInteractiveShell, type ResolvedShell } from "./platform/shell";
+
 export interface WslLocation {
   distro: string;
   /** Linux 形态绝对路径（`/home/u/proj`，distro 根即 `/`）。 */
@@ -40,16 +42,21 @@ export interface SpawnPlan {
   spawnCwd: string;
 }
 
-/** 交互 PTY 用：WSL 走 `wsl.exe -d D --cd /path`（默认 shell），其余沿用平台 shell。 */
-export function ptySpawnForCwd(platform: string, cwd: string, fallbackCwd: string): SpawnPlan {
+/** 交互 PTY 用：WSL 走 `wsl.exe -d D --cd /path`（默认 shell），其余用用户默认 shell（pwsh 优先）。 */
+export function ptySpawnForCwd(
+  platform: string,
+  cwd: string,
+  fallbackCwd: string,
+  shell: ResolvedShell = resolveInteractiveShell({ platform: platform as NodeJS.Platform }),
+): SpawnPlan {
   if (platform === "win32") {
     const wsl = parseWslCwd(cwd);
     if (wsl) {
       return { shell: "wsl.exe", args: ["-d", wsl.distro, "--cd", wsl.linuxPath], spawnCwd: fallbackCwd };
     }
-    return { shell: "powershell.exe", args: ["-NoLogo"], spawnCwd: cwd };
+    return { shell: shell.shell, args: shell.args, spawnCwd: cwd };
   }
-  return { shell: process.env.SHELL || "/bin/sh", args: [], spawnCwd: cwd };
+  return { shell: shell.shell, args: shell.args, spawnCwd: cwd };
 }
 
 /** 单次执行用：WSL 走 `wsl.exe -- sh -c`（与 Linux 端 `/bin/sh -c` 同语义）。 */
@@ -57,7 +64,8 @@ export function execSpawnForCwd(
   platform: string,
   cwd: string,
   cmd: string,
-  fallbackCwd: string
+  fallbackCwd: string,
+  shell: ResolvedShell = resolveInteractiveShell({ platform: platform as NodeJS.Platform }),
 ): SpawnPlan {
   if (platform === "win32") {
     const wsl = parseWslCwd(cwd);
@@ -68,9 +76,8 @@ export function execSpawnForCwd(
         spawnCwd: fallbackCwd,
       };
     }
-    return { shell: "powershell.exe", args: ["-NoProfile", "-Command", cmd], spawnCwd: cwd };
   }
-  return { shell: "/bin/sh", args: ["-c", cmd], spawnCwd: cwd };
+  return { shell: shell.shell, args: execArgsFor(shell, cmd), spawnCwd: cwd };
 }
 
 /** git 用：WSL 走 `wsl.exe -- git …`（Windows git  spawn 不了 UNC cwd）。 */

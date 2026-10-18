@@ -83,7 +83,71 @@ function freezeBlocks(blocks?: import("@agentclientprotocol/sdk").ContentBlock[]
 }
 
 function hasUserMessage(t: ChatThread): boolean {
-  return t.messages.some((m) => m.role === "user" && m.content.trim().length > 0);
+  return hasUserContent(t.messages);
+}
+
+/** True when the thread contains at least one non-blank user turn (the only reliable "has content" signal). */
+export function hasUserContent(messages: ReadonlyArray<Pick<Message, "role" | "content">> | undefined): boolean {
+  return (messages ?? []).some(
+    (m) => m.role === "user" && typeof m.content === "string" && m.content.trim().length > 0
+  );
+}
+
+/**
+ * Human-readable session title derived from the first user turn.
+ * The agent often supplies a title via session/list or session_info_update;
+ * this is the local fallback so lists/headers never have to show raw ids.
+ */
+export function deriveSessionTitle(
+  messages: ReadonlyArray<Pick<Message, "role" | "content">> | undefined,
+  fallback?: string | null
+): string | null {
+  const first = (messages ?? []).find(
+    (m) => m.role === "user" && typeof m.content === "string" && m.content.trim().length > 0
+  );
+  if (!first || typeof first.content !== "string") {
+    const f = typeof fallback === "string" ? fallback.trim() : "";
+    return f || null;
+  }
+  const text = first.content
+    .replace(/```[\s\S]*?```/g, " ")
+    .replace(/`([^`]*)`/g, "$1")
+    .replace(/!\[[^\]]*\]\([^)]*\)/g, " ")
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, "$1")
+    .replace(/[*_]{1,3}/g, "")
+    .replace(/^[ \t]*#{1,6}[ \t]+/gm, " ")
+    .replace(/^[ \t]*>[ \t]?/gm, " ")
+    .replace(/^[ \t]*[-*+][ \t]+/gm, " ")
+    .replace(/^[ \t]*\d+[.)][ \t]+/gm, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+  if (!text) return (typeof fallback === "string" && fallback.trim()) || null;
+  const chars = Array.from(text);
+  return chars.slice(0, 42).join("") + (chars.length > 42 ? "…" : "");
+}
+
+/** True when the thread has neither a user turn nor assistant text. */
+export function isThreadEmpty(thread: Pick<ChatThread, "messages"> | null | undefined): boolean {
+  if (!thread) return true;
+  if (hasUserContent(thread.messages)) return false;
+  return !thread.messages.some(
+    (m) => m.role === "assistant" && typeof m.content === "string" && m.content.trim().length > 0
+  );
+}
+
+/** Agent-generated default names that carry no information for the user. */
+export function isDefaultSessionTitle(title?: string | null): boolean {
+  if (typeof title !== "string") return true;
+  const t = title.trim();
+  if (!t) return true;
+  return /^(New session|新会话)(\s*-\s*|\s*$)/i.test(t);
+}
+
+/** Title stored on a thread, or derived from its first user message. */
+export function titleForThread(t: Pick<ChatThread, "title" | "messages"> | null | undefined): string | null {
+  if (!t) return null;
+  const stored = typeof t.title === "string" ? t.title.trim() : "";
+  return stored || deriveSessionTitle(t.messages);
 }
 
 /** 参与「是否真的变了」判定的字段：只有这些值变了才需要产出新对象。 */
@@ -334,8 +398,13 @@ export function pruneThreads(
  *    - 保留 Windows 风格路径（带盘符或 Windows 路径格式）。
  */
 export function toEnvironmentNativeCwd(rawPath?: string | null, isPosix = false): string {
-  if (!rawPath) return "";
-  let p = rawPath.trim().replace(/\\/g, "/");
+  // Runtime boundary: callers include UI event handlers and persisted records.
+  // A non-string here used to crash the whole handler with `e.trim is not a
+  // function`, so treat it as "no path" instead of trusting the TS signature.
+  if (typeof rawPath !== "string") return "";
+  const trimmed = rawPath.trim();
+  if (!trimmed) return "";
+  let p = trimmed.replace(/\\/g, "/");
 
   // 若带 Windows WSL UNC 前缀，剥离 UNC 包装，提取真实路径
   const uncMatch = /^\/\/(?:wsl\$|wsl\.localhost)\/[^\/]+(\/.*)?$/i.exec(p);

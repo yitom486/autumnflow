@@ -88,6 +88,41 @@ export class SessionIndex {
     Object.assign(row, metadata);
     this.save(rows);
   }
+  /**
+   * Batch variant for session/list pages: one read + one atomic save, and only
+   * rows already referenced by this app are updated (never auto-imports).
+   */
+  updateMany(
+    agentId: string,
+    updates: Array<{ sessionId: string; title?: string; updatedAt?: string; cwd?: string }>,
+  ) {
+    if (updates.length === 0) return;
+    const rows = this.read();
+    const byId = new Map(rows.filter(row => row.agentId === agentId).map(row => [row.sessionId, row]));
+    let changed = false;
+    for (const update of updates) {
+      const row = byId.get(update.sessionId);
+      if (!row) continue;
+      if (typeof update.title === "string" && update.title.trim()) {
+        const title = update.title.trim();
+        if (row.title !== title) {
+          row.title = title;
+          changed = true;
+        }
+      }
+      if (typeof update.updatedAt === "string" && update.updatedAt) {
+        if (row.updatedAt !== update.updatedAt) {
+          row.updatedAt = update.updatedAt;
+          changed = true;
+        }
+      }
+      if (typeof update.cwd === "string" && update.cwd && row.cwd !== update.cwd) {
+        row.cwd = update.cwd;
+        changed = true;
+      }
+    }
+    if (changed) this.save(rows);
+  }
   children(agentId: string, sessionId: string): StudioSession[] {
     const rows = this.list(agentId);
     const parents = new Set([sessionId]);

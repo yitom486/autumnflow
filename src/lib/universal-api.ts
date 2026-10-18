@@ -380,10 +380,23 @@ export interface Attachment {
 
 /** ACP "Authentication required" (-32000, reserved ACP range -32000..-32099). */
 export const ACP_ERROR_AUTH_REQUIRED = -32000;
+/** JSON-RPC invalid params: agents also use it for "this session id is unknown". */
+export const ACP_ERROR_INVALID_PARAMS = -32602;
 
 export function acpErrorCode(err: unknown): number | null {
   const code = (err as { code?: unknown } | null)?.code;
   return typeof code === "number" ? code : null;
+}
+
+/**
+ * True when the agent says the session id itself is gone/invalid (as opposed
+ * to the agent not implementing load/resume). Bare-attaching such an id is
+ * never useful: every later prompt fails, and the UI keeps showing a dead id.
+ */
+export function isSessionGoneError(err: unknown): boolean {
+  if (acpErrorCode(err) === ACP_ERROR_INVALID_PARAMS) return true;
+  const msg = err instanceof Error ? err.message : String(err ?? "");
+  return /session\b.*(?:not found|does not exist|expired|unknown|gone)|(?:unknown|invalid|no such)\s+session|invalid params.*session/i.test(msg);
 }
 
 /** Prefer the gateway's authRequired flag / ACP -32000 code over message sniffing. */
@@ -496,8 +509,15 @@ export async function searchWorkspace(
   return data;
 }
 
-/** 真 PTY 可用性（决定抽屉走 WS 交互模式还是回落 one-shot）。 */
-export async function ptyStatus(): Promise<{ ok: boolean; available: boolean; reason: string | null }> {
+/** 真 PTY 可用性 + 实际选中的用户 shell（决定 WS 交互/回落，并诚实显示 pwsh 7 还是 5.1）。 */
+export async function ptyStatus(): Promise<{
+  ok: boolean;
+  available: boolean;
+  reason: string | null;
+  shell?: string;
+  shellKind?: "pwsh" | "powershell" | "cmd" | "posix" | "custom";
+  shellLabel?: string;
+}> {
   const res = await apiFetch("/api/universal/terminal/pty/status");
   return res.json();
 }
@@ -911,11 +931,12 @@ export interface EmptyCleanupResult {
 export async function cleanupEmptySessions(
   agentId: string,
   exceptIds: string[] = [],
+  maxAgeMs?: number,
 ): Promise<EmptyCleanupResult> {
   const res = await apiFetch(`/api/universal/agents/${encodeURIComponent(agentId)}/sessions/empty`, {
     method: "DELETE",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ exceptIds }),
+    body: JSON.stringify({ exceptIds, ...(maxAgeMs !== undefined ? { maxAgeMs } : {}) }),
   });
   const data = await res.json();
   if (!data.ok && (!data || data.deleted === undefined)) {

@@ -1,10 +1,15 @@
 import { describe, expect, test } from "vitest";
 import {
+  deriveSessionTitle,
   findThreadBySessionId,
   freezeMessage,
+  isDefaultSessionTitle,
+  isThreadEmpty,
   partitionTurnContent,
   pruneThreads,
   threadForAgent,
+  titleForThread,
+  toEnvironmentNativeCwd,
   type ChatThread,
 } from "../../src/lib/threads";
 
@@ -150,6 +155,42 @@ describe("threads (per-agent persisted records)", () => {
     const res5 = partitionTurnContent("", "正在执行代码核查...\n已确认无误。");
     expect(res5.progress).toBeUndefined();
     expect(res5.conclusion).toBe("正在执行代码核查...\n已确认无误。");
+  });
+
+  test("toEnvironmentNativeCwd tolerates non-string runtime values", () => {
+    // A React click event / recent-workspace record used to reach this helper
+    // through setWorkspace and crash with `e.trim is not a function`.
+    expect(toEnvironmentNativeCwd(undefined)).toBe("");
+    expect(toEnvironmentNativeCwd(null)).toBe("");
+    expect(toEnvironmentNativeCwd({} as any)).toBe("");
+    expect(toEnvironmentNativeCwd(42 as any)).toBe("");
+    expect(toEnvironmentNativeCwd({ path: "D:/x" } as any)).toBe("");
+    expect(toEnvironmentNativeCwd("  D:\\pythonProject\\pyqt  ")).toBe("D:/pythonProject/pyqt");
+  });
+
+  test("derives a readable session title from the first user turn", () => {
+    expect(deriveSessionTitle([msg("assistant", "hi"), msg("user", "  ## 帮我看看这个 PyQt 项目  ")])).toBe(
+      "帮我看看这个 PyQt 项目"
+    );
+    expect(
+      deriveSessionTitle([msg("user", "```python\nprint(1)\n```\n请解释 **这段** [代码](https://example.com)")])
+    ).toBe("请解释 这段 代码");
+    expect(deriveSessionTitle([msg("assistant", "only answer")], "Agent 标题")).toBe("Agent 标题");
+    expect(deriveSessionTitle([msg("user", "2026 年 10 月计划")])).toBe("2026 年 10 月计划");
+    expect(deriveSessionTitle([])).toBeNull();
+    expect(deriveSessionTitle([msg("user", "a".repeat(80))])).toHaveLength(43); // 42 + ellipsis
+    expect(titleForThread({ title: "已命名", messages: [] } as any)).toBe("已命名");
+    expect(titleForThread({ title: null, messages: [msg("user", "回退标题")] } as any)).toBe("回退标题");
+  });
+
+  test("recognizes empty threads and placeholder agent titles", () => {
+    expect(isThreadEmpty(thread({ id: "t", agentId: "opencode" }))).toBe(true);
+    expect(isThreadEmpty(thread({ id: "t", agentId: "opencode", messages: [msg("system", "notice")] }))).toBe(true);
+    expect(isThreadEmpty(thread({ id: "t", agentId: "opencode", messages: [msg("assistant", "answer")] }))).toBe(false);
+    expect(isThreadEmpty(thread({ id: "t", agentId: "opencode", messages: [msg("user", "hello")] }))).toBe(false);
+    expect(isDefaultSessionTitle("New session - 2026-10-18")).toBe(true);
+    expect(isDefaultSessionTitle("新会话")).toBe(true);
+    expect(isDefaultSessionTitle("PyQt 看板选型")).toBe(false);
   });
 });
 

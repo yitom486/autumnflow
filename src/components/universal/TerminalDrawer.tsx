@@ -6,7 +6,7 @@ import { SearchAddon } from "@xterm/addon-search";
 import { SerializeAddon } from "@xterm/addon-serialize";
 import { Unicode11Addon } from "@xterm/addon-unicode11";
 import "@xterm/xterm/css/xterm.css";
-import { Terminal as TerminalIcon, X, Maximize2, Minimize2, Trash2, Folder, Square, Search, ChevronUp, ChevronDown, Download, RefreshCw, Power } from "lucide-react";
+import { Terminal as TerminalIcon, X, Maximize2, Minimize2, Trash2, Folder, Square, Search, ChevronUp, ChevronDown, Download, RefreshCw, Power, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useWorkspaceDefaultQuery } from "@/lib/acp-queries";
 import { useStudioStore } from "@/stores/useStudioStore";
@@ -107,6 +107,20 @@ export interface TerminalDrawerProps {
   isOpen: boolean;
   onClose: () => void;
   cwd: string | null;
+  /** Stable id for this terminal window (per-window geometry + labels). */
+  windowId?: string;
+  /** Short visible label (#1, #2) so multiple windows are distinguishable. */
+  label?: string;
+  /** Stacking order when multiple terminal windows are open. */
+  zIndex?: number;
+  /** Cascade position for a newly opened window (no stored geometry yet). */
+  initialGeom?: TerminalGeom | null;
+  /** Open another independent terminal window. */
+  onNewWindow?: () => void;
+  /** Bring this window to front. */
+  onActivate?: () => void;
+  /** Only the active window consumes card prefills / card cwd. */
+  active?: boolean;
 }
 
 /**
@@ -187,9 +201,9 @@ export function resizeTerminalGeom(
   return clampTerminalGeom({ x, y, w, h }, vw, vh);
 }
 
-function loadTerminalGeom(): TerminalGeom | null {
+function loadTerminalGeom(key: string = TERMINAL_GEOM_KEY): TerminalGeom | null {
   try {
-    const raw = localStorage.getItem(TERMINAL_GEOM_KEY);
+    const raw = localStorage.getItem(key);
     if (!raw) return null;
     const g = JSON.parse(raw) as Partial<TerminalGeom>;
     if (
@@ -206,7 +220,18 @@ function loadTerminalGeom(): TerminalGeom | null {
   }
 }
 
-export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ isOpen, onClose, cwd }) => {
+export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({
+  isOpen,
+  onClose,
+  cwd,
+  windowId,
+  label,
+  zIndex = 40,
+  initialGeom = null,
+  onNewWindow,
+  onActivate,
+  active = true,
+}) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitAddonRef = useRef<FitAddon | null>(null);
@@ -221,6 +246,8 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ isOpen, onClose,
   // 传输模式：pty 优先，status 不可用/WS 全败即回落 oneshot（Bun dev）。
   const [mode, setModeState] = useState<TerminalMode>("probing");
   const modeRef = useRef<TerminalMode>("probing");
+  const [shellLabel, setShellLabel] = useState("");
+  const geomKey = windowId ? `${TERMINAL_GEOM_KEY}_${windowId}` : TERMINAL_GEOM_KEY;
   const [ptyDead, setPtyDead] = useState(false);
   const wsRef = useRef<WebSocket | null>(null);
   const ptyIdRef = useRef<string>("");
@@ -480,23 +507,24 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ isOpen, onClose,
     if (!isOpen) return;
     setGeom((prev) => {
       if (prev) return clampTerminalGeom(prev, window.innerWidth, window.innerHeight);
-      const stored = loadTerminalGeom();
+      const stored = loadTerminalGeom(geomKey);
       const vw = window.innerWidth;
       const vh = window.innerHeight;
       if (stored) return clampTerminalGeom(stored, vw, vh);
+      if (initialGeom) return clampTerminalGeom(initialGeom, vw, vh);
       return defaultTerminalGeom(vw, vh);
     });
-  }, [isOpen]);
+  }, [isOpen, geomKey, initialGeom]);
 
   // 几何持久化（拖拽每帧写 localStorage 成本可忽略，失败静默）。
   useEffect(() => {
     if (!geom) return;
     try {
-      localStorage.setItem(TERMINAL_GEOM_KEY, JSON.stringify(geom));
+      localStorage.setItem(geomKey, JSON.stringify(geom));
     } catch {
       // ignore storage errors
     }
-  }, [geom]);
+  }, [geom, geomKey]);
 
   // 视口变化时把面板钳回可见区。
   useEffect(() => {
@@ -652,7 +680,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ isOpen, onClose,
   // 若有命令正在跑则保留 prefill，等下一轮就绪再填（3s 上限）。
   // 卡片 cwd 与现存活会话不同目录时只提示、不切会话（loud 原则，不悄悄杀 shell）。
   useEffect(() => {
-    if (!isOpen || !prefill) return;
+    if (!isOpen || !prefill || !active) return;
     let cancelled = false;
     let tries = 0;
     const consumePrefill = () => {
@@ -699,7 +727,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ isOpen, onClose,
     return () => {
       cancelled = true;
     };
-  }, [isOpen, prefill]);
+  }, [isOpen, prefill, active]);
 
   const handleClear = () => {
     if (termRef.current) {
@@ -857,7 +885,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ isOpen, onClose,
   // 打开即探活，隐藏只藏不杀：WS/shell 跨开关保留，真卸载才断（见下）。
   // 卡片 cwd 在此 single-owner 消费：有则切 resolvedCwd + 建连用它，并暂存供预填做 mismatch 提示。
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen || !active) return;
     // 活连接仍在：只重排版，不重建（shell 状态零打扰）。
     const live = wsRef.current;
     if (modeRef.current === "pty" && live && live.readyState === WebSocket.OPEN) {
@@ -883,6 +911,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ isOpen, onClose,
     ptyStatus()
       .then((s) => {
         if (cancelled) return;
+        if (s.shellLabel || s.shell) setShellLabel(s.shellLabel || s.shell || "");
         if (s.available) connectPty(connectCwd);
         else enterOneshotFallback(s.reason);
       })
@@ -893,7 +922,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ isOpen, onClose,
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isOpen]);
+  }, [isOpen, active]);
 
   // 真卸载才断 WS（隐藏不断，会话保留）。
   useEffect(() => () => closePty(), []);
@@ -926,7 +955,8 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ isOpen, onClose,
   return (
     <div
       className="fixed z-40 bg-card border border-border rounded-xl shadow-xl flex flex-col overflow-hidden"
-      style={panelStyle}
+      style={{ ...panelStyle, zIndex }}
+      onPointerDownCapture={() => onActivate?.()}
       aria-hidden={hidden}
     >
       {/* Terminal Title Bar（拖拽手柄；按钮区 stopPropagation 不触发拖动） */}
@@ -939,7 +969,15 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ isOpen, onClose,
       >
         <div className="flex items-center gap-2 font-medium text-foreground">
           <TerminalIcon className="w-3.5 h-3.5 text-muted-foreground" />
-          <span>终端</span>
+          <span>终端{label ? ` ${label}` : ""}</span>
+          {shellLabel && !wslDistro ? (
+            <span
+              className="font-mono text-[10px] px-1.5 py-0.5 rounded border text-muted-foreground border-border bg-transparent max-w-[130px] truncate"
+              title={`实际 shell：${shellLabel}`}
+            >
+              {shellLabel}
+            </span>
+          ) : null}
           {/* 传输模式徽标：诚实展示当前是真 shell 还是回落 */}
           <span
             className={`font-mono text-[10px] px-1.5 py-0.5 rounded border ${
@@ -1008,9 +1046,20 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ isOpen, onClose,
               variant="ghost"
               onClick={handleKillPty}
               className="h-6 w-6 p-0 hover:text-destructive"
-              title="结束 PTY 会话（右上 X 只隐藏、会话保留；这里才真正杀 shell）"
+              title="结束 PTY 会话（立即杀 shell；只关窗口由右上 X 负责）"
             >
               <Power className="w-3.5 h-3.5" />
+            </Button>
+          )}
+          {onNewWindow && (
+            <Button
+              size="sm"
+              variant="ghost"
+              onClick={onNewWindow}
+              className="h-6 w-6 p-0 hover:text-foreground"
+              title="新建终端窗口（独立 shell，可同时开多个）"
+            >
+              <Plus className="w-3.5 h-3.5" />
             </Button>
           )}
           <Button
@@ -1057,7 +1106,7 @@ export const TerminalDrawer: React.FC<TerminalDrawerProps> = ({ isOpen, onClose,
             variant="ghost"
             onClick={onClose}
             className="h-6 w-6 p-0 hover:text-destructive"
-            title="隐藏终端，会话保留（Ctrl+` 切回；杀会话请点电源按钮）"
+            title="关闭此终端窗口（其他终端窗口保留；Ctrl+` 隐藏全部）"
           >
             <X className="w-3.5 h-3.5" />
           </Button>

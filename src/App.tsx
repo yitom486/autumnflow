@@ -1,4 +1,4 @@
-import React, { Suspense, lazy, useRef, useState, useCallback } from "react";
+import React, { Suspense, lazy, useRef, useState, useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AcpAssistantProvider } from "@/components/assistant/AcpAssistantProvider";
 import { AcpComposer } from "@/components/assistant/AcpComposer";
@@ -34,7 +34,9 @@ import {
   useAgentConfig,
   useSessionLifecycle,
   useChatSend,
+  useEmptySessionCleanup,
 } from "@/hooks";
+import { isDefaultSessionTitle, isThreadEmpty, titleForThread, type ChatThread } from "@/lib/threads";
 import {
   formatGenerativeActionPrompt,
   type GenerativeCardAction,
@@ -78,9 +80,9 @@ const GitChangesModal = lazyModal(
   "GitChangesModal",
   () => import("@/components/universal/GitChangesModal").then((m) => m.GitChangesModal as any)
 );
-const TerminalDrawer = lazyModal(
-  "TerminalDrawer",
-  () => import("@/components/universal/TerminalDrawer").then((m) => m.TerminalDrawer as any)
+const TerminalWorkspace = lazyModal(
+  "TerminalWorkspace",
+  () => import("@/components/universal/TerminalWorkspace").then((m) => m.TerminalWorkspace as any)
 );
 const ModelBrowserModal = lazyModal(
   "ModelBrowserModal",
@@ -137,8 +139,44 @@ export default function App() {
   const activeAgent = agents.find((a) => a.id === s.activeAgentId);
   const connected = !!activeAgent?.status?.connected;
   const sessionsQuery = useSessionsQuery(s.activeAgentId, connected);
-  const sessions = sessionsQuery.data ?? [];
-  const sessionCwd = sessions.find((x) => x.sessionId === s.sessionId)?.cwd || null;
+  const sessionsRaw = sessionsQuery.data ?? [];
+  // Local thread cache is authoritative for "this session has a conversation"
+  // and for a human title until the Agent supplies one via session/list.
+  const sessions = useMemo<SessionItem[]>(() => {
+    const threadBySession = new Map<string, ChatThread>();
+    for (const thread of Object.values(s.threads)) {
+      if (thread.agentId === s.activeAgentId && thread.sessionId) {
+        threadBySession.set(thread.sessionId, thread);
+      }
+    }
+    return sessionsRaw.flatMap((item) => {
+      const thread = item.sessionId ? threadBySession.get(item.sessionId) : undefined;
+      // App-owned session with a known empty thread: hide immediately.
+      if (thread && isThreadEmpty(thread)) return [];
+      // No local thread + Agent default/empty title => abandoned draft. Do not
+      // resurrect it as a raw-id row. Imported sessions always stay visible.
+      if (!thread && item.origin === "created" && isDefaultSessionTitle(item.title)) return [];
+      const agentTitle = isDefaultSessionTitle(item.title) ? null : item.title;
+      const title = agentTitle || titleForThread(thread) || "未命名会话";
+      return [{ ...item, title }];
+    });
+  }, [sessionsRaw, s.threads, s.activeAgentId]);
+  const activeThread = s.activeThreadId ? s.threads[s.activeThreadId] : undefined;
+  const activeThreadTitle = titleForThread(activeThread);
+  const agentSessionTitle = isDefaultSessionTitle(s.sessionInfo?.title) ? undefined : s.sessionInfo?.title;
+  const headerSessionTitle = agentSessionTitle || activeThreadTitle || undefined;
+  const sessionCwd = sessionsRaw.find((x) => x.sessionId === s.sessionId)?.cwd || null;
+
+  // Filter is immediate; this eventually deletes abandoned empty drafts from
+  // the Agent store too (only app-owned threads, never imported ones).
+  useEmptySessionCleanup({
+    agentId: s.activeAgentId,
+    sessions: sessionsRaw,
+    threads: s.threads,
+    currentSessionId: s.sessionId,
+    connected,
+    qc,
+  });
   const isWsl = Boolean(typeof localStorage !== "undefined" && localStorage.getItem("acp_wsl_native_distro"));
   const rawEffective = s.currentWorkspace || sessionCwd;
   // WSL 纯净模式：绝不把 Windows 挂载盘 /mnt/... 当作有效工作区
@@ -378,7 +416,7 @@ export default function App() {
             }}
             authOk={s.authOk[s.activeAgentId] ?? null}
             sessionId={s.sessionId}
-            sessionTitle={s.sessionInfo?.title}
+            sessionTitle={headerSessionTitle}
             usage={s.usage}
             currentWorkspace={s.currentWorkspace}
             recentWorkspaces={s.recentWorkspaces}
@@ -488,7 +526,7 @@ export default function App() {
               fallbackModels={s.models?.availableModels || null}
               fallbackCurrentModel={s.models?.currentModelId || ""}
               onFallbackModel={handleFallbackModel}
-              onEnsureSession={() => ensureSession()}
+              onEnsureSession={() => ensureSession(s.activeAgentId, true)}
               sessionLoading={s.sessionLoading}
               currentWorkspace={effectiveCwd}
               recentWorkspaces={s.recentWorkspaces}
@@ -577,7 +615,7 @@ export default function App() {
 
       <MountOnFirstOpen isOpen={s.terminalOpen}>
         <Suspense fallback={s.terminalOpen ? <LazyModalFallback /> : null}>
-          <TerminalDrawer
+          <TerminalWorkspace
             isOpen={s.terminalOpen}
             onClose={() => s.setTerminalOpen(false)}
             cwd={effectiveCwd}

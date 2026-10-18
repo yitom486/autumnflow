@@ -16,6 +16,7 @@ import {
   pruneThreads,
   saveThreads,
   threadForAgent,
+  titleForThread,
   toEnvironmentNativeCwd,
   type ChatThread,
 } from "@/lib/threads";
@@ -131,7 +132,7 @@ interface StudioState {
   setSessionId: (id: string | null) => void;
   setSessionError: (e: string | null) => void;
   setSessionLoading: (v: boolean) => void;
-  applySessionResult: (res: any) => void;
+  applySessionResult: (res: any, expectedAgentId?: string) => void;
   setModes: (m: ModeState | null) => void;
   setModels: (m: ModelCatalog | null) => void;
   setConfigOptions: (c: any[] | null) => void;
@@ -403,6 +404,49 @@ function persistActiveAgentId(id: string): void {
   }
 }
 
+/**
+ * Last-known model catalog per agent. OpenCode builds its provider/model list
+ * lazily on the first session/new after process start (measured ~6s on this
+ * machine, ~0.4s once warm). Hydrating this cache makes the model picker
+ * usable immediately; session/new still refreshes it in the background.
+ */
+const MODEL_CATALOG_KEY = "acp_model_catalog_v1";
+interface CachedModelCatalog {
+  models: ModelCatalog | null;
+  configOptions: any[] | null;
+  at: number;
+}
+
+function readCachedCatalog(agentId: string): CachedModelCatalog | null {
+  try {
+    if (typeof localStorage === "undefined" || !agentId) return null;
+    const all = JSON.parse(localStorage.getItem(MODEL_CATALOG_KEY) || "{}") as Record<string, CachedModelCatalog>;
+    const row = all?.[agentId];
+    if (!row || typeof row !== "object") return null;
+    if (row.models !== null && typeof row.models !== "object") return null;
+    if (row.configOptions !== null && !Array.isArray(row.configOptions)) return null;
+    return row;
+  } catch (err) {
+    console.debug("[Studio] 读取模型目录缓存失败 (已忽略):", err);
+    return null;
+  }
+}
+
+function saveCachedCatalog(agentId: string, models: ModelCatalog | null, configOptions: any[] | null): void {
+  try {
+    if (typeof localStorage === "undefined" || !agentId) return;
+    const all = JSON.parse(localStorage.getItem(MODEL_CATALOG_KEY) || "{}") as Record<string, CachedModelCatalog>;
+    all[agentId] = { models, configOptions, at: Date.now() };
+    // Bound the cache to the most recent agents so it cannot grow unbounded.
+    const rows = Object.entries(all).sort((a, b) => (b[1]?.at || 0) - (a[1]?.at || 0)).slice(0, 8);
+    localStorage.setItem(MODEL_CATALOG_KEY, JSON.stringify(Object.fromEntries(rows)));
+  } catch (err) {
+    console.debug("[Studio] 写入模型目录缓存失败 (已忽略):", err);
+  }
+}
+
+const initialCatalog = readCachedCatalog(loadInitialActiveAgentId());
+
 export const useStudioStore = create<StudioState>()((set, get) => ({
   activeAgentId: loadInitialActiveAgentId(),
   connectingId: null,
@@ -413,6 +457,9 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
   activeThreadId: null,
   autoUpdate: loadAutoUpdate(),
   ...initialThread,
+  // Show the last known catalog instantly; a fresh session/new will replace it.
+  models: initialCatalog?.models ?? null,
+  configOptions: initialCatalog?.configOptions ?? null,
   input: "",
   isStreaming: false,
   busy: false,
@@ -436,6 +483,13 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
 
   setWorkspace: (targetPath, optName) =>
     set((s) => {
+      // Runtime boundary: workspace pickers/menus occasionally hand over an
+      // event or a recent-workspace record instead of a path string. Treating
+      // it as a path used to crash the caller in toEnvironmentNativeCwd.
+      if (typeof targetPath !== "string" || !targetPath.trim()) {
+        console.warn("[Studio] setWorkspace 收到非路径值，已忽略:", targetPath);
+        return {};
+      }
       const isPosix = isPosixEnvironment();
       // 提纯为当前目标环境的原生 CWD 路径（零硬编码，剥离 Windows UNC 或误拼盘符）
       const cleanPath = toEnvironmentNativeCwd(targetPath, isPosix);
@@ -482,7 +536,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
             const updated = {
               ...cur,
               messages: s.messages,
-              sessionId: s.sessionId,
+              sessionId: s.sessionId ?? (cur.stale ? cur.sessionId : null),
               cwd: s.currentWorkspace,
               updatedAt: Date.now(),
             };
@@ -493,14 +547,19 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
 
         // 2. 检索目标工作区是否已有历史会话
         const existing = threadForAgent(s.threads, s.activeAgentId, targetPath);
+        const cached = readCachedCatalog(s.activeAgentId);
         if (existing) {
+          const existingTitle = titleForThread(existing);
           return {
             currentWorkspace: targetPath,
             recentWorkspaces: nextRecents,
             ...initialThread,
+            models: cached?.models ?? null,
+            configOptions: cached?.configOptions ?? null,
             messages: existing.messages.map((m) => ({ ...m })),
-            sessionId: existing.sessionId,
-            availableCommands: cmdsFor(s, s.activeAgentId, existing.sessionId),
+            sessionId: existing.stale ? null : existing.sessionId,
+            availableCommands: cmdsFor(s, s.activeAgentId, existing.stale ? null : existing.sessionId),
+            sessionInfo: existingTitle ? { title: existingTitle } : null,
             activeThreadId: existing.id,
           };
         } else {
@@ -509,6 +568,8 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
             currentWorkspace: targetPath,
             recentWorkspaces: nextRecents,
             ...initialThread,
+            models: cached?.models ?? null,
+            configOptions: cached?.configOptions ?? null,
             sessionId: null,
             activeThreadId: null,
             messages: [],
@@ -526,7 +587,27 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
 
   setActiveAgentId: (id) => {
     persistActiveAgentId(id);
-    set({ activeAgentId: id });
+    const cached = readCachedCatalog(id);
+    set((s) =>
+      s.activeAgentId === id
+        ? { activeAgentId: id }
+        : {
+            activeAgentId: id,
+            // Agent switch is a hard isolation boundary: another agent's live
+            // session/messages/models must never remain visible under this id.
+            // The caller restores the target agent's own thread immediately
+            // afterwards (or starts a fresh one).
+            ...initialThread,
+            models: cached?.models ?? null,
+            configOptions: cached?.configOptions ?? null,
+            sessionId: null,
+            activeThreadId: null,
+            // A switch also stops treating the old turn/draft as live input.
+            isStreaming: false,
+            busy: false,
+            input: "",
+          }
+    );
   },
   setConnectingId: (id) => set({ connectingId: id }),
   setAuthOk: (agentId, ok) => set((s) => ({ authOk: { ...s.authOk, [agentId]: ok } })),
@@ -534,33 +615,52 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
     set((s) => (id === s.sessionId ? { sessionId: id } : { sessionId: id, availableCommands: cmdsFor(s, s.activeAgentId, id) })),
   setSessionError: (e) => set({ sessionError: e }),
   setSessionLoading: (v) => set({ sessionLoading: v }),
-  applySessionResult: (res: any) =>
+  applySessionResult: (res: any, expectedAgentId?: string) =>
     set((s) => {
+      // Late async result from an agent the user already switched away from:
+      // never let it overwrite the new agent's session/config/models.
+      if (expectedAgentId && s.activeAgentId !== expectedAgentId) return {};
       const sid = res?.sessionId ?? s.sessionId;
       const fromRes = Array.isArray(res?.availableCommands) ? normalizeAgentCommands(res.availableCommands) : null;
       const map = fromRes && sid ? { ...s.commandsBySession, [cmdKey(s.activeAgentId, sid)]: fromRes } : s.commandsBySession;
+      const nextModels = res?.models ?? s.models;
+      const nextConfigOptions = res?.configOptions ?? s.configOptions;
+      if (res?.models || res?.configOptions) {
+        saveCachedCatalog(s.activeAgentId, nextModels, nextConfigOptions);
+      }
       return {
       sessionId: sid,
       commandsBySession: map,
       modes: res?.modes ?? s.modes,
-      models: res?.models ?? s.models,
-      configOptions: res?.configOptions ?? s.configOptions,
+      models: nextModels,
+      configOptions: nextConfigOptions,
       availableCommands: fromRes ?? (sid === s.sessionId && s.availableCommands.length ? s.availableCommands : map[cmdKey(s.activeAgentId, sid)] ?? []),
       };
     }),
   setModes: (m) => set({ modes: m }),
-  setModels: (m) => set({ models: m }),
-  setConfigOptions: (c) => set({ configOptions: c }),
+  setModels: (m) =>
+    set((s) => {
+      saveCachedCatalog(s.activeAgentId, m, s.configOptions);
+      return { models: m };
+    }),
+  setConfigOptions: (c) =>
+    set((s) => {
+      saveCachedCatalog(s.activeAgentId, s.models, c);
+      return { configOptions: c };
+    }),
   patchConfigOption: (opt) =>
     set((s) => {
-      if (!s.configOptions) return { configOptions: [opt] };
-      const i = s.configOptions.findIndex((x) => x.id === opt.id);
-      if (i >= 0) {
-        const next = [...s.configOptions];
-        next[i] = opt;
-        return { configOptions: next };
+      let next: any[];
+      if (!s.configOptions) {
+        next = [opt];
+      } else {
+        const i = s.configOptions.findIndex((x) => x.id === opt.id);
+        next = [...s.configOptions];
+        if (i >= 0) next[i] = opt;
+        else next.push(opt);
       }
-      return { configOptions: [...s.configOptions, opt] };
+      saveCachedCatalog(s.activeAgentId, s.models, next);
+      return { configOptions: next };
     }),
   setAvailableCommands: (c, sessionId) =>
     set((s) => {
@@ -645,8 +745,14 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       const thread: ChatThread = {
         id,
         agentId: s.activeAgentId,
-        sessionId: s.sessionId,
-        cwd: s.currentWorkspace,
+        // Keep the user-facing name on the persisted record so the sidebar can
+        // show content instead of an opaque session id.
+        title: titleForThread({ title: prev?.title, messages: s.messages }),
+        // Keep the historical id, and keep the stale marker so the next boot
+        // does not try to resume the same dead id all over again.
+        sessionId: s.sessionId ?? (prev?.stale ? prev.sessionId : null),
+        stale: prev?.stale ? true : undefined,
+        cwd: s.currentWorkspace ?? prev?.cwd ?? null,
         messages: s.messages,
         // Preserve the thread's MCP servers across snapshots (auto new/resume).
         mcpServers: prev?.mcpServers,
@@ -661,11 +767,18 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
     const cwd = targetCwd !== undefined ? targetCwd : s.currentWorkspace;
     const t = threadForAgent(s.threads, agentId, cwd);
     if (!t) return null;
+    const title = titleForThread(t);
+    const cached = readCachedCatalog(agentId);
     set({
       ...initialThread,
+      models: cached?.models ?? null,
+      configOptions: cached?.configOptions ?? null,
       messages: t.messages.map((m) => ({ ...m })),
-      sessionId: t.sessionId,
-      availableCommands: cmdsFor(s, agentId, t.sessionId),
+      // A stale thread is a read-only historical transcript: showing its dead
+      // id as the live session is what made resume/ensureSession loop forever.
+      sessionId: t.stale ? null : t.sessionId,
+      availableCommands: cmdsFor(s, agentId, t.stale ? null : t.sessionId),
+      sessionInfo: title ? { title } : null,
       activeThreadId: t.id,
     });
     return t;
@@ -688,7 +801,15 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
     };
     const next = pruneThreads({ ...s0.threads, [t.id]: t }, [t.id]);
     saveThreads(next);
-    set({ ...initialThread, sessionId: null, threads: next, activeThreadId: t.id });
+    const cached = readCachedCatalog(agentId);
+    set({
+      ...initialThread,
+      models: cached?.models ?? null,
+      configOptions: cached?.configOptions ?? null,
+      sessionId: null,
+      threads: next,
+      activeThreadId: t.id,
+    });
     return t;
   },
   threadMcpServers: (agentId) => {
@@ -709,6 +830,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       const next = {
         ...cur,
         sessionId,
+        title: titleForThread(cur),
         cwd: cwd !== undefined ? cwd : cur.cwd,
         mcpServers: mcpServers !== undefined ? mcpServers : cur.mcpServers,
         stale: false,
@@ -726,7 +848,10 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       const next = { ...cur, stale: true, updatedAt: Date.now() };
       const threads = pruneThreads({ ...s.threads, [next.id]: next }, [next.id]);
       saveThreads(threads);
-      return { threads };
+      // The id remains on the historical thread record for display, but it is
+      // no longer a live session: leaving it in `sessionId` made ensureSession
+      // return the dead id forever (the "点击加载模型" button did nothing).
+      return { threads, sessionId: null };
     }),
   optimisticOpenSession: (agentId, sessionId, title, cwd) => {
     const s0 = get();
@@ -744,7 +869,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
         messages: mergeAssistantTurns(existing.messages).map((m) => ({ ...m })),
         sessionInfo: {
           ...(st.sessionInfo || {}),
-          title: existing.title || title || st.sessionInfo?.title,
+          title: titleForThread(existing) || title || st.sessionInfo?.title,
         },
         sessionError: null,
         sessionLoading: true, // indicates background sync

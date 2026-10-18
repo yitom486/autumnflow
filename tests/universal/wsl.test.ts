@@ -6,6 +6,7 @@ import {
   execSpawnForCwd,
   gitSpawnForCwd,
 } from "../../server/universal/wsl";
+import type { ResolvedShell } from "../../server/universal/platform/shell";
 import { parseWslDistros, getSystemDirectoryRoots } from "../../server/universal/http/workspace";
 import { parseWslDistro } from "@/components/universal/TerminalDrawer";
 
@@ -34,22 +35,38 @@ describe("wsl paths", () => {
   });
 
   it("routes PTY through wsl.exe on win32, keeps platform shells otherwise", () => {
+    const winShell: ResolvedShell = {
+      shell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      args: ["-NoLogo"],
+      kind: "powershell",
+      label: "Windows PowerShell",
+    };
     expect(ptySpawnForCwd("win32", UNC, "C:\\gw")).toEqual({
       shell: "wsl.exe",
       args: ["-d", "Ubuntu", "--cd", "/home/u/proj"],
       spawnCwd: "C:\\gw",
     });
-    expect(ptySpawnForCwd("win32", "D:\\repo", "C:\\gw")).toMatchObject({ shell: "powershell.exe" });
-    expect(ptySpawnForCwd("linux", "/home/u", "/srv").spawnCwd).toBe("/home/u");
+    expect(ptySpawnForCwd("win32", "D:\\repo", "C:\\gw", winShell)).toMatchObject({ shell: winShell.shell });
+    expect(ptySpawnForCwd("linux", "/home/u", "/srv", { ...winShell, shell: "/bin/bash", kind: "posix" }).spawnCwd).toBe("/home/u");
   });
 
   it("routes one-shot exec through wsl sh -c (linux parity)", () => {
+    const winShell: ResolvedShell = {
+      shell: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
+      args: ["-NoLogo"],
+      kind: "powershell",
+      label: "Windows PowerShell",
+    };
     expect(execSpawnForCwd("win32", UNC, "go build ./...", "C:\\gw")).toEqual({
       shell: "wsl.exe",
       args: ["-d", "Ubuntu", "--cd", "/home/u/proj", "--", "sh", "-c", "go build ./..."],
       spawnCwd: "C:\\gw",
     });
-    expect(execSpawnForCwd("win32", "D:\\r", "dir", "C:\\gw")).toMatchObject({ shell: "powershell.exe" });
+    expect(execSpawnForCwd("win32", "D:\\r", "dir", "C:\\gw", winShell)).toEqual({
+      shell: winShell.shell,
+      args: ["-NoProfile", "-Command", "dir"],
+      spawnCwd: "D:\\r",
+    });
   });
 
   it("routes git through wsl git (UNC cannot be a child cwd)", () => {

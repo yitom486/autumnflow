@@ -230,9 +230,19 @@ export function useAgentConfig({
       if (!known) await connectAgent(agentId);
       const res: any = await sessionNew(agentId, {});
       const cur = useStudioStore.getState();
+      // Late discovery result after an agent switch: close the throwaway
+      // session instead of leaking this agent's models into the new view.
+      if (cur.activeAgentId !== agentId) {
+        if (res?.sessionId) {
+          await sessionRpc(agentId, "close", { sessionId: res.sessionId }).catch((err) =>
+            console.debug("[App] 清理迟到的模型发现会话失败 (已忽略):", err)
+          );
+        }
+        return;
+      }
       if (res?.models) {
         cur.setModels(res.models);
-        if (!cur.sessionId) cur.applySessionResult(res);
+        if (!cur.sessionId) cur.applySessionResult(res, agentId);
       }
       if (res?.sessionId && res.sessionId !== useStudioStore.getState().sessionId) {
         // 可预期清理失败 (一次性会话已关/已失效) 允许忽略，但留 debug 痕。
