@@ -6,12 +6,23 @@
  * (and Last-Event-ID) without re-sending the prompt to the agent. Events are
  * buffered with a monotonically increasing seq; completed turns stay available
  * for a short grace window so a late retry can still read the final answer.
+ *
+ * An optional sink persists every event (SessionJournal); restore() rebuilds a
+ * turn after the host process restarted.
  */
+import type { LoadedTurn } from "./session-journal";
+import { getSessionJournal } from "./session-journal";
+
 export type TurnStatus = "running" | "done" | "error";
 
 export interface TurnEvent {
   seq: number;
   data: Record<string, unknown>;
+}
+
+export interface TurnEventSink {
+  append(record: TurnRecord, event: TurnEvent): void;
+  finish(record: TurnRecord, status: Exclude<TurnStatus, "running">): void;
 }
 
 export interface TurnRecord {
@@ -37,6 +48,8 @@ export const TURN_MAX_RETAINED = 100;
 export class TurnRegistry {
   private turns = new Map<string, TurnRecord>();
   private cleanupTimer: ReturnType<typeof setInterval> | null = null;
+
+  constructor(private readonly sink?: TurnEventSink) {}
 
   create(id: string, info: { agentId: string; sessionId: string }): TurnRecord {
     const existing = this.turns.get(id);
@@ -64,6 +77,35 @@ export class TurnRegistry {
     return this.turns.get(id);
   }
 
+  /**
+   * Rebuild a turn from the persistent journal. A file without a finish line
+   * is an interrupted turn: append a terminal error instead of prompting the
+   * agent again, so the client can show what happened exactly once.
+   */
+  restore(loaded: LoadedTurn): TurnRecord {
+    const record = this.create(loaded.turnId, {
+      agentId: loaded.agentId,
+      sessionId: loaded.sessionId,
+    });
+    record.events = loaded.events.slice(-TURN_MAX_EVENTS);
+    record.createdAt = loaded.startedAt || record.createdAt;
+    record.updatedAt = record.createdAt;
+    record.nextSeq = (record.events.at(-1)?.seq || 0) + 1;
+    if (loaded.status === "done" || loaded.status === "error") {
+      record.status = loaded.status;
+      return record;
+    }
+    this.append(loaded.turnId, {
+      type: "error",
+      turnId: loaded.turnId,
+      agentId: loaded.agentId,
+      sessionId: loaded.sessionId,
+      message: "Gateway restarted before this turn finished; the prompt was not re-sent. Please retry.",
+    });
+    this.finish(loaded.turnId, "error");
+    return record;
+  }
+
   /** Append one durable event, assign seq, and wake every live subscriber. */
   append(id: string, data: Record<string, unknown>): TurnEvent | null {
     const record = this.turns.get(id);
@@ -75,6 +117,7 @@ export class TurnRegistry {
     const event = { seq: record.nextSeq++, data };
     record.events.push(event);
     record.updatedAt = Date.now();
+    this.sink?.append(record, event);
     for (const listener of record.listeners) {
       try {
         listener(event);
@@ -90,6 +133,7 @@ export class TurnRegistry {
     if (!record || record.status !== "running") return;
     record.status = status;
     record.updatedAt = Date.now();
+    this.sink?.finish(record, status);
     for (const end of record.endListeners) {
       try {
         end();
@@ -178,4 +222,12 @@ export class TurnRegistry {
   }
 }
 
-export const turnRegistry = new TurnRegistry();
+const journal = getSessionJournal();
+export const turnRegistry = new TurnRegistry(
+  journal
+    ? {
+        append: (record, event) => journal.append(record, event),
+        finish: (record, status) => journal.finish(record, status),
+      }
+    : undefined
+);

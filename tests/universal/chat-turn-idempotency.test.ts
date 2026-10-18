@@ -45,6 +45,12 @@ describe("chat turn idempotency", () => {
     const secondText = await second.text();
     expect(secondText).toContain('"type":"done"');
     expect(prompt).toHaveBeenCalledTimes(1);
+
+    const snapshot = await chatRouter.request("http://localhost/turn-idem-1/snapshot?after=2");
+    const snapshotJson: any = await snapshot.json();
+    expect(snapshotJson.status).toBe("done");
+    expect(snapshotJson.events.map((event: any) => event.seq)).toEqual([3]);
+    expect(snapshotJson.lastSeq).toBe(3);
   });
 
   it("replays only events after afterSeq", async () => {

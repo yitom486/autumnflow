@@ -8,6 +8,7 @@ import { setupEnv, PORT, buildApp, MCP_PORT, shutdownBridges } from "./gateway";
 import { gatewayBootstrapUrl, gatewayTokenPreview } from "./universal/security";
 import { attachPtyUpgrade } from "./universal/pty";
 import { startMcpUiServer } from "./universal/mcp-ui-server";
+import { flushSessionJournal } from "./universal/session-journal";
 
 setupEnv();
 await assertPortAvailable(PORT, "127.0.0.1");
@@ -50,6 +51,7 @@ const gracefulShutdown = async () => {
   console.log("\n[Server] Shutting down cleanly...");
   netServer.close();
   await shutdownBridges();
+  await flushSessionJournal().catch((err) => console.warn("[Server] session journal flush failed:", err));
   process.exit(0);
 };
 

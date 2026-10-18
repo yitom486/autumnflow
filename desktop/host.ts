@@ -17,6 +17,7 @@ import {
 import { assertPortAvailable } from "../server/port-availability";
 import { attachPtyUpgrade } from "../server/universal/pty";
 import { setTrashImpl } from "../server/universal/http/files";
+import { flushSessionJournal, getSessionJournal } from "../server/universal/session-journal";
 import { startMcpUiServer, stopMcpUiServer } from "../server/universal/mcp-ui-server";
 
 type HostMessage =
@@ -75,6 +76,9 @@ async function shutdown(reason = "shutdown"): Promise<void> {
   await shutdownBridges().catch((err) => {
     console.warn("[Host] bridge shutdown failed:", err);
   });
+  await flushSessionJournal().catch((err) => {
+    console.warn("[Host] session journal flush failed:", err);
+  });
   await stopMcpUiServer().catch((err) => {
     console.warn("[Host] MCP UI shutdown failed:", err);
   });
@@ -85,6 +89,9 @@ async function shutdown(reason = "shutdown"): Promise<void> {
 
 async function main(): Promise<void> {
   setupEnv();
+  void getSessionJournal()?.prune().catch((err) => {
+    console.warn("[Host] session journal prune failed:", err);
+  });
   await assertPortAvailable(PORT, "127.0.0.1");
   await startMcpUiServer(MCP_PORT).catch((err) => {
     console.warn(`[Host] MCP UI server failed to start: ${(err as Error)?.message || err}`);

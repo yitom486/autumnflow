@@ -25,6 +25,7 @@
 - Electron IPC 边界加厚：所有 native IPC 都校验发送窗口、主 frame 与 `senderFrame.url` 的 origin，只允许应用自己的页面调用。
 - 有界崩溃诊断：主进程/渲染进程/子进程异常与启动失败写入 `userData/logs/crashes/crash-*.log`，包含版本、平台、错误与最近 error 级渲染日志，最多保留 10 份；不阻塞启动或退出。
 - 独立 Gateway Host 进程：Electron 主进程只保留窗口、协议、更新和生命周期，网关、MCP UI、PTY WebSocket 与 Agent 桥接移到 `ELECTRON_RUN_AS_NODE` 的 `host.cjs` 子进程；主进程等待 ready、收集 stderr、异常退出写崩溃报告；退出时先向 Host 发 shutdown 再退出，文件删除通过 IPC 回到 Electron `shell.trashItem` 以保留系统回收站。
+- 持久化 Turn Journal：每个 turn 写入 `~/.acp-studio/journal/<agent>/<turn>.jsonl`（meta + seq 事件 + finish），Host 重启后按 turnId 恢复；未写完的 turn 恢复为一次明确的 interrupted 错误，绝不重新发 prompt；完成/错误 turn 可直接重放，最多保留 7 天/500 个 turn，退出前强制 flush。
 
 <!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 

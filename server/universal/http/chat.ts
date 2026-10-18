@@ -12,6 +12,7 @@ import { z } from "zod";
 import type { ContentBlock } from "@agentclientprotocol/sdk";
 import { sdkValue } from "../acp-sdk";
 import { universalRegistry } from "../registry";
+import { getSessionJournal } from "../session-journal";
 import { turnRegistry, type TurnRecord } from "../turn-registry";
 import { gatewayError, json, jsonBody, optStr } from "./shared";
 
@@ -136,6 +137,18 @@ chatRouter.post("/", jsonBody(chatBody), async (c) => {
     return streamTurn(existing, afterSeq);
   }
 
+  // The host may have restarted since this turn was accepted. Rebuild it from
+  // the journal before touching the agent; a completed turn must replay, not
+  // prompt again.
+  if (body.turnId) {
+    const journal = getSessionJournal();
+    const loaded = journal ? await journal.loadTurn(agentId, turnId) : null;
+    if (loaded) {
+      const restored = turnRegistry.restore(loaded);
+      return streamTurn(restored, afterSeq);
+    }
+  }
+
   try {
     await conn.connect();
   } catch (err) {
@@ -225,9 +238,38 @@ chatRouter.post("/", jsonBody(chatBody), async (c) => {
   return streamTurn(record, afterSeq);
 });
 
+/** JSON snapshot for reconnect/recovery, followed by the live SSE stream. */
+chatRouter.get("/:turnId/snapshot", async (c) => {
+  const turnId = c.req.param("turnId");
+  let turn = turnRegistry.get(turnId);
+  if (!turn) {
+    const journal = getSessionJournal();
+    const loaded = journal ? await journal.loadTurnById(turnId) : null;
+    if (!loaded) return json({ ok: false, error: "unknown or expired turn" }, 404);
+    turn = turnRegistry.restore(loaded);
+  }
+  const afterSeq = parseAfterSeq(c.req.query("after"));
+  const events = turn.events.filter((event) => event.seq > afterSeq);
+  return json({
+    ok: true,
+    turnId: turn.id,
+    agentId: turn.agentId,
+    sessionId: turn.sessionId,
+    status: turn.status,
+    lastSeq: turn.events.at(-1)?.seq || 0,
+    events,
+  });
+});
+
 /** Explicit reconnect endpoint (GET /chat/:turnId/follow?after=N). */
-chatRouter.get("/:turnId/follow", (c) => {
-  const turn = turnRegistry.get(c.req.param("turnId"));
-  if (!turn) return json({ ok: false, error: "unknown or expired turn" }, 404);
+chatRouter.get("/:turnId/follow", async (c) => {
+  const turnId = c.req.param("turnId");
+  let turn = turnRegistry.get(turnId);
+  if (!turn) {
+    const journal = getSessionJournal();
+    const loaded = journal ? await journal.loadTurnById(turnId) : null;
+    if (!loaded) return json({ ok: false, error: "unknown or expired turn" }, 404);
+    turn = turnRegistry.restore(loaded);
+  }
   return streamTurn(turn, parseAfterSeq(c.req.query("after") ?? c.req.header("last-event-id")));
 });

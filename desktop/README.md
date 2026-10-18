@@ -22,6 +22,20 @@ Electron main (Node, electron-dist/main.cjs)
 `server/index.ts`（Bun）与 `server/node.ts`（Node）是同一 Hono app 的两种独立入口；
 生产桌面端改由 `desktop/host.ts` 启动同一个 app。
 
+## Turn journal 与重连
+
+每个 prompt turn 除了内存 ledger 外，还会写入：
+
+```text
+~/.acp-studio/journal/<agent>/<turnId>.jsonl
+```
+
+文件由 meta、带 `seq` 的事件和 finish 三部分组成。SSE 断线时客户端用
+`turnId + afterSeq` 先读内存，再读 journal；Host 重启后也能重放已完成的
+turn。没有 finish 的 turn 视为中断，恢复时只追加一次 terminal error，
+**不会把 prompt 再发给 Agent**。写盘按 50ms 合并，turn 结束和 Host 退出时
+强制 flush；默认保留 7 天或最近 500 个 turn。
+
 ## 开发
 
 ```bash
