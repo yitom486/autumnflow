@@ -816,7 +816,6 @@ export function dispatchStandardUpdate(update: acp.SessionUpdate, handlers: Univ
     handlers.onActivity?.({
       kind: update.sessionUpdate,
       detail: update,
-      timestamp: new Date().toISOString(),
     });
     return true;
   }

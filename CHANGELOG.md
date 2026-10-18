@@ -12,6 +12,15 @@
 ### Added
 <!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 
+## [0.1.11] - 2026-10-18
+
+### Added
+- 官方 ACP SDK 与协议深度对齐：引入 Ajv 强校验官方 @agentclientprotocol/sdk Schema，严格支持 Session Artifacts（Plan、Compaction、SessionMessage 等）
+- 人机协同（Human-in-the-Loop）问询与授权生命周期：全面支持官方 Elicitation 协议（Form 与 URL 模式），加固 Permission 授权响应归一化
+- 解决 OpenCode 在 ACP 模式下的问询中断：自动注入智能兼容指引与工作区配置，以无缝承接富交互决策卡
+- 交互式 PTY 终端认证：实现基于官方 AuthMethodTerminal 规范的专用 PTY 认证终端组件 AcpAuthTerminal
+- 主题感知图表与思维导图交互折叠：彻底清除图表硬编码颜色，增加 Mermaid/SVG 导图节点折叠/展开交互与键盘无障碍支持
+
 ## [0.1.10] - 2026-10-17
 
 ### Added
@@ -281,7 +290,7 @@
   本轮横切另含安全加固、agent 异步按需安装、SSE 发送互斥、前端懒加载拆分，
   细节见各专项条目（此处仅汇总，不编造版本号）。
 
-[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.10...HEAD
+[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.11...HEAD
 [0.1.0]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.0
 [0.1.1]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.1
 [0.1.2]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.2
@@ -293,3 +302,4 @@
 [0.1.8]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.8
 [0.1.9]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.9
 [0.1.10]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.10
+[0.1.11]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.11
