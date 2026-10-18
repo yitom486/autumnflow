@@ -349,9 +349,17 @@ export function useChatSend({
             (err.message.includes("No tool output found") ||
               err.message.includes("tool call output") ||
               err.message.includes("tool_call_id"));
+          // DSH composes two DeepSeek routes: `deepseek-official` (API key) and
+          // `deepseek-account` (platform login). The ACP profile defaults to the
+          // API-key route, so a logged-in account without DEEPSEEK_API_KEY fails
+          // every turn until the model is switched or the key is stored.
+          const isDeepseekKeyMissing =
+            typeof err?.message === "string" && /no API key for provider route/i.test(err.message);
           const diagnosticHint = isToolCallDesync
             ? "\n\n> 💡 **会话上下文失步诊断**：智能体在工具调用异常后遗漏了回包（Tool Call 状态断裂），导致上游模型服务拒绝了当前历史记录。建议点击**新建会话**以开启干净上下文继续任务。"
-            : "";
+            : isDeepseekKeyMissing
+              ? "\n\n> 💡 **DeepSeek 凭据未配置**：当前模型走 `deepseek-official`（API Key 路由），但 DSH 里没有 `DEEPSEEK_API_KEY`。\n> 1. 打开模型菜单，切换到 **DeepSeek Account** 分组里的同名模型（复用你已登录的平台账户）；\n> 2. 或在 DSH 设置（`dsh --profile web` → 设置 → 模型）里保存 API Key，或在启动 AutumnFlow 前 `export DEEPSEEK_API_KEY=…`。"
+              : "";
           c2.patchMessage(assistantId, (m) => ({
             ...m,
             content: stripRetryNotes(m.content) + `\n\n> ❌ [${agentId}] ${err.message}${diagnosticHint}`,

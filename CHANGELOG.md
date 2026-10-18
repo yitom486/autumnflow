@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### Fixed
+- 修复 DeepSeek 轮次因缺少 API Key 失败时只抛原始英文错误：现在识别 `no API key for provider route`，在错误气泡里直接给出两条可操作路径（切到 **DeepSeek Account** 模型分组，或配置 `DEEPSEEK_API_KEY`），并说明这是 DSH 的 `deepseek-official` 路由缺凭据，而不是客户端没有读取本地配置。
 - 修复取消后立刻重发导致 prompt 互斥锁失效：`session/cancel` 只是通知，被取消 turn 的 `finally` 会释放**下一个** turn 刚拿到的锁，使同一会话出现并发 prompt（409 保护形同虚设）。改为带租约令牌的 `PromptLock`：旧 turn 只能释放自己的租约，取消时按抢占处理；Agent 进程退出时重置全部租约，崩溃后不会留下永久 409 的会话。
 - 修复 per-session 内存只增不减：`sessionCommands` / `childUpdates`（每子会话最多 200 条 update）/ `childStates` / `childParents` / `releasedTerminals` 原先只在进程断开时清理，长跑 Host 下随会话数持续增长。现由 `SessionState` 单一所有者持有，`session/close`、`session/delete` 时连同子智能体会话一起回收。
 - 修复关闭窗口时仍弹「仍有任务在运行」阻断框：常驻模式下关窗不再等于退出，改为由 `window-all-closed` 的 active-work 巡检决定缩到托盘还是正常退出；显式「退出」与安装更新仍保留原确认。
