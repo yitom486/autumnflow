@@ -35,7 +35,7 @@
    “没拉到最新”的事实。
 4. 开发环境想调本地桥源码时，用自定义 profile 覆盖
   （`ACP_AGENTS_JSON` / `POST /api/universal/agents` /
-   `~/.acp-studio/agents.json`，见 `server/universal/registry.ts`）：
+   `~/.autumnflow/agents.json`，见 `server/universal/registry.ts`）：
    用户显式覆盖永远优先于 builtin 默认；生产环境不提供来源切换开关。
 
 ## 四、审查清单

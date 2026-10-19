@@ -10,6 +10,7 @@
 ## [Unreleased]
 
 ### Fixed
+- 修复安装版首次启动时 token 提前创建新配置目录、导致旧 agents 等配置未被迁移的问题；读取磁盘 token 前先迁移应用目录。
 - 增强断线恢复能力：SSE 断流后的自动重试从 2 次（约 3 秒）提高到 4 次（1/2/4/8 秒，约 15 秒），足以跨过 Host/网关重启；服务端已接受该轮时重试走 `GET /chat/:turnId/follow` 续流，仍在运行的一轮会被接回而不是重发 prompt。若重启确实打断了这一轮，会明确显示「本轮被网关重启中断（prompt 未重发，请重试）」，不再是笼统的 `network error`；`unknown or expired turn` 也会给出「服务端已没有这一轮」的提示。
 - 修复恢复的线程指向已失效会话时首条消息直接失败 `Invalid params: unknown session`：chat 路由现在识别 ACP -32602 的会话失效，先用 `session/resume` 接回（保住上下文），不行再新建会话并在同一轮重试一次；客户端从第二个 `start` 帧拿到新 session id，用户消息不丢、也不会重复计费。
 - 修复只有余额、没有限额窗口的配额（DeepSeek 账户）在顶部智能体 chip 上完全不显示：现在显示 `¥12.34` 形式的余额徽标；限额环和短计划名仍优先展示。配额数据本身一直存在（面板里的卡片能显示），只是 chip 之前只认窗口/计划名。
@@ -25,6 +26,7 @@
 - 修复失效会话把 UI 卡在历史视图：resume 失败后清除 live `sessionId`（历史记录仍保留），「点击加载模型」会强制新建会话并载入模型；无效/过期 session id 不再被裸绑定，重复失败会保留 stale 标记。
 
 ### Changed
+- 补齐 AutumnFlow 更名：Electron preload 桥接与前端调用统一为 `window.autumnflow`，同步更新安装/卸载侧边栏位图、安装脚本注释和仓库规则中的旧品牌、配置路径。
 - 内部拆分（对外行为不变）：`UniversalAgentConnection` 拆成四个单一职责模块——`AcpTransport`（进程 / NDJSON 流 / initialize / 退出）、`SessionService`（new/load/resume/fork/list/close/delete 与会话元数据回收）、`PromptTurn`（prompt 租约、取消、首轮兼容块）、`SessionState`（per-session 内存的唯一回收点），facade 从 1005 行降到约 620 行，只保留 permission / fs / terminal / subagent / quota 语义与广播，HTTP 路由与对外 API 完全不变。桌面端同时纳入类型检查：新增 `tsconfig.desktop.json` 与 `bun run typecheck`，Electron 主进程/preload/host 与 server/shared 一起过 `tsc`。
 - 全面更名：应用目录改为 `~/.autumnflow`。首次启动会把旧 `~/.acp-studio`（agents、`.gateway-token`、journal、trash、codex-home）复制到新目录，并把旧 `~/.acp-client/`（AGENTS.md、skills、mcp.json）复制到 `~/.autumnflow/resources`；旧目录只读保留、不再写入；Electron userData 同步迁移到 `%APPDATA%\autumnflow`，主题的 localStorage key 迁移到 `autumnflow_theme_v1`。`appId` 改为 `com.autumnflow.app`（注意：已有安装会被视为新应用，自动更新不会从旧安装接续）。GitHub 链接、菜单、日志与 ACP `clientInfo` 统一为 AutumnFlow；路径类环境变量统一为 `AUTUMNFLOW_HOME` / `AUTUMNFLOW_CODEX_HOME` / `AUTUMNFLOW_RESOURCES_DIR` / `AUTUMNFLOW_SKILLS_DIR`（旧名不再读取）。
 - Codex 默认使用应用独占的 `CODEX_HOME`（默认 `~/.autumnflow/codex-home`，可用 `AUTUMNFLOW_CODEX_HOME` 或 `AUTUMNFLOW_HOME` 覆盖，不写死机器路径）：首次连接从用户 `~/.codex` 复制 `auth.json` 与 `config.toml`，并合并 `[features] code_mode = true` 后启动；不再写入全局 `~/.codex`。复制或创建失败时自动回退用户目录并告警，不影响 Codex 可用性。

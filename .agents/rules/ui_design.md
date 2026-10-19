@@ -1,4 +1,4 @@
-# ACP Studio UI 设计铁律（所有 AI 助手与贡献者必读）
+# AutumnFlow UI 设计铁律（所有 AI 助手与贡献者必读）
 
 本规则与 `.agents/rules/version_control.md` 同级，适用于本仓库 `src/` 下一切界面改动。
 违反以下任何一条的 UI 提交必须打回重做。

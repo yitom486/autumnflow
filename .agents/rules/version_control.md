@@ -1,6 +1,6 @@
-# acp-studio 版本规范与发版铁律
+# AutumnFlow 版本规范与发版铁律
 
-本规则适用于本仓库（acp-studio，`package.json` 当前 `0.1.0` 起步）。
+本规则适用于本仓库（AutumnFlow，`package.json` 当前 `0.1.0` 起步）。
 日常只允许 **Patch 线性递增**（`0.1.0` → `0.1.1` → `0.1.2` …），
 功能往上加也先走 patch；Minor / Major 跃迁以后另行许可。
 

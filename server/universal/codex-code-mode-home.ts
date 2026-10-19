@@ -28,7 +28,7 @@ const APP_CODEX_HOME_DIR = "codex-home";
  * The app-owned Codex home.
  *
  * Resolution order (no machine-specific path is ever hardcoded):
- * 1. `AUTUMNFLOW_CODEX_HOME` (legacy: `ACP_CODEX_HOME`) — a full target directory;
+ * 1. `AUTUMNFLOW_CODEX_HOME` — a full target directory;
  * 2. `<AUTUMNFLOW_HOME>/codex-home`, or a base argument;
  * 3. `<app home>/codex-home` (`~/.autumnflow/codex-home` by default).
  */
