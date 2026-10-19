@@ -12,6 +12,15 @@
 ### Added
 <!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 
+## [0.1.13] - 2026-10-19
+
+### Fixed
+- 修复 Linux/macOS 上解析 Windows shell 路径时误判 PowerShell 类型的问题，统一支持两种路径分隔符；补充跨平台回归测试。
+
+### Changed
+- 包含下方 v0.1.12 的全部更新。v0.1.12 因跨平台测试失败已停止发布，用户可直接从 v0.1.11 升级到本版本。
+### Added
+
 ## [0.1.12] - 2026-10-19
 
 ### Fixed
@@ -335,7 +344,7 @@
   本轮横切另含安全加固、agent 异步按需安装、SSE 发送互斥、前端懒加载拆分，
   细节见各专项条目（此处仅汇总，不编造版本号）。
 
-[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.12...HEAD
+[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.13...HEAD
 [0.1.0]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.0
 [0.1.1]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.1
 [0.1.2]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.2
@@ -349,3 +358,4 @@
 [0.1.10]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.10
 [0.1.11]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.11
 [0.1.12]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.12
+[0.1.13]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.13

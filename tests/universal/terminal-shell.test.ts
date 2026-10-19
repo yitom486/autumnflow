@@ -1,7 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { execArgsFor, resolveInteractiveShell, shellArgsFor } from "../../server/universal/platform/shell";
+import { execArgsFor, resolveInteractiveShell, shellArgsFor, shellKindFor } from "../../server/universal/platform/shell";
 
 describe("interactive shell resolution", () => {
+  it.each([
+    ["C:\\Program Files\\PowerShell\\7\\pwsh.exe", "pwsh", ["-NoLogo"]],
+    ["C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe", "powershell", ["-NoLogo"]],
+    ["C:\\Windows\\System32\\cmd.exe", "cmd", []],
+    ["/usr/local/bin/pwsh", "pwsh", ["-NoLogo"]],
+    ["/bin/bash", "posix", []],
+  ])("recognizes shell path %s on every host", (shell, kind, args) => {
+    expect(shellKindFor(shell)).toBe(kind);
+    expect(shellArgsFor(shell)).toEqual(args);
+  });
   it("prefers PowerShell 7 (pwsh) over Windows PowerShell 5.1", () => {
     const calls: string[] = [];
     const resolved = resolveInteractiveShell({

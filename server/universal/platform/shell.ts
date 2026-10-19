@@ -20,14 +20,15 @@ export interface ResolveShellOptions {
 
 /** PowerShell switches must not load -NoProfile: the user's own profile is the point. */
 export function shellArgsFor(shell: string): string[] {
-  const base = path.basename(shell).toLowerCase();
+  // win32.basename also handles '/' so Windows paths work on every host.
+  const base = path.win32.basename(shell).toLowerCase();
   return base === "pwsh" || base === "pwsh.exe" || base === "powershell" || base === "powershell.exe"
     ? ["-NoLogo"]
     : [];
 }
 
 export function shellKindFor(shell: string): ShellKind {
-  const base = path.basename(shell).toLowerCase();
+  const base = path.win32.basename(shell).toLowerCase();
   if (base === "pwsh" || base === "pwsh.exe") return "pwsh";
   if (base === "powershell" || base === "powershell.exe") return "powershell";
   if (base === "cmd" || base === "cmd.exe") return "cmd";
@@ -38,7 +39,7 @@ function labelFor(shell: string, kind: ShellKind): string {
   if (kind === "pwsh") return "PowerShell 7+";
   if (kind === "powershell") return "Windows PowerShell";
   if (kind === "cmd") return "Command Prompt";
-  const base = path.basename(shell).replace(/\.(exe|cmd|bat)$/i, "");
+  const base = path.win32.basename(shell).replace(/\.(exe|cmd|bat)$/i, "");
   return base || shell;
 }
 
