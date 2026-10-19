@@ -9,6 +9,11 @@
 
 ## [Unreleased]
 
+### Added
+<!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
+
+## [0.1.12] - 2026-10-19
+
 ### Fixed
 - 修复安装版首次启动时 token 提前创建新配置目录、导致旧 agents 等配置未被迁移的问题；读取磁盘 token 前先迁移应用目录。
 - 增强断线恢复能力：SSE 断流后的自动重试从 2 次（约 3 秒）提高到 4 次（1/2/4/8 秒，约 15 秒），足以跨过 Host/网关重启；服务端已接受该轮时重试走 `GET /chat/:turnId/follow` 续流，仍在运行的一轮会被接回而不是重发 prompt。若重启确实打断了这一轮，会明确显示「本轮被网关重启中断（prompt 未重发，请重试）」，不再是笼统的 `network error`；`unknown or expired turn` 也会给出「服务端已没有这一轮」的提示。
@@ -24,14 +29,12 @@
 - 修复发行版点击「新会话」/「点击加载模型」时 `e.trim is not a function` 崩溃：新会话按钮把 React 点击事件当作 `targetCwd` 传入 `setWorkspace`，现已在 UI 接线、hook 入口与路径工具三层做类型收口。
 - 修复跨智能体会话串绑：切换 Agent 时清空上一 Agent 的 live session/messages，并丢弃 `session/new`、`resume`、`fork`、模型发现等迟到结果；历史线程按 Agent 隔离恢复。
 - 修复失效会话把 UI 卡在历史视图：resume 失败后清除 live `sessionId`（历史记录仍保留），「点击加载模型」会强制新建会话并载入模型；无效/过期 session id 不再被裸绑定，重复失败会保留 stale 标记。
-
 ### Changed
 - 补齐 AutumnFlow 更名：Electron preload 桥接与前端调用统一为 `window.autumnflow`，同步更新安装/卸载侧边栏位图、安装脚本注释和仓库规则中的旧品牌、配置路径。
 - 内部拆分（对外行为不变）：`UniversalAgentConnection` 拆成四个单一职责模块——`AcpTransport`（进程 / NDJSON 流 / initialize / 退出）、`SessionService`（new/load/resume/fork/list/close/delete 与会话元数据回收）、`PromptTurn`（prompt 租约、取消、首轮兼容块）、`SessionState`（per-session 内存的唯一回收点），facade 从 1005 行降到约 620 行，只保留 permission / fs / terminal / subagent / quota 语义与广播，HTTP 路由与对外 API 完全不变。桌面端同时纳入类型检查：新增 `tsconfig.desktop.json` 与 `bun run typecheck`，Electron 主进程/preload/host 与 server/shared 一起过 `tsc`。
 - 全面更名：应用目录改为 `~/.autumnflow`。首次启动会把旧 `~/.acp-studio`（agents、`.gateway-token`、journal、trash、codex-home）复制到新目录，并把旧 `~/.acp-client/`（AGENTS.md、skills、mcp.json）复制到 `~/.autumnflow/resources`；旧目录只读保留、不再写入；Electron userData 同步迁移到 `%APPDATA%\autumnflow`，主题的 localStorage key 迁移到 `autumnflow_theme_v1`。`appId` 改为 `com.autumnflow.app`（注意：已有安装会被视为新应用，自动更新不会从旧安装接续）。GitHub 链接、菜单、日志与 ACP `clientInfo` 统一为 AutumnFlow；路径类环境变量统一为 `AUTUMNFLOW_HOME` / `AUTUMNFLOW_CODEX_HOME` / `AUTUMNFLOW_RESOURCES_DIR` / `AUTUMNFLOW_SKILLS_DIR`（旧名不再读取）。
 - Codex 默认使用应用独占的 `CODEX_HOME`（默认 `~/.autumnflow/codex-home`，可用 `AUTUMNFLOW_CODEX_HOME` 或 `AUTUMNFLOW_HOME` 覆盖，不写死机器路径）：首次连接从用户 `~/.codex` 复制 `auth.json` 与 `config.toml`，并合并 `[features] code_mode = true` 后启动；不再写入全局 `~/.codex`。复制或创建失败时自动回退用户目录并告警，不影响 Codex 可用性。
 - 升级 `@yitom/acp-client` 到 0.1.14：Codex 隔离 home 改为复用 SDK 的 `provisionCodexCodeModeHome`，并新增会话级 code mode 的 wire 测试（mock Agent 声明 `_meta.toolsMode` 时收到 `ptc`，未声明时不发）。注意 0.1.14 的 `preserveMcpOnRetry`：agent 拒绝 `mcpServers`（例如 stdio 条目缺 `env`）时不再静默降级为无 MCP 会话，而是让 `session/new` 直接失败（`ACP_PROTOCOL_ERROR`）。
-
 ### Added
 - 会话级 Code mode（PTC）：智能体面板新增 `Code mode` 开关，仅在 Agent 的 `initialize` 声明 `agentCapabilities._meta.toolsMode` 时显示；开关按线程持久化。开启后新建/恢复会话会带上 `_meta.toolsMode = 'ptc'`，Agent 只下发 `run_code`，并把该会话的全部工具（含 studio-ui MCP）渲染成 `tools.<name>()`。未声明的运行时（codex/claude/opencode/agy）忽略该请求——OpenCode 的 code mode 本来就由 MCP 目录驱动，无需开关。
 - DeepSeek 凭据面板：智能体面板新增「DeepSeek 凭据」入口。可在应用内把 `DEEPSEEK_API_KEY` 写入 DSH 的 user-env（`$DSH_HOME/.env`，原子写入、保留其它变量与注释、写前备份 `.env.bak`、不回显密钥），保存后点「重连」让新的 `dsh` 进程读取；重连在有运行中对话时拒绝（409）。面板同时给出「改用 DeepSeek Account 模型分组」和 `dsh --profile web` 设置页两条替代路径。
@@ -53,8 +56,6 @@
 - 桌面 HttpOnly 会话：Gateway Host 在 HTML 响应上设置 `acp_gateway_session`（HttpOnly、SameSite=Strict），生产渲染端不再向 preload 索取 token，HTTP 与 PTY WebSocket 均使用 Cookie；Cookie 请求额外校验同源 Origin/Sec-Fetch-Site，跨回环端口页面不能借用会话。开发外部网关与远端网关仍走 Bearer token。
 - 类型化 SSE 边界：新增闭合 `AppEvent` 联合与 `normalizeAppEvent`；`start/update/done/error/permission/elicitation/activity` 走显式分支，未知事件保留 raw 并记录日志，不再静默落入字符串分支；补充快照/重放消费者测试。
 - 刷新/多窗口续传：thread 持久化 `activeTurn {turnId,lastSeq,persistedSeq,status,assistantId}`，流式期间每 1.5 秒冻结消息；启动时自动 `GET /chat/:turnId/follow` 从已持久化 seq 续接，不重新 prompt。SSE 重连在服务端已接受 turn 后改用 GET follow；snapshot/follow 增加 `firstSeq/lastSeq/fromSeq/resetRequired/resetReason`，gap/ahead 发送 reset 并重建气泡；干净 EOF 无 `done` 视为 interrupted/重试，不再静默当成功。
-
-<!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 
 ## [0.1.11] - 2026-10-18
 
@@ -334,7 +335,7 @@
   本轮横切另含安全加固、agent 异步按需安装、SSE 发送互斥、前端懒加载拆分，
   细节见各专项条目（此处仅汇总，不编造版本号）。
 
-[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.11...HEAD
+[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.12...HEAD
 [0.1.0]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.0
 [0.1.1]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.1
 [0.1.2]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.2
@@ -347,3 +348,4 @@
 [0.1.9]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.9
 [0.1.10]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.10
 [0.1.11]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.11
+[0.1.12]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.12

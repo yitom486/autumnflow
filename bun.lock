@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "antigravity-acp-studio",
+      "name": "autumnflow",
       "dependencies": {
         "@agentclientprotocol/sdk": "^1.8.0",
         "@assistant-ui/react": "^0.15.27",
