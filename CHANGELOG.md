@@ -9,6 +9,9 @@
 
 ## [Unreleased]
 
+### Fixed
+- 修复 OpenCode 2 延迟工具目录下 studio-ui 已挂载但模型误报不可用的问题：MCP 握手提供工具发现说明，OpenCode 首轮兼容上下文引导通过 execute/search 查找真实工具签名；不覆盖用户已有配置。
+
 ### Added
 <!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 

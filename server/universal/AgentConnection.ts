@@ -45,12 +45,12 @@ export type SseSend = (evt: Record<string, unknown>) => void;
 /**
  * Encouraging client capability guidance injected into the first turn of each agent session.
  * Gently reminds the agent that Generative UI & Editorial Diagram tools are available on `studio-ui`
- * — IF the agent actually has them in its tool list (honesty gate: some agents/runtimes do not
- * load MCP servers in headless sessions; never promise tools the session does not have).
+ * — after discovery through direct tools or the runtime's deferred catalog.
+ * Some runtimes do not mount MCP at all; never promise unverified tools.
  */
 export const CLIENT_GENERATIVE_UI_HINT = [
   "【客户端交互能力与体验建议 / Client Interactive Capabilities】",
-  "当前客户端支持专用的富交互式 UI 与出版级矢量图表服务（MCP 服务：studio-ui）。请先检查你本次会话可用工具列表中是否包含该 MCP 服务的工具；仅当以下工具真实存在并可调用时，才在契合场景下优先调用它们，为用户提供清晰生动的视觉与交互体验。如果你的工具列表中没有这些工具，请直接忽略本段，切勿向用户承诺你可以调用它们：",
+  "当前客户端支持专用的富交互式 UI 与出版级矢量图表服务（MCP 服务：studio-ui）。请先通过本次会话的直接工具列表或运行时工具目录发现这些工具；若工具通过 execute/search 延迟暴露，请先检索目录并确认实际签名。仅在确认可用后按场景调用；发现或调用失败时说明具体限制，切勿承诺未验证的能力：",
   "- 出版级矢量图表（render_editorial_diagram）：当呈现系统架构分层拓扑、服务调用时序、流程业务状态机、技术选型四象限决策矩阵或项目演进里程碑时，鼓励优先调用生成出版级矢量图表，代替原始简陋的 Mermaid 文本；",
   "- 结构化富交互卡片（show_interactive_card）：当向用户提供方案对比决策(cardType='decision')、任务排查或门禁清单('checklist')、核心性能与指标看板('metrics')或表单填报('form')时直接渲染。调用时 data 必须携带非空内容（如 decision 必须含 options: [{ id, label, description, recommended }]，严禁传空数据）；若向用户征询执行方案确认或授权决策，请调用 cardType='decision' 提供明确的选择支；真正的高危文件修改与终端命令在执行时宿主底层安全机制会自动拦截并弹出系统权限气泡；",
   "- 人机协同交互表单（prompt_form）与动态组件沙箱原型（render_react_sandbox）；",

@@ -241,6 +241,33 @@ describe("MCP Integration Pipeline - Mock LLM Agent Tool Calls & Auto-Injection"
     expect(data.mcpDiscovery.skillContent).toContain("1-Accent Principle");
   });
 
+  it("delivers OpenCode tool-directory guidance on first prompt and after restoring a session", async () => {
+    const opencode = new UniversalAgentConnection({
+      id: "opencode", name: "OpenCode mock", command: process.platform === "win32" ? "bun.exe" : "bun",
+      args: ["run", fixturePath],
+    });
+    try {
+      await opencode.connect();
+      const session: any = await opencode.newSession({ cwd: process.cwd() });
+      const inspect = async () => {
+        const updates: any[] = [];
+        await opencode.prompt(session.sessionId, [{ type: "text", text: "trigger_inspect_prompt" }], evt => {
+          if (evt.type === "update") updates.push(evt.update);
+        });
+        return JSON.parse(updates.find(update => update.sessionUpdate === "agent_message_chunk").content.text).promptBlocks;
+      };
+      const first = await inspect();
+      const guidance = first.find((block: any) => block.text?.includes("【OpenCode 交互指引】"));
+      expect(guidance.text).toContain('tools["studio-ui"]');
+      expect(guidance.text).toContain("search");
+      expect((await inspect()).some((block: any) => block.text?.includes("【OpenCode 交互指引】"))).toBe(false);
+      await opencode.resumeSession({ sessionId: session.sessionId, cwd: process.cwd() });
+      expect((await inspect()).some((block: any) => block.text?.includes('tools["studio-ui"]'))).toBe(true);
+    } finally {
+      await opencode.disconnect();
+    }
+  });
+
   it("ensures multiple concurrent sessions discover skills independently with strict isolation", async () => {
     // Open Session A and Session B concurrently
     const sessA: any = await conn.newSession({ cwd: process.cwd() });

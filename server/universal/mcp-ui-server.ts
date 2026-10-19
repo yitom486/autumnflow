@@ -16,6 +16,7 @@ import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { listStudioSkills, getStudioSkill } from "./studio-skills";
+import { STUDIO_MCP_INSTRUCTIONS } from "./studio-tool-guidance";
 import {
   presentResultId,
   PRESENT_SCHEMA_VERSION,
@@ -74,7 +75,7 @@ export function createMcpUiServer(): McpServer {
   const mcp = new McpServer({
     name: "studio-ui",
     version: "1.0.0",
-  });
+  }, { instructions: STUDIO_MCP_INSTRUCTIONS });
 
   // 1. 结构化富交互卡片（决策、指标、核对清单、表单）
   mcp.registerTool(

@@ -12,6 +12,7 @@
 import * as acp from "@agentclientprotocol/sdk";
 import { requestAgent, requireAgentCapability, sdkRequest } from "./acp-sdk";
 import { PromptLock } from "./prompt-lock";
+import { STUDIO_MCP_DISCOVERY_HINT } from "./studio-tool-guidance";
 import type { SessionState } from "./session-state";
 import type { StudioAgentResources } from "./studio-agent-resources";
 import { studioSessions } from "./session-index";
@@ -118,7 +119,7 @@ export class PromptTurn {
       const compatibilityContext = this.deps.resources.compatibilityText(sessionId);
       const isOpencode = this.agentId === "opencode";
       const opencodeCompatibility = (isOpencode && turnCount === 0)
-        ? "【OpenCode 交互指引】：客户端已通过官方 ACP SDK 声明并处理标准 elicitation 的 form 和 url 模式。只有运行时实际转发 elicitation/create，原生提问才能显示；若当前版本未转发或原生 question 已被禁用，请使用 show_interactive_card(cardType='decision') 或正文编号选项等待用户选择，不要重复调用失败的原生 question。"
+        ? "【OpenCode 交互指引】：客户端已通过官方 ACP SDK 声明并处理标准 elicitation 的 form 和 url 模式。只有运行时实际转发 elicitation/create，原生提问才能显示；若当前版本未转发或原生 question 已被禁用，请使用 show_interactive_card(cardType='decision') 或正文编号选项等待用户选择，不要重复调用失败的原生 question。\n" + STUDIO_MCP_DISCOVERY_HINT
         : null;
 
       const prefixBlocks: acp.ContentBlock[] = [];

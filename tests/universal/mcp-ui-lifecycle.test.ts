@@ -36,6 +36,24 @@ async function count(url: string) {
 afterEach(async () => { await stopMcpUiServer(); });
 
 describe("Studio MCP connection lifecycle", () => {
+  it("advertises discovery instructions with the mounted tools in the MCP handshake", async () => {
+    const { url } = await startMcpUiServer(0);
+    const response = await rpc(url, "initialize", { protocolVersion: version, capabilities: {}, clientInfo: { name: "opencode", version: "2" } });
+    const result = (await response.json()).result;
+    const session = response.headers.get("mcp-session-id")!;
+    expect(result.instructions).toContain('tools["studio-ui"]');
+    expect(result.instructions).toContain("execute");
+    expect(result.instructions).toContain("search");
+    const initialized = await fetch(url, {
+      method: "POST", headers: { ...headers, "Mcp-Session-Id": session },
+      body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/initialized" }),
+    });
+    expect(initialized.status).toBe(202);
+    const listed = await rpc(url, "tools/list", {}, session);
+    for (const tool of (await listed.json()).result.tools) {
+      expect(result.instructions).toContain(tool.name);
+    }
+  });
   it("isolates concurrent clients and overlapping JSON-RPC request IDs", async () => {
     const { url } = await startMcpUiServer(0);
     const ids = await Promise.all([initialize(url, "agy"), initialize(url, "opencode")]);
