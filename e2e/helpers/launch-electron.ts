@@ -69,6 +69,7 @@ export async function launchElectronApp(options?: {
       PORT: String(port),
       ACP_PUBLIC_DIR: path.join(projectRoot, "dist"),
       ACP_USER_DATA_DIR: tmpDir,
+      AUTUMNFLOW_HOME: path.join(tmpDir, "home"),
       ACP_GATEWAY_TOKEN: TEST_GATEWAY_TOKEN,
       ACP_AGENTS_FILE: path.join(tmpDir, "agents.json"),
       AUTUMNFLOW_RESOURCES_DIR: path.join(tmpDir, "resources"),

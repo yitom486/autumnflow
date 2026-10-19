@@ -13,7 +13,7 @@
  *   PTY WebSocket 升级用 `gatewayAuthHeaders(req, { allowQueryToken: true })`。
  * - 前端拿 token：生产 Electron Host 在 HTML 响应上设置 HttpOnly
  *   `acp_gateway_session` Cookie，渲染端不再持有 token；开发外部网关仍经
- *   preload `acpStudio.getGatewayToken()`，浏览器模式可打开网关启动日志里
+ *   preload `autumnflow.getGatewayToken()`，浏览器模式可打开网关启动日志里
  *   打印的 `/?token=...` 链接（前端存进 localStorage 后从地址栏抹掉），
  *   或在令牌页手动粘贴 `~/.autumnflow/.gateway-token` 的内容。见 src/lib/gateway-auth.ts。
  * - CORS：`corsHeaders(req)` 回显可信本地 Origin，不返回 `*`。
@@ -24,7 +24,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
-import { resolveAppHome } from "./app-paths";
+import { ensureAppHome, resolveAppHome } from "./app-paths";
 
 // ---------------------------------------------------------------------------
 // Gateway token
@@ -60,6 +60,9 @@ export function ensureGatewayToken(): string {
     cachedToken = fromEnv;
     return cachedToken;
   }
+  // Electron can request the token before the gateway calls setupEnv().
+  // Migrate first: creating the token's parent would otherwise skip migration.
+  ensureAppHome();
   const file = gatewayTokenPath();
   try {
     if (fs.existsSync(file)) {
