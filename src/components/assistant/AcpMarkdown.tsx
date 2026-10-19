@@ -19,6 +19,7 @@ import { AcpImageView, isSafeLinkHref, isSafeMediaSrc } from "@/components/assis
 import { Citation } from "@/components/primitives/Citations";
 import { getHighlighter, ensureLanguage } from "@/components/magicui/code-comparison";
 import { useThemeStore } from "@/stores/useThemeStore";
+import { StableTextPart } from "./StableTextPart";
 
 const ReactArtifactCard = lazy(() =>
   import("./ReactArtifactCard").then((m) => ({ default: m.ReactArtifactCard }))
@@ -604,7 +605,7 @@ const BASE_REMARK = [remarkGfm];
 const BASE_REHYPE = [rehypeRaw];
 const fencesOnly = (t: string) => closeOpenFences(t);
 
-export const AcpMarkdownText: TextMessagePartComponent = memo(() => {
+const AcpMarkdownContent = memo(() => {
   const components = useMemo(() => acpComponents, []);
   const byLanguage = useMemo(() => customByLanguage, []);
   const { smoothOptions } = useDeviceFps();
@@ -642,6 +643,12 @@ export const AcpMarkdownText: TextMessagePartComponent = memo(() => {
     />
   );
 });
+
+export const AcpMarkdownText: TextMessagePartComponent = memo(() => (
+  <StableTextPart>
+    <AcpMarkdownContent />
+  </StableTextPart>
+));
 
 export interface AcpStandaloneMarkdownProps {
   content: string;

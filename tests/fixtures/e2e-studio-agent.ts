@@ -63,6 +63,24 @@ const app = acp.agent({ name: "e2e-agent" })
       .map((block: any) => String(block.text || ""))
       .filter((t: string) => !t.trimStart().startsWith("<acp-compat-context"))
       .join(" ");
+    if (fullText === "E2E_STABLE_TEXT") {
+      await text(ctx, sessionId, "阶段输出：已经定位消息更新路径，接下来核对工具事件。");
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      for (let index = 1; index <= 3; index++) {
+        const toolCallId = `stable-read-${index}`;
+        await ctx.client.notify(acp.methods.client.session.update, { sessionId, update: {
+          sessionUpdate: "tool_call", toolCallId, title: `STABLE_READ_${index}`, kind: "read", status: "in_progress",
+        } });
+        await new Promise(resolve => setTimeout(resolve, 200));
+        await ctx.client.notify(acp.methods.client.session.update, { sessionId, update: {
+          sessionUpdate: "tool_call_update", toolCallId, status: "completed",
+        } });
+        await new Promise(resolve => setTimeout(resolve, 250));
+      }
+      await text(ctx, sessionId, "新增结论：正文应当只追加。");
+      await new Promise(resolve => setTimeout(resolve, 1200));
+      return { stopReason: "end_turn" };
+    }
     if (fullText.startsWith("E2E_PERMISSION")) {
       // A real reverse ACP request. No command executes in this fixture.
       const result = await ctx.client.request(acp.methods.client.session.requestPermission, {
