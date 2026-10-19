@@ -269,9 +269,9 @@ export function isAppInstallPath(p?: string | null): boolean {
   if (!p) return false;
   const norm = p.replace(/\\/g, "/").toLowerCase();
   return (
-    norm.includes("appdata/local/programs/acp-studio") ||
-    norm.includes("program files/acp-studio") ||
-    norm.includes("program files (x86)/acp-studio")
+    norm.includes("appdata/local/programs/autumnflow") ||
+    norm.includes("program files/autumnflow") ||
+    norm.includes("program files (x86)/autumnflow")
   );
 }
 

@@ -105,7 +105,7 @@ function LazyModalFallback() {
 }
 
 /**
- * ACP Studio Universal — full ACP v1 client.
+ * AutumnFlow Universal — full ACP v1 client.
  * Decoupled controller layer via focused hooks:
  * 1. useAppBootAndShortcuts: theme, thread restore, agent validation, trailing snapshot, hotkeys.
  * 2. useAgentConfig: model config, fallback model, preferences migration, discovery.

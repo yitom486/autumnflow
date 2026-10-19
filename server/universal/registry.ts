@@ -1,13 +1,13 @@
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { AgentProfile, AgentStatus } from "./types";
 import { BUILTIN_AGENTS, loadExtraProfilesFromEnv, resolveBuiltin, parseProfilesJson } from "./presets";
 import { UniversalAgentConnection } from "./AgentConnection";
+import { resolveAppHome } from "./app-paths";
 
 /** User custom profiles live here (override with ACP_AGENTS_FILE). */
 export function customAgentsFile(): string {
-  return process.env.ACP_AGENTS_FILE || path.join(os.homedir(), ".acp-studio", "agents.json");
+  return process.env.ACP_AGENTS_FILE || path.join(resolveAppHome(), "agents.json");
 }
 
 function loadCustomProfilesFromFile(): AgentProfile[] {
@@ -27,7 +27,7 @@ function loadCustomProfilesFromFile(): AgentProfile[] {
 /**
  * Registry of agent profiles + live stdio connections.
  * One connection per agent id (shared across sessions, like Zed).
- * Sources (later wins): builtins → ACP_AGENTS_JSON env → ~/.acp-studio/agents.json.
+ * Sources (later wins): builtins → ACP_AGENTS_JSON env → ~/.autumnflow/agents.json.
  */
 export class UniversalRegistry {
   private profiles = new Map<string, AgentProfile>();

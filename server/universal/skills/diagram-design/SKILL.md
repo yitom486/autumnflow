@@ -123,7 +123,7 @@ description: 指导智能体在呈现系统架构、调用时序、业务状态�
 - **调用示例**:
 \`\`\`json
 {
-  "title": "ACP Studio 演进里程碑",
+  "title": "AutumnFlow 演进里程碑",
   "diagramType": "timeline",
   "accent": "violet",
   "data": {

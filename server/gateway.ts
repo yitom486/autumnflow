@@ -7,6 +7,7 @@ import { Hono } from "hono";
 import { handleUniversal } from "./universal/routes";
 import { universalRegistry } from "./universal/registry";
 import { corsHeaders as secureCorsHeaders, ensureGatewayToken, gatewaySessionCookie, requireAuth } from "./universal/security";
+import { ensureAppHome } from "./universal/app-paths";
 import { resolveRuntimeConfig } from "../shared/runtime-config";
 import * as path from "node:path";
 import * as fs from "node:fs";
@@ -15,6 +16,8 @@ import { staticFileResponse } from "./static-files";
 import { stopMcpUiServer } from "./universal/mcp-ui-server";
 
 export function setupEnv() {  // 生成/复用网关 token 并注入进程环境，同一机器前后端共享（详见 universal/security.ts）。
+  // 首次运行先把 ~/.acp-studio 复制到 ~/.autumnflow；之后的读写只走新目录。
+  ensureAppHome();
   const token = ensureGatewayToken();
   if (!process.env.ACP_GATEWAY_TOKEN) process.env.ACP_GATEWAY_TOKEN = token;
 
@@ -45,7 +48,7 @@ process.on("uncaughtException", (err) => {
   console.error("[Server] Uncaught exception:", err);
 });
 
-console.log("[Server] Initializing Universal ACP Studio Gateway...");
+console.log("[Server] Initializing AutumnFlow Gateway...");
 
 /**
  * 受限 CORS（re-export，唯一实现在 universal/security.ts，避免循环依赖：

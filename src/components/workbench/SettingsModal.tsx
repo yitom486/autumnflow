@@ -7,7 +7,7 @@ import { useStudioStore } from "@/stores/useStudioStore";
 import { getGatewayBase, getGatewayToken, isCookieAuth, isLoopbackBase, setGatewayBase, setGatewayToken, verifyGatewayToken } from "@/lib/gateway-auth";
 import { cn } from "@/lib/utils";
 
-const CHANGELOG_URL = "https://github.com/yitom486/acp-studio/blob/master/CHANGELOG.md";
+const CHANGELOG_URL = "https://github.com/yitom486/autumnflow/blob/master/CHANGELOG.md";
 
 function fmtTime(ts: number | null | undefined): string {
   if (!ts) return "从未";
@@ -112,7 +112,7 @@ const GatewayPanel: React.FC = () => {
   const saveToken = async () => {
     const t = tokenInput.trim();
     if (!t) {
-      say("err", "先粘贴该网关的令牌（其本机 ~/.acp-studio/.gateway-token）。");
+      say("err", "先粘贴该网关的令牌（其本机 ~/.autumnflow/.gateway-token）。");
       return;
     }
     setBusy(true);
@@ -193,7 +193,7 @@ const GatewayPanel: React.FC = () => {
             ? "桌面网关使用 HttpOnly SameSite=Strict 会话 Cookie，页面 JS 无需持有令牌。"
             : getGatewayToken()
               ? "已设置（按基址隔离保存，不回显）。"
-              : "未设置：粘贴该网关本机 ~/.acp-studio/.gateway-token。"
+              : "未设置：粘贴该网关本机 ~/.autumnflow/.gateway-token。"
         }
       >
         <div className="flex gap-2">
@@ -225,7 +225,7 @@ const GatewayPanel: React.FC = () => {
       <pre className="overflow-x-auto rounded-lg border border-border bg-muted/40 p-3 font-mono text-[11px] leading-relaxed text-muted-foreground">
 {`# 1. WSL 内（Ubuntu）：进仓库目录，装好 bun，起网关（高位端口 13005，避开常用端口）
 PORT=13005 bun run dev:server:node
-# 2. 拿 WSL 里 ~/.acp-studio/.gateway-token 的内容
+# 2. 拿 WSL 里 ~/.autumnflow/.gateway-token 的内容
 # 3. 本页基址填 http://127.0.0.1:13005，保存（自动重载），再贴令牌
 # 4. 工作区直接用 Linux 路径，如 /home/you/proj`}
       </pre>
@@ -326,7 +326,7 @@ export const AboutPanel: React.FC = () => {
       <Row title="安装方式" desc={info?.canAutoInstall ? "后台下载，重启或下次打开时静默安装。" : "当前平台只提示新版并打开下载页（macOS 未签名 / deb 包）。"} />
       <div className="mt-4 flex gap-2">
         <a className={btn} href={CHANGELOG_URL} target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" /> 更新日志</a>
-        <a className={btn} href="https://github.com/yitom486/acp-studio" target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" /> GitHub</a>
+        <a className={btn} href="https://github.com/yitom486/autumnflow" target="_blank" rel="noreferrer"><ExternalLink className="h-3.5 w-3.5" /> GitHub</a>
       </div>
       <div className="mt-6 text-[11px] text-muted-foreground">MIT License · © yitom486</div>
     </div>

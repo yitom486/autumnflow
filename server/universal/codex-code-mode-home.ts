@@ -11,18 +11,16 @@
  * adds AutumnFlow's app-specific directory default and the Codex profile test.
  */
 
-import { homedir } from "node:os";
 import { join } from "node:path";
 import {
   provisionCodexCodeModeHome as provisionWithSdk,
   type CodexCodeModeHomeResult,
 } from "@yitom/acp-client";
+import { resolveAppHome } from "./app-paths";
 
 export { withCodeModeEnabled } from "@yitom/acp-client";
 export type { CodexCodeModeHomeResult } from "@yitom/acp-client";
 
-/** Directory name under the user's home for this application's data. */
-const APP_HOME_DIR = ".acp-studio";
 /** Subdirectory that holds the isolated Codex home. */
 const APP_CODEX_HOME_DIR = "codex-home";
 
@@ -30,19 +28,19 @@ const APP_CODEX_HOME_DIR = "codex-home";
  * The app-owned Codex home.
  *
  * Resolution order (no machine-specific path is ever hardcoded):
- * 1. `ACP_CODEX_HOME` — a full target directory;
- * 2. `<base>/codex-home`, where base is the argument or `ACP_STUDIO_HOME`;
- * 3. `<user home>/.acp-studio/codex-home`.
+ * 1. `AUTUMNFLOW_CODEX_HOME` (legacy: `ACP_CODEX_HOME`) — a full target directory;
+ * 2. `<AUTUMNFLOW_HOME>/codex-home`, or a base argument;
+ * 3. `<app home>/codex-home` (`~/.autumnflow/codex-home` by default).
  */
 export function resolveAppCodexHome(
   baseDir?: string,
   env: NodeJS.ProcessEnv = process.env,
 ): string {
-  const explicit = env.ACP_CODEX_HOME?.trim();
+  const explicit = env.AUTUMNFLOW_CODEX_HOME?.trim();
   if (explicit) return explicit;
-  const base = baseDir?.trim() || env.ACP_STUDIO_HOME?.trim();
+  const base = baseDir?.trim() || env.AUTUMNFLOW_HOME?.trim();
   if (base) return join(base, APP_CODEX_HOME_DIR);
-  return join(homedir(), APP_HOME_DIR, APP_CODEX_HOME_DIR);
+  return join(resolveAppHome(env), APP_CODEX_HOME_DIR);
 }
 
 /**

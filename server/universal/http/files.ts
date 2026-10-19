@@ -7,14 +7,14 @@
  * - 目标路径一律相对 cwd 解析，realpath 后（含父目录）必须仍在 cwd 内：`..`、绝对路径、软链接逃逸都拒绝；
  * - 不允许写 / 改 / 删 `.git` 目录内的东西，不允许删除或重命名 cwd 本身；
  * - 写入带 mtime 乐观锁：客户端带上打开时的 mtimeMs，磁盘已被改动则 409；
- * - 删除进回收站（Electron 注入 shell.trashItem；否则移到 ~/.acp-studio/trash），不真删。
+ * - 删除进回收站（Electron 注入 shell.trashItem；否则移到 ~/.autumnflow/trash），不真删。
  */
 import { Hono, type Context } from "hono";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
 import { z } from "zod";
 import { dangerousRootReason } from "../security";
+import { resolveAppHome } from "../app-paths";
 import { json, jsonBody } from "./shared";
 
 export const filesRouter = new Hono();
@@ -35,7 +35,7 @@ async function moveToTrash(abs: string): Promise<string> {
     await trashImpl(abs);
     return "system";
   }
-  const dir = path.join(process.env.ACP_TRASH_DIR || path.join(os.homedir(), ".acp-studio", "trash"), String(Date.now()));
+  const dir = path.join(process.env.ACP_TRASH_DIR || path.join(resolveAppHome(), "trash"), String(Date.now()));
   fs.mkdirSync(dir, { recursive: true });
   const dest = path.join(dir, path.basename(abs));
   try {

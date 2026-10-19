@@ -1,4 +1,4 @@
-# ACP Studio — UI Redesign Brief
+# AutumnFlow — UI Redesign Brief
 
 Target: an almost-full visual redesign of the chat workbench to remove AI-slop.
 Status: direction + constraints live here. **Mandatory skills** (installed globally

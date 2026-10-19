@@ -8,7 +8,7 @@ import { DecisionCard, ChecklistCard, MetricsCard, PromptFormCard } from "../../
 import { ReactArtifactCard } from "../../src/components/assistant/ReactArtifactCard";
 import { EditorialDiagramCard } from "../../src/components/assistant/EditorialDiagramCard";
 
-describe("Universal ACP Studio - 5-Digit MCP Server & Generative UI", () => {
+describe("AutumnFlow - 5-Digit MCP Server & Generative UI", () => {
   let mcpSessionId = "";
 
   afterAll(async () => {

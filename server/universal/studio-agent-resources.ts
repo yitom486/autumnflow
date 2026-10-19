@@ -46,7 +46,7 @@ export async function ensureStudioResources(defaultRules: string): Promise<strin
   const directory = getStudioResourcesDir();
   await rejectSymlink(directory);
   await fs.mkdir(directory, { recursive: true, mode: 0o700 });
-  await writeDefault(path.join(directory, "AGENTS.md"), `# ACP Studio 会话规则\n\n${defaultRules}\n`);
+  await writeDefault(path.join(directory, "AGENTS.md"), `# AutumnFlow 会话规则\n\n${defaultRules}\n`);
   await writeDefault(path.join(directory, "SYSTEM.md"), SYSTEM_TEMPLATE);
   await writeDefault(path.join(directory, "mcp.json"), DEFAULT_MCP);
   for (const name of ["AGENTS.md", "SYSTEM.md", "mcp.json"]) await rejectSymlink(path.join(directory, name));
@@ -86,7 +86,7 @@ export class StudioAgentResources {
       this.rules = [rules.trim(), system.trim(), `Application configuration source: ${this.source}`].filter(Boolean).join("\n\n");
       if (Buffer.byteLength(this.rules) > 256 * 1024) throw new Error("Application rules exceed 256 KiB");
       await fs.writeFile(path.join(this.snapshot, "AGENTS.md"), this.rules, { mode: 0o600 });
-      const skillSource = process.env.ACP_STUDIO_SKILLS_DIR || path.join(this.source, "skills");
+      const skillSource = process.env.AUTUMNFLOW_SKILLS_DIR || path.join(this.source, "skills");
       await copyMarkdown(skillSource, path.join(this.snapshot, "skills"), true);
       const config = JSON.parse(await fs.readFile(path.join(this.source, "mcp.json"), "utf8"));
       if (!config || !Array.isArray(config.mcpServers)) throw new Error("mcp.json must contain an ACP mcpServers array");

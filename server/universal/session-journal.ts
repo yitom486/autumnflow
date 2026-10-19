@@ -11,9 +11,9 @@
  * an interrupted terminal turn, never replayed into a second prompt.
  */
 import { appendFile, mkdir, readFile, readdir, stat, unlink } from "node:fs/promises";
-import * as os from "node:os";
 import * as path from "node:path";
 import type { TurnEvent, TurnRecord, TurnStatus } from "./turn-registry";
+import { resolveAppHome } from "./app-paths";
 
 export type JournalTurnStatus = Exclude<TurnStatus, "running"> | "interrupted";
 
@@ -35,7 +35,7 @@ function safePart(value: string): string {
 }
 
 function resolveJournalRoot(): string {
-  return process.env.ACP_SESSION_JOURNAL_DIR || path.join(os.homedir(), ".acp-studio", "journal");
+  return process.env.ACP_SESSION_JOURNAL_DIR || path.join(resolveAppHome(), "journal");
 }
 
 export class SessionJournal {

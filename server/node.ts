@@ -27,8 +27,8 @@ const server = serve(
     hostname: "127.0.0.1", // 安全边界第一层：只绑回环，局域网不可达（纵深防御见 universal/security.ts）。
   },
   (info) => {
-    console.log(`[Server] Google Antigravity ACP Studio server running at http://127.0.0.1:${info.port} (node)`);
-    console.log(`[Server] gateway token: ${gatewayTokenPreview()} (full token in ~/.acp-studio/.gateway-token)`);
+    console.log(`[Server] AutumnFlow server running at http://127.0.0.1:${info.port} (node)`);
+    console.log(`[Server] gateway token: ${gatewayTokenPreview()} (full token in ~/.autumnflow/.gateway-token)`);
     // 所有 /api/universal/* 都要 token：浏览器模式用一次性链接打开 UI（只打到本机终端）。
     console.log(`[Server] open the UI with:  ${gatewayBootstrapUrl(`http://127.0.0.1:${info.port}`)}`);
   }

@@ -32,7 +32,7 @@ export async function launchElectronApp(options?: {
   });
   const tmpDir = path.join(
     os.tmpdir(),
-    `acp-studio-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    `autumnflow-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
   );
   fs.mkdirSync(tmpDir, { recursive: true });
   const workspace = path.join(tmpDir, "workspace");
@@ -71,7 +71,7 @@ export async function launchElectronApp(options?: {
       ACP_USER_DATA_DIR: tmpDir,
       ACP_GATEWAY_TOKEN: TEST_GATEWAY_TOKEN,
       ACP_AGENTS_FILE: path.join(tmpDir, "agents.json"),
-      ACP_STUDIO_RESOURCES_DIR: path.join(tmpDir, "resources"),
+      AUTUMNFLOW_RESOURCES_DIR: path.join(tmpDir, "resources"),
       ACP_AGENTS_JSON: JSON.stringify(agentsConfig),
       ELECTRON_DEV: options?.developmentUrl ? "1" : "0",
       NODE_ENV: "production",
@@ -89,7 +89,7 @@ export async function launchElectronApp(options?: {
   const cleanup = async () => {
     try { await app.close(); } finally {
       const target = path.resolve(tmpDir);
-      if (path.dirname(target) === path.resolve(os.tmpdir()) && path.basename(target).startsWith("acp-studio-e2e-")) {
+      if (path.dirname(target) === path.resolve(os.tmpdir()) && path.basename(target).startsWith("autumnflow-e2e-")) {
         fs.rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
       }
     }

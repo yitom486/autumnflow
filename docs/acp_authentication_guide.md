@@ -106,7 +106,7 @@ this.proc = Bun.spawn([this.options.executablePath, ...args], {
 * Google 官方的 `agy_acp_server.exe` 会将用户的登录状态、OAuth Token 以及已绑定的 Project ID 存储在系统的用户全局目录：
   `C:\Users\<用户名>\.gemini\antigravity-acp\settings.json`
 * **Zed 自身调用的也是同一个二进制文件与同一份全局配置**。
-* 既然我们已经在 ACP Studio 中走通了完整的 OAuth Onboarding 并把凭证写盘，**当你在 Zed 中打开 Antigravity 插件时，它会自动识别到该配置，无需再次跳转浏览器进行脆弱的 OAuth 登录！**
+* 既然我们已经在 AutumnFlow 中走通了完整的 OAuth Onboarding 并把凭证写盘，**当你在 Zed 中打开 Antigravity 插件时，它会自动识别到该配置，无需再次跳转浏览器进行脆弱的 OAuth 登录！**
 
 #### 2. 在 Zed 中顺畅使用模型的关键建议（避坑提示）
 虽然登录凭据已经保存在本地，但在 Zed 中向模型发问（Session Prompt）时，`agy_acp_server.exe` 仍然需要访问 Google 的推理接口。为了确保 Zed 中的子进程不会再次因网络直连超时，建议：

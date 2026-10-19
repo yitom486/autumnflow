@@ -60,7 +60,7 @@ export function GatewayTokenGate({ reason, detail, onAuthorized }: Props) {
               最简单：打开网关启动日志里 <span className="font-mono text-foreground">open the UI with:</span> 后面那条链接。
             </li>
             <li>
-              或者把 <span className="font-mono text-foreground">~/.acp-studio/.gateway-token</span> 的内容粘贴到下面。
+              或者把 <span className="font-mono text-foreground">~/.autumnflow/.gateway-token</span> 的内容粘贴到下面。
             </li>
           </ol>
           <form onSubmit={submit} className="flex gap-2">

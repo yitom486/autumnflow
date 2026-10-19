@@ -15,7 +15,7 @@
  *   `acp_gateway_session` Cookie，渲染端不再持有 token；开发外部网关仍经
  *   preload `acpStudio.getGatewayToken()`，浏览器模式可打开网关启动日志里
  *   打印的 `/?token=...` 链接（前端存进 localStorage 后从地址栏抹掉），
- *   或在令牌页手动粘贴 `~/.acp-studio/.gateway-token` 的内容。见 src/lib/gateway-auth.ts。
+ *   或在令牌页手动粘贴 `~/.autumnflow/.gateway-token` 的内容。见 src/lib/gateway-auth.ts。
  * - CORS：`corsHeaders(req)` 回显可信本地 Origin，不返回 `*`。
  * - 工作区：智能体写文件前调 `isPathAllowed(p, extraRoots)`，不在允许根内直接拒绝
  *  （见 .agents/rules/no-silent-fallbacks.md）。
@@ -24,6 +24,7 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
+import { resolveAppHome } from "./app-paths";
 
 // ---------------------------------------------------------------------------
 // Gateway token
@@ -36,11 +37,7 @@ export function gatewayTokenPath(): string {
   if (process.env.ACP_GATEWAY_TOKEN_FILE) {
     return path.resolve(process.env.ACP_GATEWAY_TOKEN_FILE);
   }
-  const stateHome = process.env.XDG_STATE_HOME || process.env.ACP_HOME;
-  if (stateHome) {
-    return path.join(stateHome, ".acp-studio", ".gateway-token");
-  }
-  return path.join(os.homedir(), ".acp-studio", ".gateway-token");
+  return path.join(resolveAppHome(), ".gateway-token");
 }
 
 function isValidTokenFormat(t: string): boolean {
@@ -49,7 +46,7 @@ function isValidTokenFormat(t: string): boolean {
 
 /**
  * 首次启动随机生成 32 字节 hex token，缓存在内存 + 写入
- * `~/.acp-studio/.gateway-token`（mode 600），下次复用；
+ * `~/.autumnflow/.gateway-token`（mode 600），下次复用；
  * 允许 `ACP_GATEWAY_TOKEN` 环境变量覆盖（Electron 主进程在 createWindow 前
  * 写入该环境变量；CI/多实例也可用它固定 token）。
  *
@@ -93,7 +90,7 @@ export function ensureGatewayToken(): string {
 
 /**
  * 只用于启动日志：前8位 + 掩码。禁止把完整 token 打进日志，
- * 完整 token 只存在 ~/.acp-studio/.gateway-token（或 ACP_GATEWAY_TOKEN 环境变量）里。
+ * 完整 token 只存在 ~/.autumnflow/.gateway-token（或 ACP_GATEWAY_TOKEN 环境变量）里。
  */
 export function gatewayTokenPreview(): string {
   const t = ensureGatewayToken();
@@ -390,9 +387,9 @@ export function isAppInstallDir(p: string): boolean {
   if (!p) return false;
   const norm = p.replace(/\\/g, "/").toLowerCase();
   if (
-    norm.includes("appdata/local/programs/acp-studio") ||
-    norm.includes("program files/acp-studio") ||
-    norm.includes("program files (x86)/acp-studio")
+    norm.includes("appdata/local/programs/autumnflow") ||
+    norm.includes("program files/autumnflow") ||
+    norm.includes("program files (x86)/autumnflow")
   ) {
     return true;
   }
@@ -414,7 +411,7 @@ export function isAppInstallDir(p: string): boolean {
 export function dangerousRootReason(p: string): string | null {
   const abs = path.resolve(p);
   if (path.parse(abs).root === abs) return `不能把文件系统根目录 ${abs} 作为工作区`;
-  if (isAppInstallDir(abs)) return `不能把 ACP Studio 应用程序安装目录 ${abs} 作为工作区`;
+  if (isAppInstallDir(abs)) return `不能把 AutumnFlow 应用程序安装目录 ${abs} 作为工作区`;
   const cmp = process.platform === "win32" ? abs.toLowerCase() : abs;
   const sys = process.platform === "win32" ? WIN_SYSTEM_DIRS : UNIX_SYSTEM_DIRS;
   for (const d of sys) {

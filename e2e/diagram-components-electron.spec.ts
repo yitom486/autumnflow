@@ -62,7 +62,7 @@ test.describe("Diagram components through real Electron, ACP and MCP", () => {
   for (const theme of ["light", "dark"]) for (const scenario of editorialCases) {
     test(`${scenario.kind}: ${theme} rendering, zoom bounds, fullscreen, copy and SVG download`, async ({}, info) => {
       const { page, app } = launched;
-      await page.evaluate(theme => localStorage.setItem("acp_studio_theme_v1", theme), theme);
+      await page.evaluate(theme => localStorage.setItem("autumnflow_theme_v1", theme), theme);
       await page.reload();
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       await prompt(`E2E_DIAGRAM:${scenario.kind}`);
@@ -187,7 +187,7 @@ test.describe("Diagram components through real Electron, ACP and MCP", () => {
 
   for (const theme of ["light", "dark"]) test(`Mermaid mindmap: ${theme} nested collapse, keyboard and shared preview state`, async ({}, info) => {
     const { page } = launched;
-    await page.evaluate(theme => localStorage.setItem("acp_studio_theme_v1", theme), theme);
+    await page.evaluate(theme => localStorage.setItem("autumnflow_theme_v1", theme), theme);
     await page.reload();
     await prompt("E2E_MERMAID:mindmap");
     const diagram = page.locator("[data-mermaid-diagram]");

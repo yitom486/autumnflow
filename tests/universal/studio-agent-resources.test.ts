@@ -9,7 +9,7 @@ let root: string;
 const owners: StudioAgentResources[] = [];
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(tmpdir(), "studio-resources-test-"));
-  vi.stubEnv("ACP_STUDIO_RESOURCES_DIR", root);
+  vi.stubEnv("AUTUMNFLOW_RESOURCES_DIR", root);
 });
 afterEach(async () => {
   await Promise.all(owners.splice(0).map(owner => owner.dispose()));

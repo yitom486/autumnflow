@@ -27,7 +27,7 @@ for (const order of ["development-first", "release-first"] as const) {
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "acp-runtime-isolation-"));
     const tokenEnv = { ACP_GATEWAY_TOKEN: TEST_GATEWAY_TOKEN };
     const developmentEnv = { ...tokenEnv, ACP_AGENTS_FILE: path.join(stateRoot, "dev-agents.json"),
-      ACP_STUDIO_RESOURCES_DIR: path.join(stateRoot, "dev-resources") };
+      AUTUMNFLOW_RESOURCES_DIR: path.join(stateRoot, "dev-resources") };
     const developmentAgent = [{ id: "e2e-agent", name: "e2e-agent", title: "Development Test Agent",
       command: process.platform === "win32" ? "bun.exe" : "bun",
       args: ["run", path.join(root, "tests/fixtures/e2e-studio-agent.ts")], builtin: false }];
@@ -61,7 +61,7 @@ for (const order of ["development-first", "release-first"] as const) {
       const startRelease = async () => {
         release = await launchElectronApp({ env: { ...tokenEnv, MCP_PORT: String(await freePort()),
           ACP_AGENTS_FILE: path.join(stateRoot, "release-agents.json"),
-          ACP_STUDIO_RESOURCES_DIR: path.join(stateRoot, "release-resources") } });
+          AUTUMNFLOW_RESOURCES_DIR: path.join(stateRoot, "release-resources") } });
         await expect(release.page.locator("aside").first()).toBeVisible({ timeout: 20000 });
       };
       if (order === "development-first") { await startDevelopment(); await startRelease(); }

@@ -12,7 +12,7 @@ export interface SlashCommand {
   description?: string;
   /** ACP AvailableCommand.input.hint — placeholder for the argument. */
   hint?: string;
-  /** Handled by ACP Studio itself (not sent to the agent). */
+  /** Handled by AutumnFlow itself (not sent to the agent). */
   local?: boolean;
 }
 

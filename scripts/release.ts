@@ -1,5 +1,5 @@
 /**
- * acp-studio 发版脚本：默认 patch （+0.0.1），自动同步 CHANGELOG。
+ * AutumnFlow 发版脚本：默认 patch （+0.0.1），自动同步 CHANGELOG。
  *
  *   bun run release:patch [--notes "..."] [--dry-run]
  *   bun run release:minor --allow-minor [--notes "..."] [--dry-run]

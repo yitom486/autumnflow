@@ -1,12 +1,12 @@
-# 04 - ACP Studio 技能系统与生成式 UI 架构技术白皮书
+# 04 - AutumnFlow 技能系统与生成式 UI 架构技术白皮书
 
-> 本文系统阐述 ACP Studio 如何在**完全不污染各智能体私有环境、不污染用户工作区 Git 仓库、且不浪费每一轮会话 Token** 的前提下，实现跨模型生态（Claude、Gemini/Antigravity、Codex、Cursor 等）的出版级矢量图表与生成式 UI 交互规范的统一分发与按需加载。
+> 本文系统阐述 AutumnFlow 如何在**完全不污染各智能体私有环境、不污染用户工作区 Git 仓库、且不浪费每一轮会话 Token** 的前提下，实现跨模型生态（Claude、Gemini/Antigravity、Codex、Cursor 等）的出版级矢量图表与生成式 UI 交互规范的统一分发与按需加载。
 
 ---
 
 ## 一、 背景痛点与架构挑战
 
-在将多种生态的智能体接入 ACP Studio 时，传统做法通常面临三个两难工程困境：
+在将多种生态的智能体接入 AutumnFlow 时，传统做法通常面临三个两难工程困境：
 
 1. **每轮 Turn 硬塞大段提示词（Prompt Bloat）**：
    - 传统做法是在每个会话或每一轮提问的前后拼接长篇大论的“格式说明书”和“Schema 规范”；
@@ -24,11 +24,11 @@
 
 ## 二、 复合零污染分发架构设计（Hybrid Architecture）
 
-ACP Studio 创造性地采用 **“以 MCP 原生按需检索为骨干，以 ACP 会话级附加目录为底层辅助”** 的无污染复合架构：
+AutumnFlow 创造性地采用 **“以 MCP 原生按需检索为骨干，以 ACP 会话级附加目录为底层辅助”** 的无污染复合架构：
 
 ```mermaid
 flowchart TD
-    subgraph ACP Studio 本地专属数据层
+    subgraph AutumnFlow 本地专属数据层
         SkillStorage["server/universal/skills/\n├── diagram-design/SKILL.md\n└── generative-ui/SKILL.md"]
     end
 

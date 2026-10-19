@@ -57,7 +57,7 @@ export const CustomAgentModal: React.FC<CustomAgentModalProps> = ({ isOpen, onCl
         args: argsText.split("\n").map((s) => s.trim()).filter(Boolean),
         env,
       });
-      setMsg(`已保存 ${form.id.trim()}（持久化到 ~/.acp-studio/agents.json）。`);
+      setMsg(`已保存 ${form.id.trim()}（持久化到 ~/.autumnflow/agents.json）。`);
       resetForm();
       onChanged();
     } catch (e: any) {

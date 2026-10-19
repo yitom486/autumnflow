@@ -1,5 +1,5 @@
 /**
- * Universal ACP Studio Built-in MCP Server for Generative UI.
+ * Universal AutumnFlow Built-in MCP Server for Generative UI.
  *
  * Runs a Streamable HTTP MCP server on a shared local port.
  * (default starting at 13920, automatically cascading up if occupied).
@@ -292,7 +292,7 @@ export function createMcpUiServer(): McpServer {
     "list_studio_skills",
     {
       description:
-        "【Studio 技能清单】列出当前 ACP Studio 客户端内置提供的专业能力与设计规范清单（例如 diagram-design 出版级矢量图表设计、generative-ui 生成式交互卡片规范）。",
+        "【Studio 技能清单】列出当前 AutumnFlow 客户端内置提供的专业能力与设计规范清单（例如 diagram-design 出版级矢量图表设计、generative-ui 生成式交互卡片规范）。",
       inputSchema: {},
     },
     async () => {
@@ -302,7 +302,7 @@ export function createMcpUiServer(): McpServer {
           {
             type: "text",
             text:
-              `当前 ACP Studio 已加载 ${skills.length} 个内置专业技能：\n` +
+              `当前 AutumnFlow 已加载 ${skills.length} 个内置专业技能：\n` +
               skills.map((s) => `- **${s.name}**: ${s.title} — ${s.description}`).join("\n"),
           },
         ],

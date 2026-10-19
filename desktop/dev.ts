@@ -1,5 +1,5 @@
 /**
- * ACP Studio unified Desktop dev orchestrator.
+ * AutumnFlow unified Desktop dev orchestrator.
  * Handles:
  * 1. Check development ports without stopping other applications
  * 2. Compiles desktop/main.ts and desktop/preload.ts
@@ -168,7 +168,7 @@ function startSubProcess(name: string, color: string, cmd: string, args: string[
 }
 
 async function main() {
-  console.log(`${c.bold}${c.magenta}=== ACP Studio 桌面端集成开发环境启动中 ===${c.reset}\n`);
+  console.log(`${c.bold}${c.magenta}=== AutumnFlow 桌面端集成开发环境启动中 ===${c.reset}\n`);
 
   // Never reclaim a port by killing its owner: it may be the release app.
   await assertPortAvailable(GATEWAY_PORT);

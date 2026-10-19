@@ -1,4 +1,4 @@
-# ACP Studio Desktop (Electron)
+# AutumnFlow Desktop (Electron)
 
 桌面客户端：Electron 窗口 + 独立 Gateway Host 子进程（Hono），前端 `dist` 由 Host 同源 served，
 无需浏览器、无需常驻终端。
@@ -27,7 +27,7 @@ Electron main (Node, electron-dist/main.cjs)
 每个 prompt turn 除了内存 ledger 外，还会写入：
 
 ```text
-~/.acp-studio/journal/<agent>/<turnId>.jsonl
+~/.autumnflow/journal/<agent>/<turnId>.jsonl
 ```
 
 文件由 meta、带 `seq` 的事件和 finish 三部分组成。SSE 断线时客户端用
@@ -85,7 +85,7 @@ bun run dev:electron     # 外接已启动的 vite(5188)+网关，只启动 Elec
 开发版和正式版可以同时运行：开发 HTTP 网关默认 `13015`、MCP 默认 `13930`，
 正式版分别为 `13005`、`13920`；开发页面仍使用 `5188`。`PORT`、`MCP_PORT`、
 `ACP_DEV_VITE_PORT` 可显式覆盖，开发启动器会把同一配置传给网关、Vite 和桌面窗口。
-开发与正式版分别使用 `acp-studio-dev`、`acp-studio` 的 Electron 数据目录和单实例锁。
+开发与正式版分别使用 `autumnflow-dev`、`autumnflow` 的 Electron 数据目录和单实例锁。
 端口被占用时会报错退出，不再强杀占用进程；退出开发环境只结束本次启动的子进程树。
 Windows 下启动器直接管理 Vite 和网关，不为后台服务创建独立控制台窗口，
 由启动器统一关闭并确认退出，避免脚本包装进程先退出后遗留 Vite 占用端口。
@@ -120,7 +120,7 @@ Mermaid、Markdown、数学公式等前端依赖已编译进 `dist`，不再额�
 WOFF/TTF）。`electron-dist/host.cjs` 会按 `asarUnpack` 解包到
 `resources/app.asar.unpacked/electron-dist/host.cjs`；主进程从该路径 fork Host，
 不要把 Host 留在 asar 内。界面和开发演示共用 `public/icon.png`；高清猫咪原图保存在
-`build/acp-studio-cat.png`，不复制到前端发布目录。
+`build/icon.png`，不复制到前端发布目录。
 原生终端使用系统 ConPTY（显式 `useConptyDll: false`），保留 WinPTY 回退文件；
 发布目录不带实验版 `conpty.dll` / `OpenConsole.exe` 和仅用于编译的
 `node-addon-api`。其许可证仍保留在第三方声明中，开发依赖不变。
@@ -159,7 +159,7 @@ WOFF/TTF）。`electron-dist/host.cjs` 会按 `asarUnpack` 解包到
 
 - **网关跑进 WSL（原生 Linux agent/工具）**：WSL 内进仓库目录，
   `PORT=4004 bun run dev:server:node`，基址填 `http://127.0.0.1:4004`，
-  令牌贴 WSL 里 `~/.acp-studio/.gateway-token`，工作区直接用 Linux 路径。
+  令牌贴 WSL 里 `~/.autumnflow/.gateway-token`，工作区直接用 Linux 路径。
 - **SSH 远端**：远端起网关（只听 127.0.0.1 即可），本地
   `ssh -L 4004:127.0.0.1:3004 user@host -N`，基址填 `http://127.0.0.1:4004`。
 - 非回环 http 基址设置页会 loud 警告（明文 token 出本机）；跨源能通是因为

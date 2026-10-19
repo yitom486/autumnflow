@@ -17,7 +17,7 @@
   "type": "module",
   "main": "electron-dist/main.cjs",
   "build": {
-    "appId": "studio.acp.app",
+    "appId": "com.autumnflow.app",
     "productName": "AutumnFlow",
     "files": [
       "electron-dist/**/*",

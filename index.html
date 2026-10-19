@@ -11,7 +11,7 @@
     <script>
       (function() {
         try {
-          var t = localStorage.getItem('acp_studio_theme_v1') || 'dark';
+          var t = localStorage.getItem('autumnflow_theme_v1') || localStorage.getItem('acp_studio_theme_v1') || 'dark';
           var doc = document.documentElement;
           doc.setAttribute('data-theme', t);
           if (t === 'light') {

@@ -10,7 +10,7 @@ import type { AgentProfile } from "./types";
  * gateway picks it up. See `authHint` per preset.
  *
  * Users can override / extend via ACP_AGENTS_JSON env, POST
- * /api/universal/agents, or ~/.acp-studio/agents.json (all persisted).
+ * /api/universal/agents, or ~/.autumnflow/agents.json (all persisted).
  */
 /**
  * Antigravity bridge, codex-style: `bunx @yitom/agy-acp-map@latest` runs the

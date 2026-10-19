@@ -1,5 +1,5 @@
 /**
- * Standalone process and port cleaner for ACP Studio.
+ * Standalone process and port cleaner for AutumnFlow.
  * Run: bun run clean
  */
 import { spawn, execSync } from "node:child_process";

@@ -236,7 +236,7 @@ export class AcpTransport {
     const stream = acp.ndJsonStream(toWebWritable, toWebReadable);
 
     const app = acp
-      .client({ name: "acp-studio-universal" })
+      .client({ name: "autumnflow-universal" })
       .onRequest(acp.methods.client.session.requestPermission, ctx => handlers.requestPermission(ctx.params, ctx.signal))
       .onRequest(acp.methods.client.fs.readTextFile, ctx => handlers.readTextFile(ctx.params))
       .onRequest(acp.methods.client.fs.writeTextFile, ctx => handlers.writeTextFile(ctx.params))
@@ -259,7 +259,7 @@ export class AcpTransport {
           ...clientCapabilities,
           auth: { terminal: this.hooks.terminalAuthAvailable?.(resolved) ?? false },
         },
-        clientInfo: { name: "acp-studio-universal", title: "ACP Studio Universal", version: "1.0.0" },
+        clientInfo: { name: "autumnflow-universal", title: "AutumnFlow Universal", version: "1.0.0" },
       });
       if (res.protocolVersion !== acp.PROTOCOL_VERSION) throw new Error(`Unsupported ACP protocol version: ${res.protocolVersion}`);
       this.initResult = res;

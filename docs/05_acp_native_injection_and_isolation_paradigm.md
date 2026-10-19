@@ -13,7 +13,7 @@
 1. **磁盘强行侵入（Disk Mutation Anti-Pattern）**：直接向用户工作区注入 `.rules`、`.agents/skills` 或修改全局 `~/.codex/config.json`，导致 Git 仓库脏化、多人协同冲突与跨客户端死链报错；
 2. **每轮强制提示词拼接（Every-Turn Prompt Stuffing Anti-Pattern）**：在用户发送的每个请求前硬塞大段规则文本，导致上下文 Token 严重浪费、注意力稀释（Attention Dilution）与“规则疲劳”导致的智能体失控。
 
-本项目（Antigravity ACP Studio）在实践中沉淀出一套**基于 ACP（Agent Client Protocol）协议的“传输层动态环境编排与零污染隔离范式”**。本文详细拆解其底层原理、全对称生命周期模型以及在其他 AI 应用中的落地实现方案。
+本项目（AutumnFlow）在实践中沉淀出一套**基于 ACP（Agent Client Protocol）协议的“传输层动态环境编排与零污染隔离范式”**。本文详细拆解其底层原理、全对称生命周期模型以及在其他 AI 应用中的落地实现方案。
 
 ---
 
@@ -56,7 +56,7 @@ ACP（Agent Client Protocol）的底层是一套双向 JSON-RPC 2.0 通道。它
 sequenceDiagram
     autonumber
     actor User as 用户
-    participant Studio as ACP Studio (Host App)
+    participant Studio as AutumnFlow (Host App)
     participant McpServer as Studio-UI MCP (HTTP Streamable)
     participant Agent as Agent Subprocess (e.g. Codex / Agy)
     participant LLM as LLM Engine
@@ -225,7 +225,7 @@ export class UniversalAgentConnection {
                   └──────┬────────────────────────────────┬──────┘
                          │                                │
           ┌──────────────┴──────────────┐  ┌──────────────┴──────────────┐
-          │  场景 A: 原生终端 CLI 打开   │  │   场景 B: ACP Studio 打开    │
+          │  场景 A: 原生终端 CLI 打开   │  │   场景 B: AutumnFlow 打开    │
           │  (codex resume <session-id>)│  │ (Studio 恢复/加载该历史会话)│
           ├─────────────────────────────┤  ├─────────────────────────────┤
           │ • 无 studio-ui 注入         │  │ • 动态挂载 studio-ui MCP    │

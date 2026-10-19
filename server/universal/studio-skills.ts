@@ -13,11 +13,11 @@ export interface StudioSkill {
 
 /**
  * Returns the resolved directory where Studio built-in skills reside.
- * Can be overridden via ACP_STUDIO_SKILLS_DIR environment variable.
+ * Can be overridden via AUTUMNFLOW_SKILLS_DIR environment variable.
  */
 export function getStudioSkillsDir(): string {
-  if (process.env.ACP_STUDIO_SKILLS_DIR) {
-    return path.resolve(process.env.ACP_STUDIO_SKILLS_DIR);
+  if (process.env.AUTUMNFLOW_SKILLS_DIR) {
+    return path.resolve(process.env.AUTUMNFLOW_SKILLS_DIR);
   }
   const configured = path.join(getStudioResourcesDir(), "skills");
   return fs.existsSync(configured) ? configured : getBundledStudioSkillsDir();

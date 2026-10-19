@@ -1,12 +1,12 @@
-# ACP Studio 消息流与测试规范文档 (Message Testing & Protocol Guide)
+# AutumnFlow 消息流与测试规范文档 (Message Testing & Protocol Guide)
 
-本文档定义了 **ACP Studio** 内部的消息流转机制、核心数据模型、SSE 事件载荷规范，以及用于调试与自动化测试的标准用例。
+本文档定义了 **AutumnFlow** 内部的消息流转机制、核心数据模型、SSE 事件载荷规范，以及用于调试与自动化测试的标准用例。
 
 ---
 
 ## 1. 消息流转全链路架构 (Architecture)
 
-在 ACP Studio 中，消息在以下三层之间进行流式传递与转换：
+在 AutumnFlow 中，消息在以下三层之间进行流式传递与转换：
 
 ```text
 ┌────────────────────────┐         SSE (Server-Sent Events)        ┌────────────────────────┐
@@ -63,7 +63,7 @@ data: {"type":"session_info","sessionId":"sess_test_001"}
 data: {"type":"agent_text_chunk","delta":"你好！我是 "}
 
 // SSE 帧 3: 文字块追加
-data: {"type":"agent_text_chunk","delta":"ACP Studio 智能助手。"}
+data: {"type":"agent_text_chunk","delta":"AutumnFlow 智能助手。"}
 
 // SSE 帧 4: 结束推流
 data: {"type":"done"}

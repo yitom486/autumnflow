@@ -53,7 +53,7 @@ export function thirdPartyNotices(projectRoot: string): string {
     if (!dir) throw new Error(`Missing dependency ${name}; run bun install before packaging`);
     visit(dir);
   }
-  return `Third-party packages used by ACP Studio's compiled bundles.\n\n${notices.sort().join("\n\n" + "=".repeat(72) + "\n\n")}\n`;
+  return `Third-party packages used by AutumnFlow's compiled bundles.\n\n${notices.sort().join("\n\n" + "=".repeat(72) + "\n\n")}\n`;
 }
 
 export function stageDesktopApp(projectRoot: string, platform = process.platform, arch = process.arch): string {

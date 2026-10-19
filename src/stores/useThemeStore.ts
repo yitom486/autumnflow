@@ -51,13 +51,23 @@ export const THEMES: Record<ThemeId, ThemeMeta> = {
   },
 };
 
-const THEME_STORAGE_KEY = "acp_studio_theme_v1";
+const THEME_STORAGE_KEY = "autumnflow_theme_v1";
+const LEGACY_THEME_STORAGE_KEY = "acp_studio_theme_v1";
 
 function getInitialTheme(): ThemeId {
   try {
     if (typeof localStorage !== "undefined") {
-      const saved = localStorage.getItem(THEME_STORAGE_KEY) as ThemeId | null;
-      if (saved && saved in THEMES) return saved;
+      const saved = (localStorage.getItem(THEME_STORAGE_KEY) ||
+        localStorage.getItem(LEGACY_THEME_STORAGE_KEY)) as ThemeId | null;
+      if (saved && saved in THEMES) {
+        try {
+          localStorage.setItem(THEME_STORAGE_KEY, saved);
+          localStorage.removeItem(LEGACY_THEME_STORAGE_KEY);
+        } catch {
+          // best effort
+        }
+        return saved;
+      }
     }
   } catch {
     // fallback

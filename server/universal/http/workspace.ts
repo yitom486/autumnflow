@@ -623,7 +623,7 @@ workspaceRouter.post("/wsl-launch", jsonBody(wslLaunchBody), async (c) => {
   // 1.5 探查 WSL 内部已有的有效令牌（若已有合法 64 位 token 则复用，保证前后端和 WSL 内部一致）
   let effectiveToken = token;
   const probeTokenRes = await execWsl(
-    `cat ~/.acp-studio/.gateway-token 2>/dev/null`,
+    `cat ~/.autumnflow/.gateway-token 2>/dev/null || cat ~/.acp-studio/.gateway-token 2>/dev/null`,
     5000
   );
   const existingWslToken = (probeTokenRes.stdout || "").replace(/[\r\n\0]/g, "").trim();
@@ -672,14 +672,14 @@ workspaceRouter.post("/wsl-launch", jsonBody(wslLaunchBody), async (c) => {
   const linuxProjectRoot = `/mnt/${driveLetter}/${subPath}`;
 
   // 4. 以后台守护进程方式在 WSL 内部启动网关（自动同步同一令牌，重定向输入避免终端退出时断开）
-  const wslLogDir = (process.env.ACP_WSL_LOG_DIR || "~/.acp-studio/logs").trim();
+  const wslLogDir = (process.env.ACP_WSL_LOG_DIR || "~/.autumnflow/logs").trim();
   const logFile = `${wslLogDir}/acp-wsl-gateway-${port}.log`;
   const wslHost = (process.env.ACP_WSL_HOST || process.env.HOST || "0.0.0.0").trim();
   // 用 printf 纯净写入 64 位 token 并加锁权限；
   // 启动前先彻底释放端口残留进程，防止 EADDRINUSE 导致启动失败；
-  // 进程内自动读取 ~/.acp-studio/.gateway-token，不把 token 拼入 export 命令行参数以防 ps 泄露。
+  // 进程内自动读取 ~/.autumnflow/.gateway-token，不把 token 拼入 export 命令行参数以防 ps 泄露。
   const killOldScript = `fuser -k ${port}/tcp 2>/dev/null; for p in $(ss -lptn 'sport = :${port}' 2>/dev/null | grep -o 'pid=[0-9]*' | cut -d= -f2); do kill -9 $p 2>/dev/null; done; sleep 0.5`;
-  const launchScript = `mkdir -p ~/.acp-studio "${wslLogDir}" && printf "%s\\n" "${effectiveToken}" > ~/.acp-studio/.gateway-token && chmod 600 ~/.acp-studio/.gateway-token 2>/dev/null && ${killOldScript} && cd "${linuxProjectRoot}" && ${cleanLinuxPath} && export PORT=${port} && export HOST=${wslHost} && nohup ${runtime} server/index.ts --port ${port} --host ${wslHost} < /dev/null > "${logFile}" 2>&1 & sleep 1`;
+  const launchScript = `mkdir -p ~/.autumnflow "${wslLogDir}" && if [ ! -f ~/.autumnflow/.gateway-token ] && [ -f ~/.acp-studio/.gateway-token ]; then cp ~/.acp-studio/.gateway-token ~/.autumnflow/.gateway-token; fi && printf "%s\\n" "${effectiveToken}" > ~/.autumnflow/.gateway-token && chmod 600 ~/.autumnflow/.gateway-token 2>/dev/null && ${killOldScript} && cd "${linuxProjectRoot}" && ${cleanLinuxPath} && export PORT=${port} && export HOST=${wslHost} && nohup ${runtime} server/index.ts --port ${port} --host ${wslHost} < /dev/null > "${logFile}" 2>&1 & sleep 1`;
 
   const launchResult = await execWsl(launchScript, 10000);
   if (launchResult.error) {

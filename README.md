@@ -18,7 +18,7 @@ AutumnFlow（秋水）是一个**面向通用 ACP 编码智能体的全能桌面
 
 **多智能体接入**
 - 内置 8 个预设，统一走各家官方 CLI，复用其本地登录态，Studio 不保存任何密钥（`server/universal/presets.ts`）
-- 自定义智能体：界面里添加，或用 `ACP_AGENTS_JSON` 环境变量 / `~/.acp-studio/agents.json` 配置 `{id, command, args, env}`（`server/universal/registry.ts`、`src/components/universal/CustomAgentModal.tsx`）
+- 自定义智能体：界面里添加，或用 `ACP_AGENTS_JSON` 环境变量 / `~/.autumnflow/agents.json` 配置 `{id, command, args, env}`（`server/universal/registry.ts`、`src/components/universal/CustomAgentModal.tsx`）
 - 连接时做 `initialize` 能力协商，按智能体实际能力开关界面功能（fork、providers、附加目录、图片输入等）
 
 **会话**
@@ -123,7 +123,7 @@ ACP_GATEWAY=node bun run dev:desktop   # 改用 Node 网关，启用真 PTY 终�
 
 网关启动时会在终端打印一条 `open the UI with: http://localhost:5188/?token=...` 链接，用它打开 → 选择智能体 → 连接 → 新建会话 → 发送。
 
-网关的所有 `/api/universal/*` 接口（包括终端执行）都要求访问令牌：Electron 桌面版自动带上；浏览器模式第一次用上面的链接打开，前端会记住令牌并从地址栏抹掉，也可以在令牌页粘贴 `~/.acp-studio/.gateway-token` 的内容。
+网关的所有 `/api/universal/*` 接口（包括终端执行）都要求访问令牌：Electron 桌面版自动带上；浏览器模式第一次用上面的链接打开，前端会记住令牌并从地址栏抹掉，也可以在令牌页粘贴 `~/.autumnflow/.gateway-token` 的内容。
 
 ### 检查与构建
 
@@ -145,9 +145,9 @@ bun run package:win             # 或 package:mac / package:linux，产物在 re
 | --- | --- | --- |
 | `PORT` | 网关端口 | `3004` |
 | `ACP_AGENTS_JSON` | 追加 / 覆盖智能体定义（JSON 数组） | 空 |
-| `ACP_AGENTS_FILE` | 自定义智能体持久化文件 | `~/.acp-studio/agents.json` |
+| `ACP_AGENTS_FILE` | 自定义智能体持久化文件 | `~/.autumnflow/agents.json` |
 | `ACP_WORKSPACE_ROOTS` | 额外允许智能体写入的目录（`;` 或 `:` 分隔）；会话工作区本身始终允许 | 网关当前目录 |
-| `ACP_GATEWAY_TOKEN` | 网关访问令牌 | 自动生成，存于 `~/.acp-studio/.gateway-token` |
+| `ACP_GATEWAY_TOKEN` | 网关访问令牌 | 自动生成，存于 `~/.autumnflow/.gateway-token` |
 | `ACP_PUBLIC_DIR` | 网关托管的前端目录 | `./dist` |
 | `ACP_GATEWAY` | `dev:desktop` 使用的网关（`bun` / `node`） | `bun` |
 
@@ -168,7 +168,7 @@ Antigravity 桥接（`@yitom/agy-acp-map`）本身就是标准 ACP stdio 服务�
 ## 项目结构
 
 ```text
-acp-studio/
+autumnflow/
 ├── server/
 │   ├── index.ts / node.ts       # Bun / Node 网关入口
 │   ├── gateway.ts               # Hono 应用：鉴权、/api/universal/*、静态文件
@@ -205,10 +205,10 @@ acp-studio/
 
 ## 应用配置目录、长期指令与 Skills
 
-通过 Studio 启动的 agent 默认读取应用自有的 `~/.acp-client/`。可用绝对路径环境变量 `ACP_STUDIO_RESOURCES_DIR` 指向另一套配置；此入口不修改 agent 的全局配置、认证 HOME 或项目工作目录。
+通过 Studio 启动的 agent 默认读取应用自有的 `~/.autumnflow/resources/`（首次启动会从旧 `~/.acp-client/` 复制一次）。可用绝对路径环境变量 `AUTUMNFLOW_RESOURCES_DIR` 指向另一套配置；此入口不修改 agent 的全局配置、认证 HOME 或项目工作目录。
 
 ```text
-~/.acp-client/
+~/.autumnflow/resources/
   AGENTS.md                 通用长期规则；首次生成后保留你的编辑
   SYSTEM.md                 附加指令，与 AGENTS.md 合并交付
   skills/<name>/SKILL.md     技能，可通过 studio-ui 按需读取

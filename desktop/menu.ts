@@ -14,9 +14,9 @@ export interface MenuActions {
   checkForUpdates: () => void;
 }
 
-const CHANGELOG_URL = "https://github.com/yitom486/acp-studio/blob/master/CHANGELOG.md";
-const RELEASES_URL = "https://github.com/yitom486/acp-studio/releases";
-const ISSUES_URL = "https://github.com/yitom486/acp-studio/issues";
+const CHANGELOG_URL = "https://github.com/yitom486/autumnflow/blob/master/CHANGELOG.md";
+const RELEASES_URL = "https://github.com/yitom486/autumnflow/releases";
+const ISSUES_URL = "https://github.com/yitom486/autumnflow/issues";
 
 export function sendCommand(id: string, payload?: unknown) {
   const w = BrowserWindow.getFocusedWindow() || BrowserWindow.getAllWindows()[0];

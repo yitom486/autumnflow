@@ -11,7 +11,7 @@ import { autoUpdater } from "electron-updater";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
-const RELEASES_URL = "https://github.com/yitom486/acp-studio/releases/latest";
+const RELEASES_URL = "https://github.com/yitom486/autumnflow/releases/latest";
 const FIRST_CHECK_DELAY_MS = 10_000;
 const CHECK_INTERVAL_MS = 4 * 60 * 60 * 1000;
 

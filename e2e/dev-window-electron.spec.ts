@@ -49,7 +49,7 @@ for (const gateway of ["bun", "node"]) test(`actual ${gateway} development launc
     PORT: String(await freePort()), ACP_DEV_VITE_PORT: String(await freePort()), MCP_PORT: String(await freePort()),
     ACP_GATEWAY_TOKEN: TEST_GATEWAY_TOKEN, ACP_DISABLE_UPDATES: "1",
     ACP_USER_DATA_DIR: path.join(state, "profile"), ACP_AGENTS_FILE: path.join(state, "agents.json"),
-    ACP_STUDIO_RESOURCES_DIR: path.join(state, "resources"), ACP_DEFAULT_AGENT_ID: "e2e-agent",
+    AUTUMNFLOW_RESOURCES_DIR: path.join(state, "resources"), ACP_DEFAULT_AGENT_ID: "e2e-agent",
     ACP_AGENTS_JSON: JSON.stringify([{ id: "e2e-agent", name: "e2e-agent", title: "Window Test Agent",
       command: "bun.exe", args: ["run", path.join(root, "tests/fixtures/e2e-studio-agent.ts")], builtin: false }]),
   };

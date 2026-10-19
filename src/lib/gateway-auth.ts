@@ -7,7 +7,7 @@
  * 1. Electron：preload 透出 `window.acpStudio.getGatewayToken()`（主进程直接给）。
  * 2. 浏览器：网关启动日志打印的 `/?token=...` 一次性链接 → 存 localStorage，
  *    并立刻从地址栏抹掉（不留在历史记录 / 截图里）。
- * 3. 浏览器：令牌页手动粘贴 `~/.acp-studio/.gateway-token` 的内容（GatewayTokenGate）。
+ * 3. 浏览器：令牌页手动粘贴 `~/.autumnflow/.gateway-token` 的内容（GatewayTokenGate）。
  *
  * 传输层保持哑巴（state_management.md 第三条）：这里只持有 token 本身，
  * 不缓存任何业务数据。

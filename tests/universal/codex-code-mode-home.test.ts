@@ -82,8 +82,8 @@ describe("isCodexProfile", () => {
 
 describe("home resolution", () => {
   it("honors env overrides instead of a fixed path", () => {
-    expect(resolveAppCodexHome(undefined, { ACP_CODEX_HOME: "X:/custom" })).toBe("X:/custom");
-    expect(resolveAppCodexHome(undefined, { ACP_STUDIO_HOME: "X:/base" })).toBe(join("X:/base", "codex-home"));
-    expect(resolveAppCodexHome("X:/arg", { ACP_STUDIO_HOME: "X:/env" })).toBe(join("X:/arg", "codex-home"));
+    expect(resolveAppCodexHome(undefined, { AUTUMNFLOW_CODEX_HOME: "X:/custom" })).toBe("X:/custom");
+    expect(resolveAppCodexHome(undefined, { AUTUMNFLOW_HOME: "X:/base" })).toBe(join("X:/base", "codex-home"));
+    expect(resolveAppCodexHome("X:/arg", { AUTUMNFLOW_HOME: "X:/env" })).toBe(join("X:/arg", "codex-home"));
   });
 });

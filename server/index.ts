@@ -35,8 +35,8 @@ const gracefulShutdown = async () => {
 process.on("SIGINT", gracefulShutdown);
 process.on("SIGTERM", gracefulShutdown);
 
-console.log(`[Server] Google Antigravity ACP Studio server running at http://127.0.0.1:${PORT}`);
-console.log(`[Server] gateway token: ${gatewayTokenPreview()} (full token in ~/.acp-studio/.gateway-token)`);
+console.log(`[Server] AutumnFlow server running at http://127.0.0.1:${PORT}`);
+console.log(`[Server] gateway token: ${gatewayTokenPreview()} (full token in ~/.autumnflow/.gateway-token)`);
 // 所有 /api/universal/* 都要 token。浏览器模式用下面的一次性链接打开 UI（Jupyter 式，
 // 前端读取后存 localStorage 并从地址栏抹掉）；只打到本机终端，不写入任何文件。
 console.log(`[Server] open the UI with:  ${gatewayBootstrapUrl(`http://localhost:${resolveRuntimeConfig().vitePort}`)}  (vite dev)`);

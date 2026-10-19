@@ -13,7 +13,7 @@ function fixture() {
     fs.mkdirSync(path.dirname(path.join(root, file)), { recursive: true });
     fs.writeFileSync(path.join(root, file), value);
   };
-  write("package.json", JSON.stringify({ name: "acp-studio", version: "0.1.5", type: "module", main: "electron-dist/main.cjs", dependencies: { mermaid: "1.0.0", "node-pty": "1.1.0" } }));
+  write("package.json", JSON.stringify({ name: "autumnflow", version: "0.1.5", type: "module", main: "electron-dist/main.cjs", dependencies: { mermaid: "1.0.0", "node-pty": "1.1.0" } }));
   write("dist/index.html", '<script type="module" src="/assets/chat.js"></script>');
   write("dist/assets/chat.js", 'import("./mermaid.js")');
   write("dist/assets/mermaid.js", "export const render = () => '<svg></svg>';");

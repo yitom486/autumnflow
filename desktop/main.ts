@@ -1,5 +1,5 @@
 /**
- * ACP Studio desktop shell (Electron main).
+ * AutumnFlow desktop shell (Electron main).
  * Starts the Node gateway in-process, then opens the Studio window on it.
  * Dev: ELECTRON_DEV=1 ELECTRON_START_URL=http://localhost:5188 (external vite+gateway).
  */
@@ -36,19 +36,31 @@ const PORT = runtime.gatewayPort;
 const START_URL = process.env.ELECTRON_START_URL || (isDev
   ? `http://localhost:${runtime.vitePort}` : `http://127.0.0.1:${PORT}`);
 
-// 设置 Windows 任务栏应用标识与独立分组，确保任务栏图标显示 ACP Studio 猫咪图标而非 Electron 默认原子图标
+// 设置 Windows 任务栏应用标识与独立分组，确保任务栏图标显示 AutumnFlow 图标而非 Electron 默认原子图标
 if (process.platform === "win32") {
-  app.setAppUserModelId(isDev ? "studio.acp.app.dev" : "studio.acp.app");
+  app.setAppUserModelId(isDev ? "com.autumnflow.app.dev" : "com.autumnflow.app");
 }
 
 // 隔离应用名称与 userData 路径，避免开发模式下与本地其他未打包的 Electron 应用（如 inkdown）
-// 共享 %APPDATA%\Electron 导致 Chromium ProcessSingleton 单例锁冲突（0x20 锁文件被占用错误）
-app.name = isDev ? "acp-studio-dev" : "acp-studio";
+// 共享 %APPDATA%\Electron 导致 Chromium ProcessSingleton 单例锁冲突（0x20 锁文件被占用错误）。
+// 首次运行时把旧目录 acp-studio 复制到 autumnflow，之后的读写只走新目录。
+app.name = isDev ? "autumnflow-dev" : "autumnflow";
 try {
-  const customUserData =
+  const appDataRoot = app.getPath("appData");
+  const userDataDir =
     process.env.ACP_USER_DATA_DIR ||
-    path.join(app.getPath("appData"), isDev ? "acp-studio-dev" : "acp-studio");
-  app.setPath("userData", customUserData);
+    path.join(appDataRoot, isDev ? "autumnflow-dev" : "autumnflow");
+  if (!process.env.ACP_USER_DATA_DIR) {
+    const legacyDir = path.join(appDataRoot, isDev ? "acp-studio-dev" : "acp-studio");
+    if (!fs.existsSync(userDataDir) && fs.existsSync(legacyDir)) {
+      try {
+        fs.cpSync(legacyDir, userDataDir, { recursive: true, force: false, errorOnExist: false });
+      } catch (err) {
+        console.warn("[Electron] 迁移旧 userData 失败（保留旧目录）:", err);
+      }
+    }
+  }
+  app.setPath("userData", userDataDir);
 } catch (err) {
   console.warn("[Electron] 无法设置独立 userData 路径:", err);
 }
@@ -954,7 +966,7 @@ if (!app.requestSingleInstanceLock()) {
 } else {
   app.on("second-instance", (_e, argv) => {
     leaveBackground();
-    // 第二次启动带了目录参数（如 `acp-studio .`）→ 新窗口打开该目录；否则聚焦已有窗口
+    // 第二次启动带了目录参数（如 `autumnflow .`）→ 新窗口打开该目录；否则聚焦已有窗口
     const dir = argv.slice(1).reverse().find((a) => !a.startsWith("-") && fs.existsSync(a) && fs.statSync(a).isDirectory());
     if (dir) {
       void createWindow(path.resolve(dir)).catch(reportStartupFailure);

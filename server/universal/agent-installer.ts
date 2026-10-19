@@ -1,8 +1,8 @@
 import { spawn, spawnSync } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import * as fs from "node:fs";
-import * as os from "node:os";
 import * as path from "node:path";
+import { resolveAppHome } from "./app-paths";
 
 /**
  * On-demand agent runtimes (fail-fast, no silent fallbacks).
@@ -40,7 +40,7 @@ export function specFor(id: string): ManagedAgentSpec | undefined {
 
 /** Override with ACP_AGENTS_HOME. */
 export function agentsHome(): string {
-  return process.env.ACP_AGENTS_HOME || path.join(os.homedir(), ".acp-studio", "agents");
+  return process.env.ACP_AGENTS_HOME || path.join(resolveAppHome(), "agents");
 }
 
 export function managedDir(id: string): string {
