@@ -4,7 +4,7 @@
  * 网关对所有 /api/universal/* 强制 `Authorization: Bearer <token>`
  * （server/universal/security.ts），这里负责拿到 token 并在每个请求上带上：
  *
- * 1. Electron：preload 透出 `window.acpStudio.getGatewayToken()`（主进程直接给）。
+ * 1. Electron：preload 透出 `window.autumnflow.getGatewayToken()`（主进程直接给）。
  * 2. 浏览器：网关启动日志打印的 `/?token=...` 一次性链接 → 存 localStorage，
  *    并立刻从地址栏抹掉（不留在历史记录 / 截图里）。
  * 3. 浏览器：令牌页手动粘贴 `~/.autumnflow/.gateway-token` 的内容（GatewayTokenGate）。
@@ -126,7 +126,7 @@ function readStored(): string | null {
 export function isCookieAuth(): boolean {
   return (
     typeof window !== "undefined" &&
-    window.acpStudio?.authMode === "cookie" &&
+    window.autumnflow?.authMode === "cookie" &&
     getGatewayBase() === ""
   );
 }
@@ -164,8 +164,8 @@ export function clearGatewayToken(): void {
  */
 export async function bootstrapGatewayToken(): Promise<string | null> {
   if (isCookieAuth()) return null;
-  if (typeof window !== "undefined" && window.acpStudio?.getGatewayToken) {
-    const t = await window.acpStudio.getGatewayToken();
+  if (typeof window !== "undefined" && window.autumnflow?.getGatewayToken) {
+    const t = await window.autumnflow.getGatewayToken();
     setGatewayToken(t, false);
     return getGatewayToken();
   }

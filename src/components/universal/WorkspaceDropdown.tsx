@@ -41,8 +41,8 @@ export const WorkspaceDropdown: React.FC<WorkspaceDropdownProps> = ({
 
   const handleRevealInExplorer = async () => {
     setOpen(false);
-    if (currentWorkspace && window.acpStudio?.openPath) {
-      await window.acpStudio.openPath(currentWorkspace);
+    if (currentWorkspace && window.autumnflow?.openPath) {
+      await window.autumnflow.openPath(currentWorkspace);
     }
   };
 
@@ -79,7 +79,7 @@ export const WorkspaceDropdown: React.FC<WorkspaceDropdownProps> = ({
           </button>
 
           {/* Reveal in explorer (Electron only) */}
-          {currentWorkspace && window.acpStudio?.openPath && (
+          {currentWorkspace && window.autumnflow?.openPath && (
             <button
               type="button"
               onClick={handleRevealInExplorer}

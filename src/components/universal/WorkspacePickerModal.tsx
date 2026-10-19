@@ -192,9 +192,9 @@ export const WorkspacePickerModal: React.FC = () => {
   // 降级：使用系统原生选择器
   const handleFallbackSystemDialog = async () => {
     close();
-    if (window.acpStudio?.openDirectory) {
+    if (window.autumnflow?.openDirectory) {
       try {
-        const picked = await window.acpStudio.openDirectory({ defaultPath: currentPath || undefined });
+        const picked = await window.autumnflow.openDirectory({ defaultPath: currentPath || undefined });
         if (picked) {
           if (onSelectCallback) {
             onSelectCallback(picked);

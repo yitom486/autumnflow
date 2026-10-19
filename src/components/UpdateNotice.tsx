@@ -11,7 +11,7 @@ export const UpdateNotice: React.FC = () => {
   const state = useUpdateStore((s) => s.state);
   const dispatch = useUpdateStore((s) => s.dispatch);
   const check = useUpdateStore((s) => s.check);
-  const api = typeof window !== "undefined" ? window.acpStudio?.updates : undefined;
+  const api = typeof window !== "undefined" ? window.autumnflow?.updates : undefined;
 
   useEffect(() => startUpdateBridge(), []);
   useEffect(() => {

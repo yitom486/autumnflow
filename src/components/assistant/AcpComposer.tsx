@@ -172,8 +172,8 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
 
   const handleRevealInExplorer = async () => {
     setLocalMenuOpen(false);
-    if (p.currentWorkspace && window.acpStudio?.openPath) {
-      await window.acpStudio.openPath(p.currentWorkspace);
+    if (p.currentWorkspace && window.autumnflow?.openPath) {
+      await window.autumnflow.openPath(p.currentWorkspace);
     }
   };
 
@@ -441,7 +441,7 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
     let outsideDirs = 0;
     (payload.files || []).forEach((file) => {
       const isDir = !!(file as any).isDirectory;
-      const abs = (file as any).path || window.acpStudio?.workbench?.pathForFile?.(file) || "";
+      const abs = (file as any).path || window.autumnflow?.workbench?.pathForFile?.(file) || "";
       const rel = cwd && abs ? relativeToWorkspace(cwd, abs) : null;
       if (rel !== null && rel !== "") refs.push({ path: rel, kind: isDir ? "dir" : "file" });
       else if (isDir) outsideDirs++;
@@ -487,7 +487,7 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
     Array.from(dt.files || []).forEach((file, i) => {
       const entry = (items[i] as any)?.webkitGetAsEntry?.();
       const isDir = !!entry?.isDirectory;
-      const abs = (file as any).path || window.acpStudio?.workbench?.pathForFile?.(file) || "";
+      const abs = (file as any).path || window.autumnflow?.workbench?.pathForFile?.(file) || "";
       const rel = cwd && abs ? relativeToWorkspace(cwd, abs) : null;
       if (rel !== null && rel !== "") refs.push({ path: rel, kind: isDir ? "dir" : "file" });
       else if (isDir) outsideDirs++;

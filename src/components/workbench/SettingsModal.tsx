@@ -50,7 +50,7 @@ const GeneralPanel: React.FC = () => {
   const theme = useThemeStore((s) => s.theme);
   const setTheme = useThemeStore((s) => s.setTheme);
   const cwd = useStudioStore((s) => s.currentWorkspace);
-  const wb = window.acpStudio?.workbench;
+  const wb = window.autumnflow?.workbench;
   const fileTreeOpen = useWorkbenchStore((s) => s.fileTreeOpen);
   const setFileTreeOpen = useWorkbenchStore((s) => s.setFileTreeOpen);
   return (
@@ -235,7 +235,7 @@ PORT=13005 bun run dev:server:node
 
 export const AboutPanel: React.FC = () => {
   const { state, info, check, setAutoCheck, refreshInfo } = useUpdateStore();
-  const api = window.acpStudio?.updates;
+  const api = window.autumnflow?.updates;
   useEffect(() => {
     void refreshInfo();
   }, [refreshInfo]);

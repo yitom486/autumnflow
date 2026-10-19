@@ -331,7 +331,7 @@ export const FileTreePanel: React.FC<{ cwd: string | null }> = ({ cwd }) => {
   const ctxItems = (node: TreeNode | null) => {
     if (!cwd) return [];
     const dirId = node ? (node.type === "dir" ? node.id : parentOf(node.id)) : "";
-    const wb = window.acpStudio?.workbench;
+    const wb = window.autumnflow?.workbench;
     const copy = (t: string) => (wb ? wb.copyText(t) : navigator.clipboard.writeText(t));
     const items: Array<{ label: string; run: () => void; danger?: boolean } | "sep"> = [
       { label: "新建文件…", run: () => void createIn(dirId, "file") },

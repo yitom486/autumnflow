@@ -4,7 +4,7 @@ import { contextBridge, ipcRenderer, webUtils } from "electron";
  * Minimal bridge: version/platform info + native dialogs + gateway token.
  * All ACP traffic stays on HTTP; the token authenticates it (see src/lib/gateway-auth.ts).
  */
-contextBridge.exposeInMainWorld("acpStudio", {
+contextBridge.exposeInMainWorld("autumnflow", {
   platform: process.platform,
   // Production Gateway host sets an HttpOnly SameSite=Strict cookie on the
   // document response; the renderer never needs the raw token. Dev still uses

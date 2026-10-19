@@ -26,13 +26,13 @@ const realFetch = globalThis.fetch;
 beforeEach(() => {
   clearGatewayToken();
   setGatewayBase("");
-  delete (window as any).acpStudio;
+  delete (window as any).autumnflow;
   window.history.replaceState(null, "", "/");
 });
 
 afterEach(() => {
   globalThis.fetch = realFetch;
-  delete (window as any).acpStudio;
+  delete (window as any).autumnflow;
 });
 
 describe("gateway token bootstrap", () => {
@@ -51,7 +51,7 @@ describe("gateway token bootstrap", () => {
 
   it("prefers the Electron preload token and does not persist it", async () => {
     localStorage.setItem(GATEWAY_TOKEN_STORAGE_KEY, "stale");
-    (window as any).acpStudio = { platform: "linux", versions: {}, getGatewayToken: async () => "from-electron" };
+    (window as any).autumnflow = { platform: "linux", versions: {}, getGatewayToken: async () => "from-electron" };
     expect(await bootstrapGatewayToken()).toBe("from-electron");
     expect(getGatewayToken()).toBe("from-electron");
     expect(localStorage.getItem(GATEWAY_TOKEN_STORAGE_KEY)).toBe("stale");
@@ -62,7 +62,7 @@ describe("gateway token bootstrap", () => {
   });
 
   it("cookie mode never reads the preload token or injects Authorization/query", async () => {
-    (window as any).acpStudio = {
+    (window as any).autumnflow = {
       platform: "win32",
       authMode: "cookie",
       versions: {},

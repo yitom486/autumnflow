@@ -26,7 +26,8 @@ for (const order of ["development-first", "release-first"] as const) {
     const mcpPort = await freePort();
     const stateRoot = fs.mkdtempSync(path.join(os.tmpdir(), "acp-runtime-isolation-"));
     const tokenEnv = { ACP_GATEWAY_TOKEN: TEST_GATEWAY_TOKEN };
-    const developmentEnv = { ...tokenEnv, ACP_AGENTS_FILE: path.join(stateRoot, "dev-agents.json"),
+    const developmentEnv = { ...tokenEnv, AUTUMNFLOW_HOME: path.join(stateRoot, "dev-home"),
+      ACP_AGENTS_FILE: path.join(stateRoot, "dev-agents.json"),
       AUTUMNFLOW_RESOURCES_DIR: path.join(stateRoot, "dev-resources") };
     const developmentAgent = [{ id: "e2e-agent", name: "e2e-agent", title: "Development Test Agent",
       command: process.platform === "win32" ? "bun.exe" : "bun",
@@ -48,7 +49,7 @@ for (const order of ["development-first", "release-first"] as const) {
         catch { return 0; }
       }, { timeout: 20000 }).toBe(200);
       vite = await createViteServer({
-        server: { host: "127.0.0.1", port: 0, strictPort: false,
+        server: { host: "127.0.0.1", port: await freePort(), strictPort: true,
           proxy: { "/api": { target: `http://127.0.0.1:${developmentPort}` } } },
       });
       await vite.listen();
@@ -71,7 +72,7 @@ for (const order of ["development-first", "release-first"] as const) {
       for (const launched of [development!, release!]) {
         await expect(launched.page.locator("textarea").first()).toBeVisible();
         const result = await launched.page.evaluate(async () => {
-          const token = await window.acpStudio!.getGatewayToken!();
+          const token = await window.autumnflow!.getGatewayToken!();
           const response = await fetch(
             "/api/universal/agents",
             token ? { headers: { Authorization: `Bearer ${token}` } } : {},

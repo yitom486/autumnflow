@@ -1,7 +1,7 @@
 /// <reference types="vite/client" />
 
 interface Window {
-  acpStudio?: {
+  autumnflow?: {
     platform: string;
     authMode?: "token" | "cookie";
     versions: Record<string, string | undefined>;

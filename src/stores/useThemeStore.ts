@@ -78,8 +78,8 @@ function getInitialTheme(): ThemeId {
 function syncTitleBarOverlay(color: string, symbolColor: string) {
   if (typeof window === "undefined") return;
   const apply = () => {
-    if (window.acpStudio?.setTitleBarOverlay) {
-      window.acpStudio.setTitleBarOverlay({
+    if (window.autumnflow?.setTitleBarOverlay) {
+      window.autumnflow.setTitleBarOverlay({
         color,
         symbolColor,
         height: 32,

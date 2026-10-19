@@ -20,7 +20,7 @@ export function useWorkbenchCommands(opts: { onNewSession: (targetCwd?: string) 
   useEffect(() => {
     const wb = () => useWorkbenchStore.getState();
     const studio = () => useStudioStore.getState();
-    const desktop = typeof window !== "undefined" ? window.acpStudio?.workbench : undefined;
+    const desktop = typeof window !== "undefined" ? window.autumnflow?.workbench : undefined;
     const cwd = () => studio().currentWorkspace;
     const copy = (t: string) => (desktop ? desktop.copyText(t) : navigator.clipboard.writeText(t));
     const openWorkspace = async (p: string) => {

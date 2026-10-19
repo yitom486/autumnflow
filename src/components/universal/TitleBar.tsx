@@ -19,15 +19,15 @@ export const TitleBar: React.FC = () => {
   const [themeMenuOpen, setThemeMenuOpen] = useState(false);
   const themeMenuRef = useRef<HTMLDivElement>(null);
 
-  const isElectron = typeof window !== "undefined" && Boolean(window.acpStudio);
-  const platform = typeof window !== "undefined" ? window.acpStudio?.platform : "web";
+  const isElectron = typeof window !== "undefined" && Boolean(window.autumnflow);
+  const platform = typeof window !== "undefined" ? window.autumnflow?.platform : "web";
   const isMac = platform === "darwin";
 
   const [isMaximized, setIsMaximized] = useState(false);
 
   useEffect(() => {
-    if (isElectron && window.acpStudio?.isMaximized) {
-      window.acpStudio.isMaximized().then(setIsMaximized).catch(() => {});
+    if (isElectron && window.autumnflow?.isMaximized) {
+      window.autumnflow.isMaximized().then(setIsMaximized).catch(() => {});
     }
   }, [isElectron]);
 
@@ -60,15 +60,15 @@ export const TitleBar: React.FC = () => {
     }
   };
 
-  const handleMinimize = () => window.acpStudio?.minimize?.();
+  const handleMinimize = () => window.autumnflow?.minimize?.();
   const handleMaximize = async () => {
-    await window.acpStudio?.maximize?.();
-    if (window.acpStudio?.isMaximized) {
-      const max = await window.acpStudio.isMaximized();
+    await window.autumnflow?.maximize?.();
+    if (window.autumnflow?.isMaximized) {
+      const max = await window.autumnflow.isMaximized();
       setIsMaximized(max);
     }
   };
-  const handleClose = () => window.acpStudio?.close?.();
+  const handleClose = () => window.autumnflow?.close?.();
 
   return (
     <div

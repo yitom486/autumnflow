@@ -21,7 +21,7 @@ interface UpdateStore {
   setAutoCheck: (v: boolean) => Promise<void>;
 }
 
-const api = () => (typeof window !== "undefined" ? window.acpStudio?.updates : undefined);
+const api = () => (typeof window !== "undefined" ? window.autumnflow?.updates : undefined);
 
 /** 浏览器 / 开发模式（无 Electron）时的占位信息 */
 const WEB_INFO: UpdateInfo = {

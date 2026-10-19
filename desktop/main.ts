@@ -928,7 +928,7 @@ const menuActions: MenuActions = {
   checkForUpdates: () => checkForUpdatesFromMenu(),
 };
 
-// 网关 token 交给页面：preload 透出 `acpStudio.getGatewayToken()`，前端
+// 网关 token 交给页面：preload 透出 `autumnflow.getGatewayToken()`，前端
 // （src/lib/gateway-auth.ts）启动时取一次，之后所有 /api/universal/* 请求带
 // `Authorization: Bearer <token>`，PTY WebSocket 带 `?token=`。
 // 只响应本应用自己加载的页面（主窗口），其他 webContents 拿不到。

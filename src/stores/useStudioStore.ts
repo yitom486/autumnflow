@@ -530,7 +530,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
           }
         }
         if (typeof sessionStorage !== "undefined") sessionStorage.setItem(WINDOW_WORKSPACE_KEY, cleanPath);
-        void window.acpStudio?.workbench?.recentAdd(cleanPath)?.catch?.(() => {});
+        void window.autumnflow?.workbench?.recentAdd(cleanPath)?.catch?.(() => {});
       } catch {
         // ignore storage errors
       }
