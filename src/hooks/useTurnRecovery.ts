@@ -7,7 +7,7 @@
  * seq. It never re-sends the prompt.
  */
 import { useEffect } from "react";
-import { followUniversalTurn } from "@/lib/universal-api";
+import { followUniversalTurn, mergePromptUsage } from "@/lib/universal-api";
 import { useStudioStore } from "@/stores/useStudioStore";
 import type { ActiveTurn } from "@/lib/threads";
 import { isTurnLive } from "@/lib/live-turns";
@@ -159,7 +159,15 @@ export async function recoverActiveTurn(turn: ActiveTurn, assistantId: string): 
                 useStudioStore.getState().patchActiveTurn({ lastSeq });
               }
             },
-            onDone: () => {
+            onDone: (_reason, response) => {
+              if (isCurrent()) {
+                const store = useStudioStore.getState();
+                const usage = mergePromptUsage(store.messages.find(message => message.id === assistantId)?.usage, response);
+                if (usage) {
+                  store.setUsage(usage);
+                  store.patchMessage(assistantId, { usage });
+                }
+              }
               terminal = true;
               finish("done", gap ? "> ⚠️ 连接恢复时部分早期事件已被清理，以上为当前可恢复的内容。" : undefined);
             },

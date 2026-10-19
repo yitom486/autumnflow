@@ -31,15 +31,17 @@ export interface UsageState {
   used: number;
   size: number;
   cost?: { amount: number; currency: string };
+  costScope?: "session";
   /**
    * Prompt-cache counters (agent 透传、有则显示，绝不编造）。
-   * 当前链路 usage_update 仅含 used/size/cost，这些字段全是 undefined；
-   * 一旦 agent 开始下发 cachedTokens，UI 自动出现缓存命中率行。
+   * used/size 为上下文快照；结束响应的本轮累计计数独立保留，不能覆盖 used。
    */
   cachedTokens?: number;
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  thoughtTokens?: number;
+  cachedWriteTokens?: number;
   /** 提示词总量（新增输入 + 缓存命中）；缓存命中率的分母 */
   promptTokens?: number;
   /** 缓存命中率 0~1（agent 侧口径优先，UI 仅在缺失时自行折算） */

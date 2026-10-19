@@ -3,6 +3,7 @@ import * as acp from "@agentclientprotocol/sdk";
 import { Client } from "@modelcontextprotocol/sdk/client/index.js";
 import { StreamableHTTPClientTransport } from "@modelcontextprotocol/sdk/client/streamableHttp.js";
 import { editorialCases, mermaidCases, mindmapCode, flowJoinCase } from "./diagram-cases";
+import { contextUsage, promptUsage } from "./usage-sample";
 
 // Model decisions are scripted; MCP discovery and tool execution use the real server.
 const sessions = new Map<string, { mcpServers: any[]; presented?: string; title?: string; parentID?: string }>();
@@ -63,6 +64,15 @@ const app = acp.agent({ name: "e2e-agent" })
       .map((block: any) => String(block.text || ""))
       .filter((t: string) => !t.trimStart().startsWith("<acp-compat-context"))
       .join(" ");
+    if (fullText === "E2E_USAGE" || fullText === "E2E_USAGE_ONLY") {
+      if (fullText === "E2E_USAGE") {
+        await ctx.client.notify(acp.methods.client.session.update, {
+          sessionId, update: { sessionUpdate: "usage_update", ...contextUsage },
+        });
+      }
+      await text(ctx, sessionId, "用量校验完成。");
+      return { stopReason: "end_turn", usage: promptUsage };
+    }
     if (fullText === "E2E_STABLE_TEXT") {
       await text(ctx, sessionId, "阶段输出：已经定位消息更新路径，接下来核对工具事件。");
       await new Promise(resolve => setTimeout(resolve, 1200));

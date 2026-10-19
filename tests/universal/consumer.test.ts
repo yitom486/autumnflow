@@ -1,6 +1,7 @@
 import { describe, it, expect, vi, afterEach } from "vitest";
 import {
   pickUsageExtras,
+  mergePromptUsage,
   consumeUniversalChat,
   buildTranscriptFromReplay,
   parseModelId,
@@ -9,6 +10,7 @@ import {
   flattenConfigOptions,
 } from "../../src/lib/universal-api";
 import { isTransientSendError } from "../../src/hooks/useChatSend";
+import { contextUsage, promptUsage, displayedPromptUsage } from "../fixtures/usage-sample";
 
 function sseResponse(frames: unknown[]): Response {
   const enc = new TextEncoder();
@@ -350,6 +352,30 @@ describe("consumeUniversalChat (v1 full updates)", () => {
 });
 
 describe("usage extras", () => {
+  it("preserves context and session cost when merging cumulative prompt tokens", () => {
+    const previous = { ...contextUsage, costScope: "session" as const };
+    const merged = mergePromptUsage(previous, { usage: promptUsage });
+    expect(merged).toMatchObject({ ...previous, ...displayedPromptUsage });
+    expect(mergePromptUsage(merged, { usage: promptUsage })).toEqual(merged);
+  });
+
+  it("does not invent context occupation when only prompt totals are provided", () => {
+    expect(mergePromptUsage(null, { usage: promptUsage })).toMatchObject({ used: 0, size: 0, totalTokens: 8094326 });
+  });
+
+  it("dispatches context snapshots separately from raw end-turn usage without summing", async () => {
+    globalThis.fetch = vi.fn(async () => sseResponse([
+      { type: "update", update: { sessionUpdate: "usage_update", ...contextUsage } },
+      { type: "update", update: { sessionUpdate: "usage_update", ...contextUsage } },
+      { type: "done", stopReason: "end_turn", response: { usage: promptUsage } },
+    ])) as unknown as typeof fetch;
+    const onUsage = vi.fn();
+    const onDone = vi.fn();
+    await consumeUniversalChat({ agentId: "opencode", prompt: "usage" }, { onUsage, onDone });
+    expect(onUsage).toHaveBeenCalledTimes(2);
+    expect(onUsage.mock.calls[1][0]).toMatchObject({ ...contextUsage, costScope: "session" });
+    expect(onDone).toHaveBeenCalledWith("end_turn", { usage: promptUsage });
+  });
   it("prefers the agent-computed cache hit rate and prompt total", () => {
     const extras = pickUsageExtras({
       used: 140000,

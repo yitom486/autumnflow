@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recoverActiveTurn } from "../../src/hooks/useTurnRecovery";
 import { useStudioStore } from "../../src/stores/useStudioStore";
+import { contextUsage, promptUsage, displayedPromptUsage } from "../fixtures/usage-sample";
 
 const realFetch = globalThis.fetch;
 
@@ -42,6 +43,16 @@ afterEach(() => {
 });
 
 describe("turn recovery", () => {
+  it("keeps context and prompt totals separate when following a finished journal turn", async () => {
+    globalThis.fetch = vi.fn(async () => sse([
+      { id: 3, data: { type: "update", update: { sessionUpdate: "usage_update", ...contextUsage } } },
+      { id: 4, data: { type: "done", stopReason: "end_turn", response: { usage: promptUsage } } },
+    ])) as unknown as typeof fetch;
+    await recoverActiveTurn(useStudioStore.getState().activeTurn!, "a1");
+    expect(useStudioStore.getState().messages.find(message => message.id === "a1")?.usage).toMatchObject({
+      ...contextUsage, costScope: "session", ...displayedPromptUsage,
+    });
+  });
   it("follows from lastSeq and settles without resending the prompt", async () => {
     const calls: string[] = [];
     globalThis.fetch = vi.fn(async (url: string) => {

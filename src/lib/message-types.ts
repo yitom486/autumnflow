@@ -15,11 +15,14 @@ export interface Message {
     used: number;
     size: number;
     cost?: { amount: number; currency: string };
+    costScope?: "session";
     /** 可选的缓存/输入/输出计数（agent 下发才有，UsagePanel 按需显示）。 */
     cachedTokens?: number;
     inputTokens?: number;
     outputTokens?: number;
     totalTokens?: number;
+    thoughtTokens?: number;
+    cachedWriteTokens?: number;
     sessionInputTokens?: number;
     sessionOutputTokens?: number;
     sessionTotalTokens?: number;

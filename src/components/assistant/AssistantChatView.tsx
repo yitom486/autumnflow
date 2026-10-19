@@ -210,12 +210,12 @@ const UsagePanel: React.FC<{ msg: Message }> = ({ msg }) => {
       <button type="button" onClick={() => setOpen((o) => !o)} className="w-full text-left">
         <div className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
           <span>
-            context {u.used.toLocaleString()}/{u.size.toLocaleString()}
+            {u.size > 0 ? `context ${u.used.toLocaleString()}/${u.size.toLocaleString()}` : "上下文占用：agent 未提供"}
           </span>
-          <span className="tabular-nums">{(pct * 100).toFixed(1)}%</span>
+          {u.size > 0 && <span className="tabular-nums">{(pct * 100).toFixed(1)}%</span>}
           {u.cost ? (
             <span>
-              · ${u.cost.amount} {u.cost.currency}
+              · {u.costScope === "session" ? "会话累计费用" : "运行时费用"} ${u.cost.amount} {u.cost.currency}
             </span>
           ) : null}
           {cacheRate != null ? <span>· 缓存 {(cacheRate * 100).toFixed(1)}%</span> : null}
@@ -223,17 +223,17 @@ const UsagePanel: React.FC<{ msg: Message }> = ({ msg }) => {
             className={cn("w-3 h-3 ml-auto transition-transform duration-300", open && "rotate-180")}
           />
         </div>
-        <div className="h-1 rounded-full bg-muted overflow-hidden mt-1.5">
+        {u.size > 0 && <div className="h-1 rounded-full bg-muted overflow-hidden mt-1.5">
           <div
             className={cn("h-full rounded-full transition-[width] duration-500", bar)}
             style={{ width: `${(pct * 100).toFixed(1)}%` }}
           />
-        </div>
+        </div>}
       </button>
       {open && (
         <div className="grid grid-cols-2 gap-x-4 gap-y-1 pt-2 mt-1.5 border-t border-border/60 font-mono text-[10px] text-muted-foreground animate-fade-slide-in">
-          <div className={row}><span>窗口总量</span><span className="tabular-nums">{u.size.toLocaleString()}</span></div>
-          <div className={row}><span>剩余</span><span className="tabular-nums">{remain.toLocaleString()}</span></div>
+          <div className={row}><span>窗口总量</span><span className="tabular-nums">{u.size > 0 ? u.size.toLocaleString() : "agent 未提供"}</span></div>
+          <div className={row}><span>剩余</span><span className="tabular-nums">{u.size > 0 ? remain.toLocaleString() : "agent 未提供"}</span></div>
           <div className={row}><span>本轮用时</span><span className="tabular-nums">{turnMs != null ? fmtElapsed(turnMs) : "—"}</span></div>
           <div className={row}><span>思考用时</span><span className="tabular-nums">{thoughtMs != null ? fmtElapsed(thoughtMs) : "—"}</span></div>
           <div className={row}>
@@ -254,6 +254,15 @@ const UsagePanel: React.FC<{ msg: Message }> = ({ msg }) => {
               <span className="tabular-nums">{(u.inputTokens ?? 0).toLocaleString()} / {(u.outputTokens ?? 0).toLocaleString()}</span>
             </div>
           ) : null}
+          {u.totalTokens != null && (
+            <div className={cn(row, "col-span-2")}><span>本轮累计 tokens（多次模型请求）</span><span>{u.totalTokens.toLocaleString()}</span></div>
+          )}
+          {u.thoughtTokens != null && (
+            <div className={row}><span>本轮推理 tokens</span><span>{u.thoughtTokens.toLocaleString()}</span></div>
+          )}
+          {u.cachedWriteTokens != null && (
+            <div className={row}><span>本轮缓存写入 tokens</span><span>{u.cachedWriteTokens.toLocaleString()}</span></div>
+          )}
           {(u as any).sessionTotalTokens != null ? (
             <div className={cn(row, "col-span-2 text-muted-foreground/80")}>
               <span>会话累计</span>

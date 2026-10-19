@@ -12,15 +12,18 @@ import {
   appendGenerativeToolPlaceholder,
 } from "@/components/assistant/toolkit";
 
-/** usage_update payload: used/size/cost 必有；缓存计数由 agent 透传、有则收。 */
+/** Context snapshots and prompt totals remain separate; absent context uses size=0. */
 export interface UsageUpdate {
   used: number;
   size: number;
   cost?: { amount: number; currency: string };
+  costScope?: "session";
   cachedTokens?: number;
   inputTokens?: number;
   outputTokens?: number;
   totalTokens?: number;
+  thoughtTokens?: number;
+  cachedWriteTokens?: number;
   /** 提示词总量（新增输入 + 缓存命中），agent 侧算好的分母 */
   promptTokens?: number;
   /** 缓存命中率 0~1，agent 侧算好的口径优先 */
@@ -138,7 +141,30 @@ export function pickUsageExtras(u: any): Partial<UsageUpdate> {
     out.promptTokens = prompt;
   }
 
+  for (const key of ["thoughtTokens", "cachedWriteTokens"] as const) {
+    const value = u[key] ?? meta[key];
+    if (typeof value === "number" && Number.isFinite(value)) out[key] = value;
+  }
+
   return out;
+}
+
+/** End-turn usage is cumulative token consumption, never a context-window estimate. */
+export function mergePromptUsage(previous: UsageUpdate | null | undefined, response: any): UsageUpdate | null {
+  if (!response || typeof response !== "object") return previous ?? null;
+  const raw = response.usage ?? {};
+  const extras = pickUsageExtras({ ...raw, _meta: response._meta });
+  const used = typeof raw.used === "number" && Number.isFinite(raw.used) ? raw.used : undefined;
+  const size = typeof raw.size === "number" && Number.isFinite(raw.size) ? raw.size : undefined;
+  if (!previous && !Object.keys(extras).length && used == null && size == null && !raw.cost) return null;
+  return {
+    ...previous,
+    used: used ?? previous?.used ?? 0,
+    size: size ?? previous?.size ?? 0,
+    cost: raw.cost ?? previous?.cost,
+    costScope: raw.cost ? undefined : previous?.costScope,
+    ...extras,
+  };
 }
 
 export interface AgentSummary {
@@ -884,7 +910,7 @@ export function dispatchStandardUpdate(update: acp.SessionUpdate, handlers: Univ
     case "available_commands_update": handlers.onAvailableCommands?.(update.availableCommands); return true;
     case "current_mode_update": handlers.onModeUpdate?.(update.currentModeId); return true;
     case "session_info_update": handlers.onSessionInfo?.(update); return true;
-    case "usage_update": handlers.onUsage?.({ used: update.used, size: update.size, ...(update.cost ? { cost: update.cost } : {}), ...pickUsageExtras(update) }); return true;
+    case "usage_update": handlers.onUsage?.({ used: update.used, size: update.size, ...(update.cost ? { cost: update.cost, costScope: "session" as const } : {}), ...pickUsageExtras(update) }); return true;
     default: return false; // Tool adapters below also retain optional vendor display metadata.
   }
 }
@@ -1320,8 +1346,6 @@ async function consumeSseResponse(
             }
           } else if (kind === "session_info_update") {
             handlers.onSessionInfo?.(u.sessionInfo || u);
-          } else if (kind === "usage_update") {
-            handlers.onUsage?.({ used: u.used, size: u.size, cost: u.cost, ...pickUsageExtras(u) });
           } else if (kind === "plan_update") {
             // UNSTABLE: plan content patch — entries array when present.
             if (Array.isArray(u.plan?.entries)) handlers.onPlan?.(u.plan.entries as PlanEntry[]);
@@ -1358,18 +1382,8 @@ async function consumeSseResponse(
         } else if (event.type === "done") {
           done = true;
           stopReason = event.stopReason;
-          const resp = event.response as any;
-          if (resp && (resp.usage || resp._meta)) {
-            const rawUsage = resp.usage || {};
-            const extras = pickUsageExtras({ ...rawUsage, _meta: resp._meta });
-            const total = extras.totalTokens ?? rawUsage.totalTokens;
-            handlers.onUsage?.({
-              used: typeof rawUsage.used === "number" ? rawUsage.used : (typeof total === "number" ? total : 0),
-              size: typeof rawUsage.size === "number" ? rawUsage.size : 0,
-              cost: rawUsage.cost,
-              ...extras,
-            });
-          }
+          // Keep prompt totals on onDone. Synthesizing usage_update here would
+          // overwrite context `used` with the sum of all model calls in the turn.
           handlers.onDone?.(event.stopReason, event.response);
           try {
             await reader.cancel();
@@ -1636,7 +1650,7 @@ export function buildTranscriptFromReplay(replayed: any[]): RebuiltTranscript {
     } else if (kind === "current_mode_update" && u.currentModeId) {
       out.currentModeId = u.currentModeId;
     } else if (kind === "usage_update") {
-      out.usage = { used: u.used, size: u.size, cost: u.cost, ...pickUsageExtras(u) };
+      out.usage = { used: u.used, size: u.size, cost: u.cost, ...(u.cost ? { costScope: "session" as const } : {}), ...pickUsageExtras(u) };
     } else if (kind) {
       // Only generic unhandled activities
       out.activities.push({ kind, detail: u });

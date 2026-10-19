@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/reac
 import { useStudioStore } from "@/stores/useStudioStore";
 import { useChatSend, isTransientSendError, stripRetryNotes } from "@/hooks/useChatSend";
 import type { AgentSummary } from "@/lib/universal-api";
+import { contextUsage, promptUsage, displayedPromptUsage } from "../fixtures/usage-sample";
 
 const realFetch = globalThis.fetch;
 
@@ -26,6 +27,7 @@ interface HarnessOpts {
   retry?: { max?: number; delayMs?: (n: number) => number };
   chatBehavior: Array<"fail" | "ok" | "auth">;
   calls: string[];
+  frames?: unknown[];
 }
 
 function Harness({ onHandle, resolveSession, retry, chatBehavior, calls }: HarnessOpts) {
@@ -58,7 +60,7 @@ async function renderHarness(opts: Partial<HarnessOpts> & { calls: string[] }) {
         return { ok: false, status: 401, json: async () => ({ ok: false, error: "need auth", authRequired: true }) };
       }
       const tag = `ROUND${(globalThis as any).__chatAttempts}`;
-      return sseResponse([
+      return sseResponse(opts.frames ?? [
         { type: "update", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: "你好" } } },
         { type: "update", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text: tag } } },
         { type: "done", stopReason: "end_turn" },
@@ -96,6 +98,31 @@ describe("send retry policy", () => {
   afterEach(() => {
     globalThis.fetch = realFetch;
     vi.restoreAllMocks();
+  });
+
+  it("keeps OpenCode context separate from the completed turn total and preserves cost", async () => {
+    const { root, el, send } = await renderHarness({ calls: [], frames: [
+      { type: "update", update: { sessionUpdate: "usage_update", ...contextUsage } },
+      { type: "done", stopReason: "end_turn", response: { usage: promptUsage } },
+    ] });
+    try {
+      await act(async () => { await send("usage"); });
+      const usage = useStudioStore.getState().messages.find(message => message.role === "assistant")?.usage;
+      expect(usage).toMatchObject({ ...contextUsage, costScope: "session", ...displayedPromptUsage });
+    } finally { root.unmount(); el.remove(); }
+  });
+
+  it("does not borrow the preceding turn's context or bill when done contains totals only", async () => {
+    const { root, el, send } = await renderHarness({ calls: [], frames: [
+      { type: "done", stopReason: "end_turn", response: { usage: promptUsage } },
+    ] });
+    try {
+      useStudioStore.getState().setUsage(contextUsage);
+      await act(async () => { await send("usage only"); });
+      const usage = useStudioStore.getState().messages.find(message => message.role === "assistant")?.usage;
+      expect(usage).toMatchObject({ used: 0, size: 0, totalTokens: promptUsage.totalTokens });
+      expect(usage?.cost).toBeUndefined();
+    } finally { root.unmount(); el.remove(); }
   });
 
   it("control: direct consume parses SSE in this file", async () => {

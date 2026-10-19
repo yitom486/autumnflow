@@ -12,8 +12,7 @@ import {
   respondPermission,
   respondElicitation,
   isAuthRequiredError,
-  pickUsageExtras,
-  type UsageUpdate,
+  mergePromptUsage,
   type ActivityEvent,
   type AgentSummary,
   type PendingPermission,
@@ -583,13 +582,8 @@ export function useChatSend({
             onSessionInfo: (info) => useStudioStore.getState().setSessionInfo(info),
             onUsage: (u) => {
               const c2 = useStudioStore.getState();
-              const existingSize = c2.usage?.size;
-              const normalized: UsageUpdate = {
-                ...u,
-                size: u.size > 0 ? u.size : (existingSize && existingSize > 0 ? existingSize : u.size),
-              };
-              c2.setUsage(normalized);
-              c2.patchMessage(assistantId, { usage: normalized });
+              c2.setUsage(u);
+              c2.patchMessage(assistantId, { usage: u });
             },
             onQuota: (q) => {
               if (q) useStudioStore.getState().setQuota(q);
@@ -618,21 +612,12 @@ export function useChatSend({
             onDone: (_stopReason, resp) => {
               flushPending();
               useStudioStore.getState().patchActiveTurn({ status: "done", lastSeq });
-              if (resp && (resp.usage || resp._meta)) {
-                const extras = pickUsageExtras({ ...(resp.usage || {}), _meta: resp._meta });
-                const c2 = useStudioStore.getState();
-                const cur = c2.usage;
-                if (Object.keys(extras).length > 0) {
-                  const merged: UsageUpdate = {
-                    used: cur?.used ?? (typeof resp.usage?.used === "number" ? resp.usage.used : (extras.totalTokens ?? 0)),
-                    size: cur?.size && cur.size > 0 ? cur.size : (typeof resp.usage?.size === "number" ? resp.usage.size : 0),
-                    cost: resp.usage?.cost ?? cur?.cost,
-                    ...cur,
-                    ...extras,
-                  };
-                  c2.setUsage(merged);
-                  c2.patchMessage(assistantId, { usage: merged });
-                }
+              const c2 = useStudioStore.getState();
+              const current = c2.messages.find(message => message.id === assistantId)?.usage;
+              const merged = mergePromptUsage(current, resp);
+              if (merged) {
+                c2.setUsage(merged);
+                c2.patchMessage(assistantId, { usage: merged });
               }
               // 若该轮次结束且没有最终正文输出（仅工具前有阶段说明），将阶段说明回退为正文保证不丢失任何内容
               useStudioStore.getState().patchMessage(assistantId, (m) => {
