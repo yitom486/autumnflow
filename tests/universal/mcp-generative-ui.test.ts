@@ -15,9 +15,9 @@ describe("AutumnFlow - 5-Digit MCP Server & Generative UI", () => {
     await stopMcpUiServer();
   });
 
-  it("boots the 5-digit MCP server with auto-increment fallback on a dedicated port >= 10000", async () => {
-    const info = await startMcpUiServer(13920);
-    expect(info.port).toBeGreaterThanOrEqual(10000);
+  it("boots the MCP server on an isolated dedicated port", async () => {
+    const info = await startMcpUiServer(0);
+    expect(info.port).toBeGreaterThan(0);
     expect(info.url).toContain(`:${info.port}/mcp`);
     expect(getMcpUiServerInfo()?.port).toBe(info.port);
 

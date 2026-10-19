@@ -8,6 +8,16 @@ import { TEST_GATEWAY_TOKEN } from "../../tests/helpers/gateway-auth";
 
 const projectRoot = fileURLToPath(new URL("../../", import.meta.url));
 
+const availablePort = () => new Promise<number>((resolve, reject) => {
+  const server = createServer();
+  server.on("error", reject);
+  server.listen(0, "127.0.0.1", () => {
+    const address = server.address();
+    const selected = typeof address === "object" && address ? address.port : 0;
+    server.close((error) => error ? reject(error) : resolve(selected));
+  });
+});
+
 export interface LaunchedApp {
   app: ElectronApplication;
   page: Page;
@@ -21,15 +31,8 @@ export async function launchElectronApp(options?: {
   developmentUrl?: string;
   env?: NodeJS.ProcessEnv;
 }): Promise<LaunchedApp> {
-  const port = options?.port || await new Promise<number>((resolve, reject) => {
-    const server = createServer();
-    server.on("error", reject);
-    server.listen(0, "127.0.0.1", () => {
-      const address = server.address();
-      const selected = typeof address === "object" && address ? address.port : 0;
-      server.close((error) => error ? reject(error) : resolve(selected));
-    });
-  });
+  const port = options?.port || await availablePort();
+  const mcpPort = await availablePort();
   const tmpDir = path.join(
     os.tmpdir(),
     `autumnflow-e2e-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
@@ -67,6 +70,7 @@ export async function launchElectronApp(options?: {
     env: {
       ...env,
       PORT: String(port),
+      MCP_PORT: String(mcpPort),
       ACP_PUBLIC_DIR: path.join(projectRoot, "dist"),
       ACP_USER_DATA_DIR: tmpDir,
       AUTUMNFLOW_HOME: path.join(tmpDir, "home"),

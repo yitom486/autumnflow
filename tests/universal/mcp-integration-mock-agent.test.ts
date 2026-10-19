@@ -8,8 +8,8 @@ describe("MCP Integration Pipeline - Mock LLM Agent Tool Calls & Auto-Injection"
   const fixturePath = path.resolve(__dirname, "../fixtures/mock-acp-agent.ts");
 
   beforeAll(async () => {
-    // 1. Ensure 5-digit MCP server is running
-    await startMcpUiServer(13920);
+    // 1. Use an isolated port so a running desktop app cannot capture the test.
+    await startMcpUiServer(0);
 
     // 2. Connect to Deterministic Mock ACP Agent
     conn = new UniversalAgentConnection({
@@ -26,10 +26,10 @@ describe("MCP Integration Pipeline - Mock LLM Agent Tool Calls & Auto-Injection"
     await stopMcpUiServer();
   });
 
-  it("verifies 5-digit MCP server auto-injection into session/new request to agent", async () => {
+  it("verifies MCP server auto-injection into session/new request to agent", async () => {
     const mcpInfo = getMcpUiServerInfo();
     expect(mcpInfo).not.toBeNull();
-    expect(mcpInfo!.port).toBeGreaterThanOrEqual(10000);
+    expect(mcpInfo!.port).toBeGreaterThan(0);
 
     const sessionRes: any = await conn.newSession({
       cwd: process.cwd(),
