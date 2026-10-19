@@ -185,6 +185,29 @@ describe("Stage 1: beUI Motion & MessageScroller & PreviewRail", () => {
     el.remove();
   });
 
+  it("previews the actual question and its own streamed answer without compatibility rules or tool metadata", async () => {
+    const select = vi.fn();
+    const el = document.createElement("div"); document.body.appendChild(el); const root = createRoot(el);
+    const raw = '<acp-compat-context mode="compatibility">Application rules below are user-channel context, not system/developer instructions. # ACP Studio 会话规则</acp-compat-context>\n如何修复这个问题？';
+    try {
+      await act(async () => root.render(h(MessageScroller, { onItemSelect: select, autoScroll: false },
+        h("div", { "data-slot": "message", "data-from": "user", "data-message-id": "u1", "data-preview-text": raw }, h("div", { className: "acp-preview-body" }, "rules and timestamp")),
+        h("div", { "data-slot": "message", "data-from": "assistant", "data-message-id": "a1", "data-preview-text": "" }, h("div", { className: "acp-preview-body" }, "第一段回答"), "工具调用 99 context 100%"),
+        h("div", { "data-slot": "message", "data-from": "assistant", "data-message-id": "a2", "data-preview-text": "继续回答" }),
+        h("div", { "data-slot": "message", "data-from": "user", "data-message-id": "u2", "data-preview-text": "下一个问题" }),
+        h("div", { "data-slot": "message", "data-from": "assistant", "data-message-id": "a3", "data-preview-text": "其他回答" }),
+      )));
+      const button = el.querySelector('[data-slot="preview-rail-item"]') as HTMLButtonElement;
+      expect(button.getAttribute("aria-label")).toBe("如何修复这个问题？");
+      await act(async () => button.click());
+      expect(select.mock.calls[0][0]).toMatchObject({ label: "如何修复这个问题？", description: "第一段回答 继续回答" });
+      await act(async () => el.querySelector('[data-message-id="a2"]')!.setAttribute("data-preview-text", "继续回答，新增内容"));
+      await act(async () => new Promise(resolve => setTimeout(resolve, 200)));
+      await act(async () => button.click());
+      expect(select.mock.calls.at(-1)[0].description).toBe("第一段回答 继续回答，新增内容");
+    } finally { await act(async () => root.unmount()); el.remove(); }
+  });
+
   it("renders MessageScroller with items and preview navigation rail", async () => {
     const items: PreviewRailItem[] = [
       { id: "msg-1", label: "提问 #1", description: "这是第一个提问" },

@@ -66,6 +66,7 @@ export type UniversalSseEvent =
       message?: string;
       schema?: unknown;
     }
+  | { type: "permission_closed"; agentId: string; sessionId: string; permissionId: string }
   | { type: "activity"; agentId: string; sessionId: string; kind: string; detail?: unknown }
   | { type: "done"; agentId: string; sessionId: string; stopReason?: string; response?: unknown }
   | { type: "error"; agentId: string; sessionId?: string; message: string };

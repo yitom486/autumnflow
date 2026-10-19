@@ -1,3 +1,4 @@
+import { permissionInScope, elicitationInScope } from "@/lib/interaction-scope";
 import React from "react";
 import {
   ActionBarPrimitive,
@@ -50,7 +51,6 @@ import {
   DiffButton,
   FileEditCard,
   FileReadCard,
-  InlineApproval,
   LiveElapsed,
   SearchCard,
   StatusDot,
@@ -119,8 +119,8 @@ const ThinkingStateCapsule: React.FC<{ startedAt?: number; statusHint?: string }
   const [elapsed, setElapsed] = React.useState(() =>
     startedAt ? Math.max(0, Math.floor((Date.now() - startedAt) / 100) / 10) : 0
   );
-  const hasPendingPermission = useStudioStore((s) => s.pendingPerms.length > 0);
-  const hasPendingElicitation = useStudioStore((s) => s.pendingElic.length > 0);
+  const hasPendingPermission = useStudioStore((s) => s.pendingPerms.some(p => permissionInScope(p, s.activeAgentId, s.sessionId)));
+  const hasPendingElicitation = useStudioStore((s) => s.pendingElic.some(e => elicitationInScope(e, s.activeAgentId, s.sessionId)));
 
   React.useEffect(() => {
     if (hasPendingPermission || hasPendingElicitation) return;
@@ -457,6 +457,7 @@ const UserMessageView: React.FC = () => {
       id={messageId}
       data-slot="message"
       data-message-id={messageId}
+      data-preview-text={acp?.content || ""}
       data-from="user"
       className="flex gap-3 justify-end items-start group animate-fade-slide-in"
     >
@@ -749,7 +750,6 @@ const AssistantMessageView: React.FC<{
                   )}
                 </div>
               )}
-              <InlineApproval tc={tc} />
             </div>
           ) : undefined,
       });
@@ -865,6 +865,7 @@ const AssistantMessageView: React.FC<{
         id={messageId}
         data-slot="message"
         data-message-id={messageId}
+        data-preview-text=""
         data-from="assistant"
         className="flex gap-3 justify-start items-start group animate-fade-slide-in"
       >
@@ -901,6 +902,7 @@ const AssistantMessageView: React.FC<{
       id={messageId}
       data-slot="message"
       data-message-id={messageId}
+      data-preview-text=""
       data-from="assistant"
       className="flex gap-3 justify-start items-start group animate-fade-slide-in"
     >

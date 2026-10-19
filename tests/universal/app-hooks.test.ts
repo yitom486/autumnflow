@@ -59,6 +59,23 @@ describe("Controller hooks & App invariants", () => {
   });
 
   describe("useAgentConfig invariants", () => {
+    it("keeps the selected model and preferences when the agent rejects a model", async () => {
+      const originalFetch = globalThis.fetch;
+      const originalAlert = window.alert;
+      const alert = vi.fn();
+      window.alert = alert;
+      globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: false, error: "Model not found" }), { status: 400 })) as typeof fetch;
+      useStudioStore.setState({ sessionId: "s1", activeAgentId: "opencode", modelsOpen: true, models: { currentModelId: "old", availableModels: [] } });
+      const before = useStudioStore.getState().agentPrefs;
+      const { result, unmount } = renderTestHook(() => useAgentConfig({ agentsRef: { current: [] }, ensureSession: async () => "s1" }));
+      try {
+        await result.current.handleApplyModel("missing");
+        expect(useStudioStore.getState().models?.currentModelId).toBe("old");
+        expect(useStudioStore.getState().agentPrefs).toBe(before);
+        expect(useStudioStore.getState().modelsOpen).toBe(true);
+        expect(alert).not.toHaveBeenCalled();
+      } finally { globalThis.fetch = originalFetch; window.alert = originalAlert; unmount(); }
+    });
     it("migrates legacy localStorage keys to zustand agentPrefs", async () => {
       localStorage.setItem(
         "acp_default_config_codex",

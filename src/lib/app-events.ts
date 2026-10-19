@@ -26,6 +26,7 @@ export type AppEvent =
       schema: unknown;
       status?: "pending" | "accepted";
     }
+  | { type: "permission_closed"; permissionId: string }
   | { type: "elicitation_closed"; elicitationId: string }
   | { type: "activity"; kind: string; detail?: unknown }
   | { type: "reset"; reason: string; firstSeq: number; lastSeq: number }
@@ -97,6 +98,8 @@ export function normalizeAppEvent(payload: unknown): AppEvent {
         schema: raw.schema,
         ...(raw.status === "pending" || raw.status === "accepted" ? { status: raw.status } : {}),
       };
+    case "permission_closed":
+      return { type: "permission_closed", permissionId: text(raw.permissionId) };
     case "elicitation_completed":
     case "elicitation_closed":
       return { type: "elicitation_closed", elicitationId: text(raw.elicitationId) };

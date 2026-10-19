@@ -76,9 +76,15 @@ export class InteractionManager {
     if (selected.outcome === "selected" && !p.options.some(option => option.optionId === selected.optionId)) {
       throw RequestError.invalidParams(undefined, "Permission option was not offered by this agent");
     }
-    this.pendingPermissions.delete(permissionId);
+    this.closePermission(p);
     p.resolve(response);
     return true;
+  }
+
+  private closePermission(p: PendingPermission): void {
+    this.pendingPermissions.delete(p.permissionId);
+    this.clearRequestAbort(p.permissionId);
+    this.broadcast(p.sessionId, { type: "permission_closed", agentId: this.agentId, sessionId: p.sessionId, permissionId: p.permissionId });
   }
 
   resolveElicitation(elicitationId: string, result: unknown): boolean {
@@ -125,7 +131,7 @@ export class InteractionManager {
   cancelPendingForSession(sessionId: string): void {
     for (const [id, p] of [...this.pendingPermissions]) {
       if (p.sessionId === sessionId) {
-        this.pendingPermissions.delete(id);
+        this.closePermission(p);
         try {
           p.resolve({ outcome: "cancelled" });
         } catch (err) {
@@ -148,7 +154,7 @@ export class InteractionManager {
 
   rejectAllOnExit(code: number | null, signal: string | null): void {
     for (const [id, p] of this.pendingPermissions) {
-      this.pendingPermissions.delete(id);
+      this.closePermission(p);
       p.reject(new Error(`Agent exited (code ${code}, signal ${signal}) while permission ${id} pending`));
     }
     for (const [id, p] of this.pendingElicitations) {
@@ -166,8 +172,7 @@ export class InteractionManager {
     return new Promise<RequestPermissionResponse>((resolve, reject) => {
       const timer = setTimeout(() => {
         if (this.pendingPermissions.has(permissionId)) {
-          this.pendingPermissions.delete(permissionId);
-          this.clearRequestAbort(permissionId);
+          this.closePermission(this.pendingPermissions.get(permissionId)!);
           resolve({ outcome: { outcome: "cancelled" } });
         }
       }, INTERACTION_TIMEOUT_MS);

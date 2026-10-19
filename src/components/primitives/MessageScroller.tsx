@@ -63,21 +63,17 @@ export interface MessageScrollerProps extends HTMLAttributes<HTMLDivElement> {
   targetRole?: "user" | "all";
 }
 
-function extractTextSnippet(el: Element, maxLen = 120): string {
-  const bubble =
-    el.querySelector('[data-slot="message-bubble-content"]') ||
-    el.querySelector('[data-slot="message-content"]') ||
-    el.querySelector("p") ||
-    el;
-  let raw = (bubble.textContent || "").replace(/\s+/g, " ").trim();
-
-  // If subagent prompt boilerplate, reformat cleanly
-  if (raw.startsWith("You are a subagent spawned by another session.")) {
-    const withoutBoilerplate = raw.replace(/^You are a subagent spawned by another session\.\s*/, "");
-    if (withoutBoilerplate) raw = `[子任务] ${withoutBoilerplate}`;
-  }
-
-  return raw.length > maxLen ? `${raw.slice(0, maxLen)}…` : raw;
+function extractTextSnippet(el: Element, maxLen = 2000): string {
+  const bubble = el.querySelector('[data-slot="message-bubble-content"]') ||
+    el.querySelector('[data-slot="message-content"]') || el.querySelector("p") || el;
+  // Prefer message content over rendered tool labels, usage counters and timestamps.
+  const bodyParts = el.getAttribute("data-from") === "assistant" ? el.querySelectorAll(".acp-preview-body") : [];
+  let raw = bodyParts.length ? Array.from(bodyParts, part => part.textContent || "").join(" ") :
+    el.getAttribute("data-preview-text") ?? bubble.textContent ?? "";
+  raw = raw.replace(/^(?:\s*<acp-compat-context\b[^>]*>[\s\S]*?<\/acp-compat-context>\s*)+/i, "");
+  raw = raw.replace(/^\s*You are a subagent spawned by another session\.\s*/, "");
+  raw = raw.replace(/\s+/g, " ").trim();
+  return raw.length > maxLen ? raw.slice(0, maxLen) + "…" : raw;
 }
 
 export const MessageScroller = forwardRef<MessageScrollerHandle, MessageScrollerProps>(
@@ -181,35 +177,27 @@ export const MessageScroller = forwardRef<MessageScrollerHandle, MessageScroller
       if (!vp) return;
 
       const scan = () => {
-        const selector =
-          targetRole === "user"
-            ? '[data-slot="message"][data-from="user"]'
-            : '[data-slot="message"]';
-
-        const messageEls = Array.from(
-          vp.querySelectorAll<HTMLElement>(selector),
-        );
-        let turnIndex = 1;
+        const allMessages = Array.from(vp.querySelectorAll<HTMLElement>('[data-slot="message"]'));
+        const messageEls = targetRole === "user" ? allMessages.filter(el => el.dataset.from === "user") : allMessages;
         const found: PreviewRailItem[] = messageEls.map((el, i) => {
           const id = el.dataset.messageId || el.id || `msg-${i}`;
-          const from = el.dataset.from || "unknown";
-          const isUser = from === "user";
-          const snippet = extractTextSnippet(el);
-          const isSubagent = snippet.startsWith("[子任务]");
-          const label = isSubagent
-            ? `子任务 #${turnIndex++}`
-            : isUser
-              ? `提问 #${turnIndex++}`
-              : from === "assistant"
-                ? "智能体回复"
-                : "系统消息";
-
-          return {
-            id,
-            label,
-            ariaLabel: `${label}: ${snippet.slice(0, 40)}`,
-            description: snippet || "（空消息）",
-          };
+          const isUser = el.dataset.from === "user";
+          const question = extractTextSnippet(el);
+          let answer = "";
+          if (isUser) {
+            const replies: string[] = [];
+            for (let index = allMessages.indexOf(el) + 1; index < allMessages.length; index++) {
+              const next = allMessages[index];
+              if (next.dataset.from === "user") break;
+              if (next.dataset.from === "assistant") {
+                const text = extractTextSnippet(next);
+                if (text) replies.push(text);
+              }
+            }
+            answer = replies.join(" ");
+          }
+          const label = isUser ? question || "（附件消息）" : el.dataset.from === "assistant" ? "智能体回复" : "系统消息";
+          return { id, label, ariaLabel: label, description: isUser ? answer || "暂无回答" : question || "（空消息）" };
         });
 
         setScannedItems((prev) => {
@@ -243,7 +231,7 @@ export const MessageScroller = forwardRef<MessageScrollerHandle, MessageScroller
         debouncedScan();
       });
 
-      observer.observe(vp, { childList: true, subtree: true });
+      observer.observe(vp, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["data-preview-text"] });
       return () => {
         observer.disconnect();
         if (timer !== null) window.clearTimeout(timer);

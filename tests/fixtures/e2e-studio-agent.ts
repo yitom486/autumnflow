@@ -73,6 +73,15 @@ const app = acp.agent({ name: "e2e-agent" })
       await text(ctx, sessionId, "用量校验完成。");
       return { stopReason: "end_turn", usage: promptUsage };
     }
+    if (fullText.startsWith("E2E_RAIL_PREVIEW")) {
+      await text(ctx, sessionId, "这是当前问题对应的 AI 回答。" + "预览应按三行截断，保留完整回答供聊天正文查看。".repeat(20));
+      return { stopReason: "end_turn" };
+    }
+    if (fullText === "E2E_WAIT_FOR_FIRST_TOKEN") {
+      await new Promise(resolve => setTimeout(resolve, 3500));
+      await text(ctx, sessionId, "FIRST_TOKEN_WAIT_FINISHED");
+      return { stopReason: "end_turn" };
+    }
     if (fullText === "E2E_STABLE_TEXT") {
       await text(ctx, sessionId, "阶段输出：已经定位消息更新路径，接下来核对工具事件。");
       await new Promise(resolve => setTimeout(resolve, 1200));
@@ -92,6 +101,7 @@ const app = acp.agent({ name: "e2e-agent" })
       return { stopReason: "end_turn" };
     }
     if (fullText.startsWith("E2E_PERMISSION")) {
+      await ctx.client.notify(acp.methods.client.session.update, { sessionId, update: { sessionUpdate: "tool_call", toolCallId: `approval-${sessionId}`, title: "E2E 安全操作", kind: "execute", status: "pending" } });
       // A real reverse ACP request. No command executes in this fixture.
       const result = await ctx.client.request(acp.methods.client.session.requestPermission, {
         sessionId,

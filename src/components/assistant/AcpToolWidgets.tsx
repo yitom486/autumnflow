@@ -6,15 +6,12 @@ import {
   FileText,
   PencilLine,
   Search,
-  ShieldAlert,
   SquareTerminal,
   Terminal,
   Wrench,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { useStudioStore } from "@/stores/useStudioStore";
-import { matchPermToToolCalls } from "@/lib/acp-assistant";
-import { respondPermission, type PendingPermission } from "@/lib/universal-api";
 
 /**
  * Generative UI（展示型）：同一份 ACP 工具调用数据，按工具种类渲染专属卡片，
@@ -97,91 +94,6 @@ export const CopyTextBtn: React.FC<{ text: string; title?: string }> = ({ text, 
       {copied ? <Check className="w-3 h-3 text-success" /> : <Copy className="w-3 h-3" />}
       {copied ? "已复制" : "复制"}
     </button>
-  );
-};
-
-/** Match this tool to a pending ACP permission (same rule as the App dialog filter). */
-export function useInlinePerm(tc: Pick<WidgetTool, "id" | "title">): {
-  perm: PendingPermission | null;
-  busy: boolean;
-  respond: (optionId: string | null) => Promise<void>;
-} {
-  const sessionId = useStudioStore((s) => s.sessionId);
-  const respondingId = useStudioStore((s) => s.respondingId);
-  const pendingPerms = useStudioStore((s) => s.pendingPerms);
-  const perm = React.useMemo(() => {
-    const st = useStudioStore.getState();
-    for (const p of pendingPerms) {
-      if (sessionId && p.sessionId !== sessionId) continue;
-      const tool = (p.toolCall ?? {}) as { toolCallId?: string; id?: string; title?: string };
-      const wantId = tool.toolCallId || tool.id || null;
-      const wantTitle = tool.title || null;
-      if ((wantId && tc.id === wantId) || (wantTitle && tc.title === wantTitle)) {
-        if (matchPermToToolCalls(p, st.messages, sessionId)) return p;
-      }
-    }
-    return null;
-  }, [pendingPerms, sessionId, tc.id, tc.title]);
-  const busy = perm != null && respondingId === perm.permissionId;
-  const respond = React.useCallback(
-    async (optionId: string | null) => {
-      if (!perm) return;
-      const st = useStudioStore.getState();
-      st.setRespondingId(perm.permissionId);
-      try {
-        await respondPermission(
-          perm.agentId,
-          perm.permissionId,
-          optionId ? { outcome: "selected", optionId } : { outcome: "cancelled" },
-        );
-        useStudioStore.getState().removePermission(perm.permissionId);
-      } catch (e: any) {
-        alert(`permission respond 失败: ${e.message}`);
-      } finally {
-        useStudioStore.getState().setRespondingId(null);
-      }
-    },
-    [perm]
-  );
-  return { perm, busy, respond };
-}
-
-export const InlineApproval: React.FC<{ tc: Pick<WidgetTool, "id" | "title"> }> = ({ tc }) => {
-  const { perm, busy, respond } = useInlinePerm(tc);
-  if (!perm) return null;
-  return (
-    <div className="flex flex-wrap items-center gap-1.5 px-2.5 py-2 border-t border-line bg-inset/40 font-sans">
-      <span className="flex items-center gap-1 text-ink font-medium text-[11px] mr-1">
-        <ShieldAlert className="w-3.5 h-3.5 text-amber-500" />
-        需要授权
-      </span>
-      {(perm.options || []).slice(0, 3).map((o, i) => (
-        <button
-          key={o.optionId}
-          type="button"
-          disabled={busy}
-          onClick={() => respond(o.optionId)}
-          className={cn(
-            "h-6 px-2.5 rounded-chip text-[11px] font-medium transition-colors disabled:opacity-40 cursor-pointer shadow-btn",
-            i === 0
-              ? "bg-ink text-canvas hover:opacity-90"
-              : "bg-surface text-ink-2 hover:bg-hover border border-line",
-          )}
-          title={o.kind || o.optionId}
-        >
-          {busy ? "提交中…" : o.name}
-        </button>
-      ))}
-      <button
-        type="button"
-        disabled={busy}
-        onClick={() => respond(null)}
-        className="px-2 py-0.5 rounded-chip text-ink-3 text-[11px] hover:text-red hover:bg-red-tint transition-colors disabled:opacity-40 cursor-pointer ml-auto"
-        title="拒绝 / 取消"
-      >
-        拒绝
-      </button>
-    </div>
   );
 };
 
@@ -300,7 +212,6 @@ export const FileReadCard: React.FC<{ tc: WidgetTool }> = ({ tc }) => {
           正在读取…
         </div>
       ) : null}
-      <InlineApproval tc={tc} />
     </CardShell>
   );
 };
@@ -336,7 +247,6 @@ export const FileEditCard: React.FC<{ tc: WidgetTool }> = ({ tc }) => {
           正在写入…
         </div>
       ) : null}
-      <InlineApproval tc={tc} />
     </CardShell>
   );
 };
@@ -402,7 +312,6 @@ export const TerminalCard: React.FC<{ tc: WidgetTool }> = ({ tc }) => {
           )}
         </div>
       ) : null}
-      <InlineApproval tc={tc} />
     </CardShell>
   );
 };
@@ -434,7 +343,6 @@ export const SearchCard: React.FC<{ tc: WidgetTool }> = ({ tc }) => {
           搜索中…
         </div>
       ) : null}
-      <InlineApproval tc={tc} />
     </CardShell>
   );
 };

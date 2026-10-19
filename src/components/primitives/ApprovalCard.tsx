@@ -137,6 +137,7 @@ export default function ApprovalCard({
   onAnswerChange,
   onDismiss,
   resettable = true,
+  externallyManaged = false,
   className,
 }: {
   questions: ApprovalQuestion[];
@@ -145,6 +146,8 @@ export default function ApprovalCard({
   onAnswerChange?: (questionIndex: number, answer: number[]) => void;
   onDismiss?: () => void;
   resettable?: boolean;
+  /** Keep actions visible until the owner confirms success/removes the request. */
+  externallyManaged?: boolean;
   className?: string;
 }) {
   const t = { ...DEFAULT_LABELS, ...labels };
@@ -204,7 +207,7 @@ export default function ApprovalCard({
 
   const send = (overrideAnswers?: Record<number, number[]>, overrideCustom?: Record<number, string>) => {
     if (advanceTimer.current) clearTimeout(advanceTimer.current);
-    setSent(true);
+    if (!externallyManaged) setSent(true);
     onSubmitted?.(overrideAnswers ?? answersRef.current, overrideCustom ?? customRef.current);
   };
 
@@ -290,7 +293,7 @@ export default function ApprovalCard({
           type="button"
           aria-label="Dismiss"
           onClick={() => {
-            setOpen(false);
+            if (!externallyManaged) setOpen(false);
             onDismiss?.();
           }}
           className="primitive-icon-button absolute right-2.5 top-2.5 z-10 text-ink-3 transition-colors duration-100 hover:bg-hover hover:text-ink cursor-pointer"
@@ -439,7 +442,7 @@ export default function ApprovalCard({
               size="xs"
               onClick={() => {
                 if (last) {
-                  setOpen(false);
+                  if (!externallyManaged) setOpen(false);
                   onDismiss?.();
                 } else {
                   goTo(qi + 1);

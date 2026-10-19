@@ -420,7 +420,32 @@ describe("assistant-ui ACP thread (client smoke)", () => {
     el.remove();
   });
 
-  it("renders permission approval inline in the matching tool card", async () => {
+  it("updates waiting status by active session and agent without consuming another chat's requests", async () => {
+    useStudioStore.setState({
+      activeAgentId: "opencode", sessionId: "session-a", isStreaming: true,
+      messages: [{ id: "waiting", role: "assistant", content: "", isStreaming: true, startedAt: Date.now(), timestamp: "00:00" }],
+      pendingPerms: [{ permissionId: "perm-a", agentId: "opencode", sessionId: "session-a", toolCall: {}, options: [] }], pendingElic: [],
+    } as any);
+    const el = document.createElement("div"); document.body.appendChild(el); const root = createRoot(el);
+    try {
+      await act(async () => root.render(h(AcpAssistantProvider, { onSend: () => {}, onStop: () => {} } as any,
+        h(AssistantChatView, { onSelectSuggestion: () => {} } as any))));
+      expect(el.textContent).toContain("等待用户确认授权");
+      for (const scope of [{ sessionId: "session-b" }, { sessionId: null }, { sessionId: "session-a", activeAgentId: "codex" }]) {
+        await act(async () => useStudioStore.setState(scope));
+        expect(el.textContent).not.toContain("等待用户确认授权");
+      }
+      await act(async () => useStudioStore.setState({ activeAgentId: "opencode", sessionId: "session-a" }));
+      expect(el.textContent).toContain("等待用户确认授权");
+      expect(useStudioStore.getState().pendingPerms).toHaveLength(1);
+      await act(async () => useStudioStore.setState({ pendingPerms: [], pendingElic: [{ elicitationId: "q", agentId: "opencode", sessionId: "session-a", message: "Question", schema: {} }] } as any));
+      expect(el.textContent).toContain("等待用户回应提问");
+      await act(async () => useStudioStore.setState({ sessionId: "session-b" }));
+      expect(el.textContent).not.toContain("等待用户回应提问");
+    } finally { await act(async () => root.unmount()); el.remove(); useStudioStore.getState().resetStudio(); }
+  });
+
+  it("keeps permission actions out of the collapsible tool card", async () => {
     useStudioStore.setState({
       sessionId: "sess1",
       messages: [
@@ -452,9 +477,9 @@ describe("assistant-ui ACP thread (client smoke)", () => {
           h(AssistantChatView, { agentName: "Codex", onSelectSuggestion: () => {} } as any))
       );
     });
-    expect(el.innerHTML).toContain("需要授权");
-    expect(el.innerHTML).toContain("允许");
-    expect(el.innerHTML).toContain("拒绝");
+    expect(el.innerHTML).not.toContain("需要授权");
+    expect(el.innerHTML).not.toContain("允许");
+    expect(useStudioStore.getState().pendingPerms).toHaveLength(1);
     root.unmount();
     el.remove();
     useStudioStore.setState({ pendingPerms: [], sessionId: null } as any);

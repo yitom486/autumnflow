@@ -1,3 +1,4 @@
+import { reportError as reportRequestError } from "@/lib/error-bus";
 import { useCallback, useRef } from "react";
 import { CreateElicitationRequest, CreateElicitationResponse } from "@agentclientprotocol/sdk";
 import { applyArtifactUpdate, artifactKey, updateKey } from "../../shared/acp-session-state";
@@ -606,6 +607,7 @@ export function useChatSend({
               }
               appendActivityMessage(a, now(), assistantId);
             },
+            onPermissionClosed: (id) => useStudioStore.getState().removePermission(id),
             onPermissionRequest: (p) => useStudioStore.getState().addPermission(p),
             onElicitationRequest: (e) => useStudioStore.getState().addElicitation(e),
             onElicitationClosed: (id) => useStudioStore.getState().removeElicitation(id),
@@ -802,6 +804,7 @@ export function useChatSend({
   const handlePermRespond = useCallback(
     async (p: PendingPermission, optionId: string | null) => {
       const st = useStudioStore.getState();
+      if (st.respondingId || !st.pendingPerms.some(item => item.permissionId === p.permissionId)) return;
       st.setRespondingId(p.permissionId);
       try {
         await respondPermission(
@@ -811,9 +814,11 @@ export function useChatSend({
         );
         useStudioStore.getState().removePermission(p.permissionId);
       } catch (e: any) {
-        alert(`permission respond 失败: ${e.message}`);
+        if (e.status === 404 || e.status === 410) useStudioStore.getState().removePermission(p.permissionId);
+        reportRequestError("授权提交失败", e.status === 404 || e.status === 410 ? new Error("授权请求已结束或过期，请重新发起操作。") : e);
       } finally {
-        useStudioStore.getState().setRespondingId(null);
+        const current = useStudioStore.getState();
+        if (current.respondingId === p.permissionId) current.setRespondingId(null);
       }
     },
     []

@@ -57,7 +57,7 @@ function DefaultPreview({ item }: { item: PreviewRailItem }) {
     >
       <p
         data-slot="preview-rail-title"
-        className="text-xs font-semibold text-card-foreground leading-snug line-clamp-2"
+        className="text-xs font-semibold text-card-foreground leading-snug truncate"
       >
         {item.label}
       </p>

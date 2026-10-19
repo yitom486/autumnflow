@@ -636,7 +636,7 @@ const AcpMarkdownContent = memo(() => {
       remarkPlugins={remarkPlugins}
       rehypePlugins={rehypePlugins}
       preprocess={preprocess}
-      className="acp-md text-sm leading-relaxed break-words text-foreground"
+      className="acp-md acp-preview-body text-sm leading-relaxed break-words text-foreground"
       components={components}
       componentsByLanguage={byLanguage}
       smooth={smooth}

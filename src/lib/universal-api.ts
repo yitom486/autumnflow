@@ -849,6 +849,7 @@ export interface UniversalHandlers {
   onQuota?: (quota: any) => void;
   /** fs/terminal/compaction and any unrecognized update kinds land here. */
   onActivity?: (a: ActivityEvent) => void;
+  onPermissionClosed?: (id: string) => void;
   onPermissionRequest?: (p: PendingPermission) => void;
   onElicitationRequest?: (e: PendingElicitation) => void;
   onElicitationClosed?: (id: string) => void;
@@ -1129,6 +1130,13 @@ export async function providersRpc(agentId: string, action: "list" | "set" | "di
   return data.result;
 }
 
+export async function fetchPendingPermissions(agentId: string, signal?: AbortSignal): Promise<PendingPermission[]> {
+  const res = await apiFetch(`/api/universal/permission/pending?agentId=${encodeURIComponent(agentId)}`, { signal });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || "无法读取待处理授权");
+  return data.pending;
+}
+
 export async function respondPermission(agentId: string, permissionId: string, outcome: unknown) {
   const res = await apiFetch("/api/universal/permission/respond", {
     method: "POST",
@@ -1136,7 +1144,7 @@ export async function respondPermission(agentId: string, permissionId: string, o
     body: JSON.stringify({ agentId, permissionId, outcome }),
   });
   const data = await res.json();
-  if (!data.ok) throw new Error(data.error || "permission respond failed");
+  if (!res.ok || !data.ok) throw Object.assign(new Error(data.error || "permission respond failed"), { status: res.status });
 }
 
 export async function fetchPendingElicitations(agentId: string, signal?: AbortSignal): Promise<PendingElicitation[]> {
@@ -1368,6 +1376,8 @@ async function consumeSseResponse(
             toolCall: event.toolCall as any,
             options: event.options as any,
           });
+        } else if (event.type === "permission_closed") {
+          handlers.onPermissionClosed?.(event.permissionId);
         } else if (event.type === "elicitation_request") {
           handlers.onElicitationRequest?.({
             elicitationId: event.elicitationId,

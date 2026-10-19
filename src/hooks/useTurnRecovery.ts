@@ -116,6 +116,7 @@ export async function recoverActiveTurn(turn: ActiveTurn, assistantId: string): 
                 return { ...m, toolCalls: calls };
               });
             },
+            onPermissionClosed: (id) => useStudioStore.getState().removePermission(id),
             onPermissionRequest: (permission) => {
               if (isCurrent()) useStudioStore.getState().addPermission(permission);
             },

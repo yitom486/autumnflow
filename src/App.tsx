@@ -1,9 +1,10 @@
+import { permissionInScope, elicitationInScope } from "@/lib/interaction-scope";
+import { usePermissionSync } from "@/hooks/usePermissionSync";
 import React, { Suspense, lazy, useRef, useState, useCallback, useMemo } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { AcpAssistantProvider } from "@/components/assistant/AcpAssistantProvider";
 import { AcpComposer } from "@/components/assistant/AcpComposer";
 import { AssistantChatView } from "@/components/assistant/AssistantChatView";
-import { matchPermToToolCalls } from "@/lib/acp-assistant";
 import { StudioHeader } from "@/components/universal/StudioHeader";
 import { StatusBar } from "@/components/universal/StatusBar";
 import { ExternalHistoryDialog } from "@/components/universal/SessionHistoryTools";
@@ -128,6 +129,7 @@ function useSyncPanel(ref: ReturnType<typeof usePanelRef>, open: boolean) {
 
 export default function App() {
   useElicitationSync();
+  usePermissionSync();
   const qc = useQueryClient();
   const agentsRef = useRef<AgentSummary[]>([]);
   const [customOpen, setCustomOpen] = useState(false);
@@ -489,9 +491,10 @@ export default function App() {
             />
 
             {/* Human-in-the-Loop Interaction Dock (ApprovalCard for questions & permissions) */}
-            {(s.pendingElic.length > 0 || s.pendingPerms.length > 0) && (
-              <div className="px-4 pb-2 z-10 shrink-0 space-y-2 max-h-[340px] overflow-y-auto">
-                {s.pendingElic.filter(e => !s.authOpen && e.agentId === s.activeAgentId && (!e.sessionId || e.sessionId === s.sessionId)).map((e) => (
+            {(s.pendingElic.some(e => !s.authOpen && elicitationInScope(e, s.activeAgentId, s.sessionId)) ||
+              s.pendingPerms.some(p => permissionInScope(p, s.activeAgentId, s.sessionId))) && (
+              <div aria-label="待处理授权与提问" className="px-4 pb-2 z-10 shrink-0 space-y-2 max-h-[340px] overflow-y-auto">
+                {s.pendingElic.filter(e => !s.authOpen && elicitationInScope(e, s.activeAgentId, s.sessionId)).map((e) => (
                   <ElicitationCard
                     key={e.elicitationId}
                     e={e}
@@ -500,12 +503,7 @@ export default function App() {
                   />
                 ))}
                 <PermissionDialog
-                  pending={s.pendingPerms.filter((p) => {
-                    if (s.sessionId && p.sessionId !== s.sessionId) return false;
-                    // 已在工具卡内联展示的不再进全局弹窗
-                    if (matchPermToToolCalls(p, useStudioStore.getState().messages, s.sessionId)) return false;
-                    return true;
-                  })}
+                  pending={s.pendingPerms.filter(p => permissionInScope(p, s.activeAgentId, s.sessionId))}
                   onRespond={handlePermRespond}
                   respondingId={s.respondingId}
                 />

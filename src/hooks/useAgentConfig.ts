@@ -1,3 +1,4 @@
+import { reportError } from "@/lib/error-bus";
 import { useCallback } from "react";
 import { useStudioStore } from "@/stores/useStudioStore";
 import {
@@ -149,7 +150,7 @@ export function useAgentConfig({
     async (configId: string, value: unknown) => {
       const st = useStudioStore.getState();
       const sid = st.sessionId || (await ensureSession());
-      if (!sid) return;
+      if (!sid) return false;
       try {
         const opt = useStudioStore.getState().configOptions?.find((c) => c.id === configId);
         const body: Record<string, unknown> =
@@ -164,8 +165,10 @@ export function useAgentConfig({
 
         // Persist user preference for this agent (zustand per-agent prefs + localStorage)
         useStudioStore.getState().rememberAgentConfig(st.activeAgentId, configId, value);
+        return true;
       } catch (e: any) {
-        alert(`set_config 失败: ${e.message}`);
+        reportError("配置修改失败", e);
+        return false;
       }
     },
     [ensureSession]
@@ -177,7 +180,7 @@ export function useAgentConfig({
       const st = useStudioStore.getState();
       const modelOpt = findConfigOption(st.configOptions, "model");
       if (modelOpt) {
-        await setSessionConfig(modelOpt.id, parseModelId(modelId).model);
+        if (!await setSessionConfig(modelOpt.id, parseModelId(modelId).model)) return;
         useStudioStore.getState().saveAgentPref(st.activeAgentId, { fallbackModelId: modelId });
         return;
       }
@@ -190,7 +193,7 @@ export function useAgentConfig({
         if (cur.models) cur.setModels({ ...cur.models, currentModelId: modelId });
         cur.saveAgentPref(st.activeAgentId, { fallbackModelId: modelId });
       } catch (e: any) {
-        alert(`切换模型失败: ${e.message}`);
+        reportError("切换模型失败", e);
       }
     },
     [ensureSession, setSessionConfig]
@@ -202,13 +205,13 @@ export function useAgentConfig({
       const st = useStudioStore.getState();
       const { model, effort } = parseModelId(modelId);
       const modelOpt = findConfigOption(st.configOptions, "model");
-      await setSessionConfig(modelOpt?.id || "model", model);
+      if (!await setSessionConfig(modelOpt?.id || "model", model)) return;
       if (effort) {
         const cur = useStudioStore.getState();
         const thinkOpt = findConfigOption(cur.configOptions, "thinking");
         const flat = flattenConfigOptions(thinkOpt?.options);
         if (thinkOpt && flat.some((o) => o.value.toLowerCase() === effort.toLowerCase())) {
-          await setSessionConfig(thinkOpt.id, effort);
+          if (!await setSessionConfig(thinkOpt.id, effort)) return;
         }
       }
       const cur2 = useStudioStore.getState();
@@ -252,7 +255,7 @@ export function useAgentConfig({
       }
       cur.setAuthOk(agentId, true);
     } catch (e: any) {
-      alert(`发现模型失败: ${e.message}`);
+      reportError("发现模型失败", e);
     } finally {
       useStudioStore.getState().setDiscovering(false);
     }

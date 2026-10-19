@@ -54,6 +54,7 @@ describe("consumeUniversalChat (v1 full updates)", () => {
       { type: "update", update: { sessionUpdate: "current_mode_update", currentModeId: "agent" } },
       { type: "update", update: { sessionUpdate: "usage_update", used: 100, size: 200 } },
       { type: "permission_request", agentId: "codex", sessionId: "sess-1", permissionId: "perm-1", toolCall: {}, options: [] },
+      { type: "permission_closed", permissionId: "perm-1" },
       { type: "activity", kind: "fs_read", detail: { path: "/tmp/a.txt" } },
       { type: "update", update: { sessionUpdate: "plan_update", plan: { entries: [{ content: "s", status: "completed" }] } } },
       { type: "update", update: { sessionUpdate: "compaction_update", compactionId: "c1", status: "in_progress" } },
@@ -75,6 +76,7 @@ describe("consumeUniversalChat (v1 full updates)", () => {
         onAvailableCommands: (c) => seen.push("cmds:" + c.length),
         onModeUpdate: (m) => seen.push("mode:" + m),
         onUsage: (u) => seen.push(`usage:${u.used}/${u.size}`),
+        onPermissionClosed: (id) => seen.push("closed:" + id),
         onPermissionRequest: (p) => seen.push("perm:" + p.permissionId),
         onActivity: (a) => seen.push("activity:" + a.kind),
         onDone: (s) => seen.push("done:" + s),
@@ -88,6 +90,7 @@ describe("consumeUniversalChat (v1 full updates)", () => {
     expect(seen).toContain("plan:1");
     expect(seen).toContain("usage:100/200");
     expect(seen).toContain("perm:perm-1");
+    expect(seen).toContain("closed:perm-1");
     expect(seen).toContain("activity:fs_read");
     expect(seen).toContain("activity:compaction_update");
     expect(seen).toContain("done:end_turn");

@@ -76,26 +76,29 @@ function PermissionCard({
   };
 
   return (
-    <ApprovalCard
-      questions={[question]}
-      labels={{
-        skip: "拒绝",
-        continue: "授权执行",
-        send: busy ? "提交中…" : "批准执行",
-        customPlaceholder: "说明或参数补充（可选）…",
-        sentMessage: "授权请求已处理",
-      }}
-      onSubmitted={(answers) => {
-        const selectedIdx = answers[0]?.[0] ?? 0;
-        const opt = options[selectedIdx];
-        const optionId = typeof opt === "string" ? opt : (opt?.value || p.options?.[selectedIdx]?.optionId || null);
-        onRespond(p, optionId);
-      }}
-      onDismiss={() => {
-        onRespond(p, null);
-      }}
-      className="w-full max-w-full"
-    />
+    <fieldset disabled={busy} aria-busy={busy} className="min-w-0">
+      <ApprovalCard
+        externallyManaged
+        questions={[question]}
+        labels={{
+          skip: "拒绝",
+          continue: "授权执行",
+          send: busy ? "提交中…" : "批准执行",
+          customPlaceholder: "说明或参数补充（可选）…",
+          sentMessage: "授权请求已处理",
+        }}
+        onSubmitted={(answers) => {
+          const selectedIdx = answers[0]?.[0] ?? 0;
+          const opt = options[selectedIdx];
+          const optionId = typeof opt === "string" ? opt : (opt?.value || p.options?.[selectedIdx]?.optionId || null);
+          onRespond(p, optionId);
+        }}
+        onDismiss={() => {
+          onRespond(p, null);
+        }}
+        className="w-full max-w-full"
+      />
+    </fieldset>
   );
 }
 
