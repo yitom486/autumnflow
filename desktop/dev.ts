@@ -12,6 +12,7 @@ import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { resolveRuntimeConfig } from "../shared/runtime-config";
 import { assertPortAvailable } from "../server/port-availability";
+import { waitForServer } from "./server-readiness";
 import * as fs from "node:fs";
 import * as path from "node:path";
 
@@ -95,23 +96,27 @@ async function cleanupAndExit(code = 0) {
 process.on("SIGINT", () => cleanupAndExit(0));
 process.on("SIGTERM", () => cleanupAndExit(0));
 
-async function waitForVite(port: number, timeoutMs = 15000): Promise<boolean> {
-  const start = Date.now();
-  const urls = [`http://localhost:${port}/`, `http://127.0.0.1:${port}/`];
-
-  while (Date.now() - start < timeoutMs) {
-    for (const url of urls) {
-      try {
-        const res = await fetch(url, { signal: AbortSignal.timeout(1000) });
-        await res.body?.cancel();
-        if (res.status < 500) return true;
-      } catch {
-        // still starting up
-      }
-    }
-    await new Promise((r) => setTimeout(r, 100));
-  }
-  return false;
+/**
+ * Wait until a dev server answers.
+ *
+ * The budget has to survive a cold dependency pre-bundle: Vite reports
+ * "ready" in a few seconds but keeps requests pending while it re-optimizes
+ * after a lockfile change, and on a large dependency graph that takes a
+ * minute. Killing the child at the wrong moment aborts the optimization, so
+ * the cache is never written and every later start repeats the whole thing.
+ */
+async function waitForVite(
+  port: number,
+  timeoutMs = 120_000,
+  label = "Vite",
+): Promise<boolean> {
+  return waitForServer({
+    urls: [`http://localhost:${port}/`, `http://127.0.0.1:${port}/`],
+    timeoutMs,
+    onHint: (seconds) => {
+      log("launcher", c.yellow, `${label} 仍未就绪（${seconds}s）。首次启动或刚改过依赖时会先预打包依赖，可能需要一分钟以上。`);
+    },
+  });
 }
 
 async function buildElectron(): Promise<boolean> {
@@ -209,12 +214,15 @@ async function main() {
   console.log(`${c.yellow}[launcher] 正在等待 Vite 开发服务器就绪 (http://localhost:${VITE_PORT})...${c.reset}`);
   const viteReady = await waitForVite(VITE_PORT);
   if (!viteReady) {
-    throw new Error(`Vite 启动超时 (http://localhost:${VITE_PORT})，请检查上方日志后重试。`);
+    throw new Error(
+      `Vite 启动超时 (http://localhost:${VITE_PORT})，请检查上方日志后重试。` +
+        `若刚安装或升级过依赖，首次启动需要重新预打包依赖，请直接重试一次（缓存生成后即可秒开）。`
+    );
   } else {
     console.log(`${c.green}[launcher] Vite 开发服务器已就绪！秒开桌面窗口...${c.reset}\n`);
   }
 
-  if (!await waitForVite(GATEWAY_PORT)) {
+  if (!await waitForVite(GATEWAY_PORT, 30_000, "开发网关")) {
     throw new Error(`开发网关启动超时 (http://127.0.0.1:${GATEWAY_PORT})，请检查上方日志后重试。`);
   }
 
