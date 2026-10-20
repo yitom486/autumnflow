@@ -38,7 +38,8 @@ import {
   useTurnRecovery,
   useEmptySessionCleanup,
 } from "@/hooks";
-import { isDefaultSessionTitle, isThreadEmpty, titleForThread, type ChatThread } from "@/lib/threads";
+import { isDefaultSessionTitle, titleForThread } from "@/lib/threads";
+import { visibleSessions } from "@/lib/session-visibility";
 import {
   formatGenerativeActionPrompt,
   type GenerativeCardAction,
@@ -145,25 +146,10 @@ export default function App() {
   const sessionsRaw = sessionsQuery.data ?? [];
   // Local thread cache is authoritative for "this session has a conversation"
   // and for a human title until the Agent supplies one via session/list.
-  const sessions = useMemo<SessionItem[]>(() => {
-    const threadBySession = new Map<string, ChatThread>();
-    for (const thread of Object.values(s.threads)) {
-      if (thread.agentId === s.activeAgentId && thread.sessionId) {
-        threadBySession.set(thread.sessionId, thread);
-      }
-    }
-    return sessionsRaw.flatMap((item) => {
-      const thread = item.sessionId ? threadBySession.get(item.sessionId) : undefined;
-      // App-owned session with a known empty thread: hide immediately.
-      if (thread && isThreadEmpty(thread)) return [];
-      // No local thread + Agent default/empty title => abandoned draft. Do not
-      // resurrect it as a raw-id row. Imported sessions always stay visible.
-      if (!thread && item.origin === "created" && isDefaultSessionTitle(item.title)) return [];
-      const agentTitle = isDefaultSessionTitle(item.title) ? null : item.title;
-      const title = agentTitle || titleForThread(thread) || "未命名会话";
-      return [{ ...item, title }];
-    });
-  }, [sessionsRaw, s.threads, s.activeAgentId]);
+  const sessions = useMemo<SessionItem[]>(
+    () => visibleSessions(sessionsRaw, s.threads, s.activeAgentId),
+    [sessionsRaw, s.threads, s.activeAgentId]
+  );
   const activeThread = s.activeThreadId ? s.threads[s.activeThreadId] : undefined;
   const activeThreadTitle = titleForThread(activeThread);
   const agentSessionTitle = isDefaultSessionTitle(s.sessionInfo?.title) ? undefined : s.sessionInfo?.title;
@@ -554,11 +540,14 @@ export default function App() {
             onAuthenticated={async () => {
               invalidateAgents(qc);
               const activeId = useStudioStore.getState().activeAgentId;
-                useStudioStore.getState().setAuthOk(activeId, true);
+              // Report what the probe actually says: a failed refresh must not
+              // leave the dialog claiming the local login was reused.
               try {
                 await sessionRpc(activeId, "list", {});
                 useStudioStore.getState().setAuthOk(activeId, true);
-              } catch {}
+              } catch {
+                useStudioStore.getState().setAuthOk(activeId, false);
+              }
             }}
             onLogout={async () => {
               try {

@@ -62,6 +62,8 @@ export function useSessionLifecycle({
   now = defaultNow,
 }: UseSessionLifecycleOptions) {
   const ensuredRef = useRef<string | null>(null);
+  /** In-flight session creations, keyed by agent id; see ensureSession. */
+  const ensureInFlight = useRef(new Map<string, Promise<string | null>>());
   const [cleaningEmpty, setCleaningEmpty] = useState(false);
 
   /**
@@ -81,21 +83,11 @@ export function useSessionLifecycle({
   }, []);
 
   /**
-   * Create a session on demand (e.g. user tweaks model/thinking before chatting).
+   * The actual session/new round trip; see ensureSession for the dedup policy.
    */
-  const ensureSession = useCallback(
-    async (
-      agentId: string = useStudioStore.getState().activeAgentId,
-      force = false
-    ): Promise<string | null> => {
+  const createSession = useCallback(
+    async (agentId: string, force: boolean): Promise<string | null> => {
       const st = useStudioStore.getState();
-      // A stale thread is a read-only historical transcript. Its recorded id
-      // must never satisfy ensureSession, otherwise the composer's "加载模型"
-      // action returns the dead id and no session/new is ever issued.
-      const activeThread = st.activeThreadId ? st.threads[st.activeThreadId] : undefined;
-      const staleBinding = activeThread?.stale === true;
-      if (!force && !staleBinding && st.sessionId && agentId === st.activeAgentId) return st.sessionId;
-      if (!force && (st.isStreaming || st.busy)) return null;
       st.setSessionLoading(true);
       try {
         const known = agentsRef.current.find((a) => a.id === agentId)?.status?.connected;
@@ -168,6 +160,44 @@ export function useSessionLifecycle({
       }
     },
     [qc, agentsRef, applyDefaultConfigOptions]
+  );
+
+  /**
+   * Create a session on demand (e.g. user tweaks model/thinking before chatting).
+   */
+  const ensureSession = useCallback(
+    async (
+      agentId: string = useStudioStore.getState().activeAgentId,
+      force = false
+    ): Promise<string | null> => {
+      const st = useStudioStore.getState();
+      // A stale thread is a read-only historical transcript. Its recorded id
+      // must never satisfy ensureSession, otherwise the composer's "加载模型"
+      // action returns the dead id and no session/new is ever issued.
+      const activeThread = st.activeThreadId ? st.threads[st.activeThreadId] : undefined;
+      const staleBinding = activeThread?.stale === true;
+      if (!force && !staleBinding && st.sessionId && agentId === st.activeAgentId) return st.sessionId;
+      if (!force && (st.isStreaming || st.busy)) return null;
+      // Share one in-flight creation per agent. Boot pre-warm and the first
+      // send can both reach this point before either resolves (the agent is
+      // still spawning), and two parallel session/new calls would leave the
+      // loser orphaned on the agent side. `force` deliberately means "make a
+      // brand-new session", so it never joins the shared promise.
+      if (!force) {
+        const pending = ensureInFlight.current.get(agentId);
+        if (pending) return pending;
+      }
+      const creation = createSession(agentId, force);
+      if (!force) {
+        ensureInFlight.current.set(agentId, creation);
+        const release = () => {
+          if (ensureInFlight.current.get(agentId) === creation) ensureInFlight.current.delete(agentId);
+        };
+        creation.then(release, release);
+      }
+      return creation;
+    },
+    [createSession]
   );
 
   /**
