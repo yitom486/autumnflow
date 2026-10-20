@@ -8,11 +8,16 @@
 
 1. **默认只能 +0.0.1**：日常发版、Bug 修复、ACP 协议对齐、小功能，
    一律 `bun run release:patch`（可附 `--notes "..."`）。
-2. **Minor / Major 必须显式放行**：`release:minor` 需 `--allow-minor`
+2. **发版必须由用户明确点头**：哪怕是 Patch，Agent 也不得自行判断
+   "差不多该发了"就跑 `release:*` 脚本、打 tag、推 tag。正确做法是
+   把改动留在 master、把条目写进 `## [Unreleased]`，然后告诉用户
+   "可以发了"，**等用户在对话里说发**再执行发版脚本与打 tag。
+   Agent 主动发版 = 越权。
+3. **Minor / Major 必须显式放行**：`release:minor` 需 `--allow-minor`
    （或 `ALLOW_MINOR_BUMP=true`），`release:major` 需 `--allow-major`
    （或 `ALLOW_MAJOR_BUMP=true`）；无放行脚本直接报错退出。
    放行只能由用户在对话中明确许可，Agent 不得自行决定跃迁。
-3. 内核桥接库 `@yitom/agy-acp-map`（子仓库）沿用其自有 Patch 纪律，
+4. 内核桥接库 `@yitom/agy-acp-map`（子仓库）沿用其自有 Patch 纪律，
    与本仓库版本互不绑定。
 
 ## 二、单一事实源与 CHANGELOG 自动同步
@@ -30,6 +35,9 @@
    git add package.json CHANGELOG.md
    git commit -m "chore(release): v0.1.1"
    git tag v0.1.1   # 触发 Release 工作流出安装包
+   git push origin master && git push origin v0.1.1
    ```
+   注意：`git push --follow-tags` **不会**推轻量 tag（本仓库的 tag 都是轻量的），
+   必须显式 `git push origin <tag>`，否则 Release 工作流不会触发。
 4. 发版前门禁：`bun run typecheck`、`bunx vitest run`、`bun run build` 全绿（与 CI 一致；
    CI 另跑 Electron E2E 作业，桌面壳的改动必须等它绿）。
