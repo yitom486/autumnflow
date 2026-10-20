@@ -41,7 +41,9 @@ async function visibleConsoleWindows(): Promise<string[]> {
 }
 
 for (const gateway of ["bun", "node"]) test(`actual ${gateway} development launcher shows its window and releases ports on restart`, async ({}, info) => {
-  test.setTimeout(120000);
+  // A cold Vite dependency pre-bundle takes ~45s on this graph, so the
+  // launcher's own budget (120s) has to fit inside the test's.
+  test.setTimeout(240000);
   test.skip(process.platform !== "win32", "Checks the Windows GUI launch flags and visible native window");
   test.skip(!!process.env.CI, "Needs an interactive Windows desktop to assert on visible native windows");
   const root = fileURLToPath(new URL("../", import.meta.url));
@@ -65,8 +67,8 @@ for (const gateway of ["bun", "node"]) test(`actual ${gateway} development launc
       launcher.stderr.on("data", data => { logs += data.toString(); });
       try {
         // A cold Vite start on a loaded machine can take a while; the test's
-        // own budget is 120s, so wait long enough before declaring failure.
-        await expect.poll(() => logs.includes("窗口已显示 (visible=true)"), { timeout: 90_000 }).toBe(true);
+        // own budget is 240s, so wait long enough before declaring failure.
+        await expect.poll(() => logs.includes("窗口已显示 (visible=true)"), { timeout: 150_000 }).toBe(true);
         const pid = Number(/Electron 已启动 \(PID (\d+)\)/.exec(logs)?.[1]);
         expect(pid).toBeGreaterThan(0);
         const inspect = async () => {
