@@ -43,6 +43,7 @@ async function visibleConsoleWindows(): Promise<string[]> {
 for (const gateway of ["bun", "node"]) test(`actual ${gateway} development launcher shows its window and releases ports on restart`, async ({}, info) => {
   test.setTimeout(120000);
   test.skip(process.platform !== "win32", "Checks the Windows GUI launch flags and visible native window");
+  test.skip(!!process.env.CI, "Needs an interactive Windows desktop to assert on visible native windows");
   const root = fileURLToPath(new URL("../", import.meta.url));
   const state = fs.mkdtempSync(path.join(os.tmpdir(), "acp-visible-window-"));
   const env = { ...process.env, ACP_GATEWAY: gateway,
@@ -63,7 +64,9 @@ for (const gateway of ["bun", "node"]) test(`actual ${gateway} development launc
       launcher.stdout.on("data", data => { logs += data.toString(); });
       launcher.stderr.on("data", data => { logs += data.toString(); });
       try {
-        await expect.poll(() => logs.includes("窗口已显示 (visible=true)"), { timeout: 30000 }).toBe(true);
+        // A cold Vite start on a loaded machine can take a while; the test's
+        // own budget is 120s, so wait long enough before declaring failure.
+        await expect.poll(() => logs.includes("窗口已显示 (visible=true)"), { timeout: 90_000 }).toBe(true);
         const pid = Number(/Electron 已启动 \(PID (\d+)\)/.exec(logs)?.[1]);
         expect(pid).toBeGreaterThan(0);
         const inspect = async () => {
@@ -94,6 +97,12 @@ for (const gateway of ["bun", "node"]) test(`actual ${gateway} development launc
   } finally {
     const target = path.resolve(state);
     if (path.dirname(target) !== path.resolve(os.tmpdir()) || !path.basename(target).startsWith("acp-visible-window-")) throw new Error("Unexpected fixture directory");
-    fs.rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+    // A leftover child process can still hold a Windows handle on the folder;
+    // cleanup must not replace the real assertion error with an EPERM.
+    try {
+      fs.rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+    } catch (err) {
+      console.warn(`[e2e] temp dir cleanup skipped: ${(err as Error).message}`);
+    }
   }
 });

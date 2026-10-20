@@ -57,11 +57,11 @@ jobs:
       - name: Install (frozen lockfile)
         run: bun install --frozen-lockfile
 
-      - name: Typecheck
-        run: bunx tsc --noEmit
+      - name: Typecheck (app + server + shared + desktop)
+        run: bun run typecheck
 
-      - name: Unit tests (universal)
-        run: bunx vitest run tests/universal
+      - name: Unit & integration tests
+        run: bunx vitest run
 
       - name: Web build
         run: bun run build

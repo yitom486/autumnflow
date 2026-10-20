@@ -41,6 +41,15 @@ export async function launchElectronApp(options?: {
   const workspace = path.join(tmpDir, "workspace");
   fs.mkdirSync(workspace);
 
+  // The desktop shell keeps running in the tray when the last window closes
+  // with work in flight, so app.close() would never resolve and the temp dir
+  // would stay locked. E2E runs are not interactive: residency is off.
+  fs.writeFileSync(
+    path.join(tmpDir, "background.json"),
+    JSON.stringify({ enabled: false, idleExitMinutes: 0 }),
+    "utf-8"
+  );
+
   const agentFixturePath = path.join(projectRoot, "tests/fixtures/e2e-studio-agent.ts");
   const agentsConfig = [
     {
@@ -83,6 +92,9 @@ export async function launchElectronApp(options?: {
       ACP_DISABLE_UI_PROMPT_HINT: "1",
       ACP_DEFAULT_AGENT_ID: "e2e-agent",
       ACP_DISABLE_UPDATES: "1",
+      // The quit guard is a modal dialog: nothing can answer it in a test, so
+      // a programmatic close would hang until the test times out.
+      ACP_DISABLE_ACTIVE_WORK_GUARD: "1",
       ELECTRON_START_URL: `http://127.0.0.1:${port}/?cwd=${encodeURIComponent(workspace)}`,
       ...options?.env,
       ...(options?.developmentUrl ? {
@@ -95,7 +107,13 @@ export async function launchElectronApp(options?: {
     try { await app.close(); } finally {
       const target = path.resolve(tmpDir);
       if (path.dirname(target) === path.resolve(os.tmpdir()) && path.basename(target).startsWith("autumnflow-e2e-")) {
-        fs.rmSync(target, { recursive: true, force: true, maxRetries: 3, retryDelay: 200 });
+        // Cleanup must never mask the real failure: a still-locked directory
+        // (Windows keeps handles for a moment) is reported, not thrown.
+        try {
+          fs.rmSync(target, { recursive: true, force: true, maxRetries: 5, retryDelay: 300 });
+        } catch (err) {
+          console.warn(`[e2e] temp dir cleanup skipped: ${(err as Error).message}`);
+        }
       }
     }
   };

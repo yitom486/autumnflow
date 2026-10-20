@@ -212,6 +212,13 @@ async function inspectActiveWork(): Promise<ActiveWorkSnapshot | null> {
 }
 
 async function confirmActiveWork(action: "quit" | "install"): Promise<boolean> {
+  // Automation (E2E, scripted restarts) cannot answer the modal, and a
+  // blocking message box would trap the quit forever. The guard is skipped
+  // only when the caller opted out explicitly.
+  if (process.env.ACP_DISABLE_ACTIVE_WORK_GUARD === "1") {
+    activeWorkConfirmed = true;
+    return true;
+  }
   const work = await inspectActiveWork();
   if (!work) {
     if (action === "install") {

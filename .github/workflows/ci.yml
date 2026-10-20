@@ -18,14 +18,11 @@ jobs:
       - name: Install (frozen lockfile)
         run: bun install --frozen-lockfile
 
-      - name: Typecheck
-        run: bunx tsc --noEmit
+      - name: Typecheck (app + server + shared + desktop)
+        run: bun run typecheck
 
-      # NOTE: tests/integration legacy suites depend on a live agy binary
-      # flow and fail without it (pre-existing); the universal suite is
-      # the green gate for the gateway + studio.
-      - name: Unit tests (universal)
-        run: bunx vitest run tests/universal
+      - name: Unit & integration tests
+        run: bunx vitest run
 
       - name: Web build
         run: bun run build
@@ -35,3 +32,25 @@ jobs:
 
       - name: Desktop runtime staging check
         run: bun run stage:desktop
+
+  e2e:
+    # The Electron shell has no other coverage: the universal suite exercises
+    # the gateway in-process. This job is the only place the packaged shell,
+    # the tray/background policy and the real HTTP surface are exercised.
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: latest
+
+      - name: Install (frozen lockfile)
+        run: bun install --frozen-lockfile
+
+      - name: Electron E2E
+        run: bun run test:e2e
+        env:
+          # The dev-window spec needs an interactive Windows desktop to assert
+          # on visible native windows; it is skipped on CI by the spec itself.
+          CI: "true"

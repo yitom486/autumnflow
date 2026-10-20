@@ -31,5 +31,5 @@
    git commit -m "chore(release): v0.1.1"
    git tag v0.1.1   # 触发 Release 工作流出安装包
    ```
-4. 发版前门禁：`bunx tsc --noEmit`、`bunx vitest run tests/universal`、
-   `bun run build` 全绿（与 CI 一致）。
+4. 发版前门禁：`bun run typecheck`、`bunx vitest run`、`bun run build` 全绿（与 CI 一致；
+   CI 另跑 Electron E2E 作业，桌面壳的改动必须等它绿）。

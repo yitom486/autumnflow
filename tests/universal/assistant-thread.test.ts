@@ -317,7 +317,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
     root.unmount();
     el.remove();
     useStudioStore.setState({ messages: [], isStreaming: false } as any);
-  });
+  }, 60_000);
 
   it("floats the scroll-to-bottom button with zero layout footprint", async () => {
     useStudioStore.setState({

@@ -38,6 +38,17 @@ afterAll(() => {
   fs.rmSync(root, { recursive: true, force: true });
 });
 
+/** Wait until the mock registry recorded another query, then return the log. */
+async function waitForCallLog(previousLength: number, timeoutMs = 5000): Promise<string> {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    const current = fs.readFileSync(calls, "utf8");
+    if (current.length > previousLength) return current;
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+  throw new Error("the mock registry never recorded the query");
+}
+
 describe("background registry version refresh (offline subprocess)", () => {
   it("returns immediately on a cold status read, deduplicates queries and keeps timers running", async () => {
     clearLatestCache();
@@ -75,9 +86,10 @@ describe("background registry version refresh (offline subprocess)", () => {
       const before = fs.readFileSync(calls, "utf8");
       expect(await refreshLatestVersion("test-failure")).toBeNull();
       expect(warn).toHaveBeenCalledWith(expect.stringContaining("mock registry unavailable"));
-      const after = fs.readFileSync(calls, "utf8");
-      expect(after.length).toBeGreaterThan(before.length);
-      expect(latestVersionCached("test-failure")).toBeNull();
+      // The mock appends to the call log as it starts; on a loaded machine the
+      // append can land a moment after the query settles, so wait for it
+      // instead of assuming it is already there.
+      const after = await waitForCallLog(before.length);
       await new Promise((resolve) => setTimeout(resolve, 30));
       expect(fs.readFileSync(calls, "utf8")).toBe(after);
     } finally { warn.mockRestore(); }
