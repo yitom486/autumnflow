@@ -10,10 +10,14 @@
 ## [Unreleased]
 
 ### Added
+<!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
+
+## [0.1.15] - 2026-10-20
+
+### Added
 - 新增「排队」：智能体还在生成时按 Enter 发送的消息不再被丢弃（此前会静默吞掉，界面却在提示"发送将排队"）。排队消息显示在输入框上方，可随时撤回；当前这一轮结束后按顺序自动发送。
 - 新增「插队」：生成中输入框提供插队按钮，中断当前生成并立即发送新消息，之前排队的消息保持原位、随后继续。
 - 新增权限与提问的独立弹窗（`InteractionPanel`）：这两类请求会阻塞当前这一轮，因此不再藏在工具列表里，而是单独弹出并明确提示"智能体正在等待你的选择"。弹窗是非模态的——输入框仍然可用，直接发一条新消息就等于拒绝当前请求并继续。
-
 ### Fixed
 - 修复生成中按 Enter 发送的消息被完全丢弃的问题：发送库在有消息在途时会把 `send()` 变成空操作，提示词根本没进到应用层。现在生成中（或发送尚未落定）的提示词会进入队列，界面提示与实际行为一致。
 - 修复用户停止生成后待确认的权限卡/提问仍然挂着的问题：停止会一并拒绝这些请求，卡片立即作废，智能体不再空等。
@@ -22,14 +26,11 @@
 - 修复 resume 一失败就把线程标记为失效的问题：Agent 还在启动或连接抖动时 resume 会失败，但会话其实还在。现在只有 Agent 明确说这个会话不存在（`Invalid params` / `unknown session`）才会把线程标记为失效；瞬时失败不再把线程变成只读历史——失效线程解析不出任何会话，下一条消息会被静默丢弃。
 - 修复发送失败时用户输入的提示词凭空消失的问题：提示词在发送开始时就会从输入框清空，如果这一轮没能开始（会话解析失败或被中止），现在会把它放回输入框；普通失败仍然保留在对话里并附上错误说明。
 - 修复 Electron E2E 在 CI runner 上失败的问题：渲染最重的 sequence / flowchart 图表在较慢的 runner 上超出 20 秒的等待预算（本地整条用例约 6.7 秒）。等待预算与单用例预算同步放宽到能覆盖慢机器。
-
 ### Changed
 - CI 的 E2E 作业现在上传 Playwright 报告与 trace 产物：此前失败时只有一句「哪个 locator 超时」，无法定位。
 - Electron E2E 的图表用例先等用户自己的消息出现、再等图表：失败时能区分「发送失败」和「图表没渲染」。
 - 消息与会话由智能体负责：重启后应用会重新挂接智能体会话并回放它自己的历史，本地线程缓存只用于首帧快速显示，不再充当事实源。
-
 ### Added
-<!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 
 ## [0.1.14] - 2026-10-20
 
@@ -389,7 +390,7 @@
   本轮横切另含安全加固、agent 异步按需安装、SSE 发送互斥、前端懒加载拆分，
   细节见各专项条目（此处仅汇总，不编造版本号）。
 
-[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.14...HEAD
+[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.15...HEAD
 [0.1.0]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.0
 [0.1.1]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.1
 [0.1.2]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.2
@@ -405,3 +406,4 @@
 [0.1.12]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.12
 [0.1.13]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.13
 [0.1.14]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.14
+[0.1.15]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.15
