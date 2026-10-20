@@ -102,6 +102,11 @@ export function useSessionLifecycle({
         // delete it from the agent so abandoned zero-message sessions don't clutter the sidebar.
         const prevSid = st.sessionId;
         const prevHasUserMsg = st.messages.some((m) => m.role === "user");
+        // Whether the view had content has to be judged when the session is
+        // REQUESTED. Judging it when the response arrives would let a message
+        // that the user sent while session/new was in flight switch the thread
+        // and disappear from the chat.
+        const prevHadMessages = st.messages.length > 0;
         if (prevSid && !prevHasUserMsg) {
           void sessionRpc(agentId, "delete", { sessionId: prevSid }).catch(() => {});
         }
@@ -128,7 +133,7 @@ export function useSessionLifecycle({
 
         // Strict isolation: if starting a new session and previous view had messages or was forced,
         // create a brand-new thread so previous session's history NEVER leaks into the new session!
-        if (prevHasUserMsg || force || st.messages.length > 0) {
+        if (prevHasUserMsg || force || prevHadMessages) {
           newThread(agentId, reqCwd);
         }
 
@@ -235,10 +240,15 @@ export function useSessionLifecycle({
         if (useStudioStore.getState().activeAgentId !== agentId) return { resumed: false };
         return { resumed: true, result };
       } catch (err) {
-        // Visible degrade: mark stale, but PRESERVE the thread's binding and messages
-        // as a read-only historical record. Never hijack it with a fake new session!
         console.warn(`[App] resume 会话失败 (${agentId}/${sid.slice(0, 8)}…):`, err);
         if (useStudioStore.getState().activeAgentId !== agentId) return { resumed: false };
+        // Only a session the agent no longer knows is really gone. A transient
+        // failure (the agent is still starting, the connection dropped) must not
+        // retire the thread: a stale thread resolves to no session at all, so
+        // the next message would be dropped without a trace.
+        if (!isSessionGoneError(err)) return { resumed: false };
+        // Visible degrade: mark stale, but PRESERVE the thread's binding and messages
+        // as a read-only historical record. Never hijack it with a fake new session!
         markThreadStale();
         const sidPrefix = sid.slice(0, 8);
         const alreadyNotified =

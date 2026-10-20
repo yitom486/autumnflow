@@ -48,6 +48,9 @@ test.describe("Diagram components through real Electron, ACP and MCP", () => {
     await expect(composer).toBeVisible({ timeout: 15000 });
     await composer.fill(value);
     await composer.press("Enter");
+    // The user's own message is the first signal. If it never lands, the send
+    // itself failed, which is a different problem than a missing diagram.
+    await expect(launched.page.getByText(value, { exact: true })).toBeVisible({ timeout: 20000 });
   }
 
   async function assertSvg(svg: Locator, labels: readonly string[]) {

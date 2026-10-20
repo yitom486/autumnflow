@@ -747,6 +747,10 @@ export function useChatSend({
         disposeBatching();
         sendingRef.current = false;
         const c2 = useStudioStore.getState();
+        // The prompt leaves the composer as soon as the send starts. If the
+        // turn never began (the session could not be resolved, the request was
+        // aborted), give it back instead of dropping what the user typed.
+        if (!turnStarted && !c2.input) c2.setInput(prompt);
         if (c2.activeTurn?.turnId === turnId && c2.activeTurn.status === "running") {
           c2.patchActiveTurn({
             status: abortRef.current?.signal.aborted ? "interrupted" : "error",

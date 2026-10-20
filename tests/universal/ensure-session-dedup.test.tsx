@@ -133,4 +133,68 @@ describe("ensureSession in-flight dedup", () => {
       await act(async () => root.unmount());
     }
   });
+
+  it("keeps a message that arrives while the session is being created", async () => {
+    // The user can send before session/new answers. Judging "the view had
+    // messages" when the response arrives would switch the thread and drop
+    // that message from the chat.
+    let release!: (value: unknown) => void;
+    sessionNew.mockReturnValue(new Promise((resolve) => { release = resolve; }));
+    const { api, root } = await renderLifecycle();
+    try {
+      const pending = api.ensureSession("e2e-agent");
+      useStudioStore.getState().appendMessage({
+        id: "user-1", role: "user", content: "E2E_DIAGRAM:architecture", timestamp: "t",
+      } as any);
+      release({ sessionId: "sess-1" });
+      await pending;
+
+      const store = useStudioStore.getState();
+      expect(store.messages.map((m) => m.content)).toContain("E2E_DIAGRAM:architecture");
+      expect(store.sessionId).toBe("sess-1");
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  it("keeps the thread alive when a resume fails for a transient reason", async () => {
+    // A dead session retires the thread, but a session the agent has not
+    // finished loading must not: a retired thread resolves to no session at
+    // all, so the next message would be dropped without a trace.
+    useStudioStore.setState({
+      activeAgentId: "e2e-agent",
+      sessionId: "sess-1",
+      threads: {
+        t1: { id: "t1", agentId: "e2e-agent", sessionId: "sess-1", messages: [], updatedAt: Date.now() },
+      },
+      activeThreadId: "t1",
+    } as any);
+    sessionRpc.mockRejectedValue(Object.assign(new Error("Agent e2e-agent is not connected"), { status: 503 }));
+    const { api, root } = await renderLifecycle();
+    try {
+      await api.resolveSession("e2e-agent");
+      expect(useStudioStore.getState().threads.t1?.stale).toBeFalsy();
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
+
+  it("retires the thread when the agent says the session is gone", async () => {
+    useStudioStore.setState({
+      activeAgentId: "e2e-agent",
+      sessionId: "sess-1",
+      threads: {
+        t1: { id: "t1", agentId: "e2e-agent", sessionId: "sess-1", messages: [], updatedAt: Date.now() },
+      },
+      activeThreadId: "t1",
+    } as any);
+    sessionRpc.mockRejectedValue(new Error("Invalid params: unknown session"));
+    const { api, root } = await renderLifecycle();
+    try {
+      await api.resolveSession("e2e-agent");
+      expect(useStudioStore.getState().threads.t1?.stale).toBe(true);
+    } finally {
+      await act(async () => root.unmount());
+    }
+  });
 });

@@ -138,6 +138,40 @@ describe("send retry policy", () => {
     expect(texts).toEqual(["直连"]);
   });
 
+  it("keeps the prompt in the chat when the session cannot be resolved", async () => {
+    // The composer is cleared as soon as the send begins. A failure must
+    // leave the typed text visible in the conversation, not drop it.
+    const { root, el, send } = await renderHarness({
+      calls: [],
+      resolveSession: async () => null,
+    });
+    try {
+      await act(async () => { await send("别把我弄丢了"); });
+      const state = useStudioStore.getState();
+      const user = state.messages.find((m) => m.role === "user");
+      expect(user?.content).toBe("别把我弄丢了");
+      const asst = state.messages.find((m) => m.role === "assistant");
+      expect(asst?.content).toContain("连接异常");
+    } finally { root.unmount(); el.remove(); }
+  });
+
+  it("gives the prompt back when the turn was aborted before it started", async () => {
+    // An aborted send never appends the message, so the composer has to get
+    // the text back — otherwise the user loses what they typed with no trace.
+    const { root, el, send } = await renderHarness({
+      calls: [],
+      resolveSession: async () => {
+        throw Object.assign(new Error("aborted"), { name: "AbortError" });
+      },
+    });
+    try {
+      await act(async () => { await send("别把我弄丢了"); });
+      const state = useStudioStore.getState();
+      expect(state.input).toBe("别把我弄丢了");
+      expect(state.messages.some((m) => m.role === "user")).toBe(false);
+    } finally { root.unmount(); el.remove(); }
+  });
+
   it("control: happy path through handleSend lands text with no retry", async () => {
     const { root, el, send } = await renderHarness({
       calls: [],
