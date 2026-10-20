@@ -1,5 +1,5 @@
 // @vitest-environment node
-import { mkdtemp, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, readFile, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -49,13 +49,51 @@ describe("provisionCodexCodeModeHome", () => {
     expect(await readFile(join(source, "config.toml"), "utf8")).not.toContain("code_mode");
   });
 
-  it("keeps the app copy on later runs", async () => {
+  it("refreshes the app copy when the user's login is newer", async () => {
     const source = await mkdtemp(join(tmpdir(), "codex-src-"));
     const target = await mkdtemp(join(tmpdir(), "codex-dst-"));
     await writeFile(join(source, "auth.json"), '{"token":"old"}');
-    await writeFile(join(source, "config.toml"), "[features]\ncode_mode = true\n");
     await writeFile(join(target, "auth.json"), '{"token":"app"}');
+    // The user logged in again after the app copied the file.
+    const older = new Date(Date.now() - 60_000);
+    const newer = new Date();
+    await utimes(join(target, "auth.json"), older, older);
+    await utimes(join(source, "auth.json"), newer, newer);
+
+    const result = await provisionCodexCodeModeHome({ home: target, sourceHome: source });
+    expect(result.authCopied).toBe(true);
+    expect(await readFile(join(target, "auth.json"), "utf8")).toBe('{"token":"old"}');
+  });
+
+  it("keeps a login made inside the app-owned home", async () => {
+    const source = await mkdtemp(join(tmpdir(), "codex-src-"));
+    const target = await mkdtemp(join(tmpdir(), "codex-dst-"));
+    await writeFile(join(source, "auth.json"), '{"token":"user"}');
+    await writeFile(join(target, "auth.json"), '{"token":"app"}');
+    // The app's own copy is the newer one: it must survive.
+    const older = new Date(Date.now() - 60_000);
+    const newer = new Date();
+    await utimes(join(source, "auth.json"), older, older);
+    await utimes(join(target, "auth.json"), newer, newer);
+
+    const result = await provisionCodexCodeModeHome({ home: target, sourceHome: source });
+    expect(result.authCopied).toBe(false);
+    expect(await readFile(join(target, "auth.json"), "utf8")).toBe('{"token":"app"}');
+  });
+
+  it("keeps the app copy when the user's file is not newer", async () => {
+    const source = await mkdtemp(join(tmpdir(), "codex-src-"));
+    const target = await mkdtemp(join(tmpdir(), "codex-dst-"));
+    await writeFile(join(source, "auth.json"), '{"token":"old"}');
+    await writeFile(join(target, "auth.json"), '{"token":"app"}');
+    await writeFile(join(source, "config.toml"), "[features]\ncode_mode = true\n");
     await writeFile(join(target, "config.toml"), "[features]\ncode_mode = false\n");
+    const older = new Date(Date.now() - 60_000);
+    const newer = new Date();
+    await utimes(join(source, "auth.json"), older, older);
+    await utimes(join(target, "auth.json"), newer, newer);
+    await utimes(join(source, "config.toml"), older, older);
+    await utimes(join(target, "config.toml"), newer, newer);
 
     const result = await provisionCodexCodeModeHome({ home: target, sourceHome: source });
     expect(result.authCopied).toBe(false);

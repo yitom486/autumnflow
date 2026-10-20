@@ -11,6 +11,7 @@ import { universalRegistry } from "../registry";
 import { anyBody, gatewayError, json, jsonBody, optStr } from "./shared";
 import { probeLiveAgyQuota } from "../runtimes/agy-quota";
 import { readDeepseekCredentialState, saveDeepseekApiKey } from "../runtimes/deepseek-credentials";
+import { isCodexProfile, provisionCodexCodeModeHome } from "../codex-code-mode-home";
 import { turnRegistry } from "../turn-registry";
 import { studioSessions } from "../session-index";
 
@@ -159,6 +160,41 @@ agentsRouter.post("/:agentId/reconnect", async (c) => {
     await conn.disconnect().catch((err: Error) => console.debug(`[agents] reconnect disconnect failed ${agentId}:`, err));
     await conn.connect();
     return json({ ok: true, status: conn.status() });
+  } catch (err) {
+    return json({ ok: false, error: (err as Error).message }, 500);
+  }
+});
+
+/**
+ * 把本机的登录态重新同步给应用，然后重连。
+ *
+ * Codex 跑在应用独占的 CODEX_HOME 上；用户在 Codex CLI 里重新登录后，应用
+ * 里的那份副本可能还是旧的。刷新会按 mtime 重新复制本机的 auth.json /
+ * config.toml，再重连让 Agent 用上新登录态。
+ */
+agentsRouter.post("/:agentId/refresh-login", async (c) => {
+  const agentId = c.req.param("agentId");
+  const profile = universalRegistry.listProfiles().find((item) => item.id === agentId);
+  if (!profile) return json({ ok: false, error: `未知智能体 ${agentId}` }, 404);
+  if (!isCodexProfile(profile)) {
+    return json({ ok: false, error: "该智能体直接复用本机登录态，无需刷新" }, 400);
+  }
+  try {
+    const running = turnRegistry.listRunning().filter((turn) => turn.agentId === agentId);
+    if (running.length > 0) {
+      return json({ ok: false, error: `该智能体还有 ${running.length} 个运行中的对话，结束或取消后再刷新` }, 409);
+    }
+    const home = await provisionCodexCodeModeHome();
+    for (const warning of home.warnings) console.warn(`[agents] codex home: ${warning}`);
+    const conn = universalRegistry.connFor(agentId);
+    await conn.disconnect().catch((err: Error) => console.debug(`[agents] refresh-login disconnect failed ${agentId}:`, err));
+    await conn.connect();
+    return json({
+      ok: true,
+      status: conn.status(),
+      refreshed: { auth: home.authCopied, config: home.configCopied },
+      home: home.home,
+    });
   } catch (err) {
     return json({ ok: false, error: (err as Error).message }, 500);
   }

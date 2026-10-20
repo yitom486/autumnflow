@@ -990,6 +990,18 @@ export async function reconnectAgent(agentId: string) {
   return data.status;
 }
 
+/**
+ * Re-copy the machine's own login into the app-owned home and reconnect.
+ * Codex runs against an app-owned CODEX_HOME, so a login the user refreshed in
+ * their own Codex CLI has to be pulled in before the agent can use it.
+ */
+export async function refreshAgentLogin(agentId: string): Promise<{ refreshed: { auth: boolean; config: boolean } }> {
+  const res = await apiFetch(`/api/universal/agents/${encodeURIComponent(agentId)}/refresh-login`, { method: "POST" });
+  const data = await res.json();
+  if (!data.ok) throwGatewayError(data, "refresh login failed", res.status);
+  return { refreshed: data.refreshed ?? { auth: false, config: false } };
+}
+
 export interface EmptyCleanupResult {
   deleted: string[];
   kept: number;
@@ -1152,6 +1164,58 @@ export async function fetchPendingElicitations(agentId: string, signal?: AbortSi
   const data = await res.json();
   if (!res.ok || !data.ok) throw new Error(data.error || "无法读取待处理的提问");
   return data.pending;
+}
+
+export interface CapabilityTool {
+  name: string;
+  title: string;
+  summary: string;
+  enabled: boolean;
+}
+
+export interface CapabilitySkill {
+  name: string;
+  title: string;
+  description: string;
+  enabled: boolean;
+}
+
+export interface CapabilitiesSnapshot {
+  mcp: {
+    server: { name: string; url: string; port: number; running: boolean } | null;
+    agentSupports: { http: boolean; stdio: boolean };
+    tools: CapabilityTool[];
+  };
+  skills: CapabilitySkill[];
+}
+
+/** What the agent can reach right now: MCP server, its tools and the skills. */
+export async function fetchCapabilities(agentId?: string, signal?: AbortSignal): Promise<CapabilitiesSnapshot> {
+  const query = agentId ? `?agentId=${encodeURIComponent(agentId)}` : "";
+  const res = await apiFetch(`/api/universal/capabilities${query}`, { signal });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || "无法读取 MCP 与技能状态");
+  return { mcp: data.mcp, skills: data.skills ?? [] };
+}
+
+export async function setCapabilityTool(name: string, enabled: boolean): Promise<void> {
+  const res = await apiFetch("/api/universal/capabilities/tool", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, enabled }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || "切换工具失败");
+}
+
+export async function setCapabilitySkill(name: string, enabled: boolean): Promise<void> {
+  const res = await apiFetch("/api/universal/capabilities/skill", {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ name, enabled }),
+  });
+  const data = await res.json();
+  if (!res.ok || !data.ok) throw new Error(data.error || "切换技能失败");
 }
 
 export async function fetchTerminalOutput(agentId: string, request: acp.TerminalOutputRequest): Promise<acp.TerminalOutputResponse> {

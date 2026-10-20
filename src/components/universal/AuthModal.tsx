@@ -1,9 +1,9 @@
 import React, { useEffect, useState } from "react";
-import { X, ShieldCheck, LogOut, RefreshCw } from "lucide-react";
+import { X, ShieldCheck, LogOut, RefreshCw, HardDriveDownload } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import type { AgentSummary } from "@/lib/universal-api";
-import { authenticateAgent } from "@/lib/universal-api";
+import { authenticateAgent, refreshAgentLogin } from "@/lib/universal-api";
 import { useStudioStore } from "@/stores/useStudioStore";
 import { AcpAuthTerminal } from "./AcpAuthTerminal";
 import { ElicitationCard, type ElicitationCardProps } from "./ElicitationCard";
@@ -25,12 +25,33 @@ export const UniversalAuthModal: React.FC<UniversalAuthModalProps> = ({ isOpen, 
   const pending = useStudioStore(state => state.pendingElic);
   const respondingId = useStudioStore(state => state.respondingId);
   const [busy, setBusy] = useState(false);
+  const [refreshing, setRefreshing] = useState(false);
   const [msg, setMsg] = useState<string | null>(null);
   useEffect(() => { if (!isOpen) setTerminal(null); }, [isOpen]);
 
   if (!isOpen) return null;
   const methods = agent?.status?.authMethods || [];
   const activeMethod = methodId || methods[0]?.id || "";
+  // Codex runs against an app-owned CODEX_HOME, so it is the one agent whose
+  // local login can be out of date: the user may have signed in again in
+  // their own Codex CLI.
+  const canRefreshLocalLogin = agent?.id === "codex" || /codex-acp/i.test(agent?.command || "");
+
+  const refreshLocalLogin = async () => {
+    if (!agent) return;
+    setRefreshing(true);
+    setMsg(null);
+    try {
+      const { refreshed } = await refreshAgentLogin(agent.id);
+      const what = [refreshed.auth && "登录态", refreshed.config && "配置"].filter(Boolean).join("与");
+      setMsg(what ? `已从本机同步${what}并重连，可以开始会话。` : "本机登录态已是最新，已重连。");
+      onAuthenticated();
+    } catch (e: any) {
+      setMsg("同步本机登录态失败: " + e.message);
+    } finally {
+      setRefreshing(false);
+    }
+  };
 
   const runAuth = async () => {
     if (!agent || !activeMethod) {
@@ -80,6 +101,17 @@ export const UniversalAuthModal: React.FC<UniversalAuthModalProps> = ({ isOpen, 
         {authOk === false && (
           <div className="p-3 rounded-xl bg-warning/30 border border-warning/30 text-xs text-warning">
             本地暂无可用登录态（探测 session/list 返回需认证），请在下方选择一种方式完成 authenticate。
+          </div>
+        )}
+        {canRefreshLocalLogin && (
+          <div className="p-3 rounded-xl border border-border bg-background text-xs space-y-2">
+            <p className="text-muted-foreground">
+              Codex 跑在应用独占的 <code className="font-mono">CODEX_HOME</code> 上。如果你刚在本机 Codex 里登录过，
+              这里可以把本机的登录态同步进来并重连。
+            </p>
+            <Button size="sm" variant="outline" onClick={refreshLocalLogin} disabled={refreshing || busy} className="text-xs gap-1.5">
+              <HardDriveDownload className="w-3.5 h-3.5" /> {refreshing ? "同步中…" : "同步本机登录态并重连"}
+            </Button>
           </div>
         )}
 
