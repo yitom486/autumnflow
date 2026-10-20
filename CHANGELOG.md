@@ -9,6 +9,11 @@
 
 ## [Unreleased]
 
+### Added
+<!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
+
+## [0.1.14] - 2026-10-20
+
 ### Fixed
 - 修复 `bun run dev:desktop` 在依赖变更后彻底起不来的问题：Vite 报告 ready 后仍会在后台预打包依赖，期间不响应请求，而启动器只等 15 秒就放弃并杀掉 Vite —— 预打包被打断、缓存永远写不出来，于是每次启动都超时。实测一次完整预打包约 45 秒（470 个依赖条目）。现在等待预算覆盖一次冷预打包，等待期间给出进度提示，超时信息也说明原因。
 - 修复 Codex 明明已在本地登录、界面却提示「本地暂无可用登录态」的问题：应用独占的 `CODEX_HOME` 之前只在副本缺失时从 `~/.codex` 复制一次登录态，用户之后在 Codex 里重新登录（或令牌刷新）就不会同步到副本，Codex 一直拿着过期令牌。现在源文件更新时按 mtime 原子刷新副本；应用内自己登录产生的副本更新则不会被旧的用户文件覆盖。用户的 `~/.codex` 依旧只读。
@@ -19,6 +24,9 @@
 - 修复结束响应的本轮累计 tokens 覆盖上下文占用的问题：独立保存 usage_update 的窗口/会话费用与 prompt 响应的累计用量，普通发送和断线恢复采用相同逻辑；缺少上下文数据时明确显示未提供。
 - 修复工具调用插入或思考块出现时正文运行时位置变化、导致已输出阶段文本重新播放打字机的问题：按消息与文本块身份保留流式游标，文本不变保持显示，前缀相同仅追加新增后缀。
 - 修复 OpenCode 2 延迟工具目录下 studio-ui 已挂载但模型误报不可用的问题：MCP 握手提供工具发现说明，OpenCode 首轮兼容上下文引导通过 execute/search 查找真实工具签名；不覆盖用户已有配置。
+- 修复导入的外部会话因本地线程为空而从侧栏消失的问题：导入引用指向的是 Agent 侧尚未加载的历史，空线程不能作为隐藏它的依据（此前被更早的断言失败掩盖）。
+- 修复能力面板开关缺少无障碍名称的问题：开关改用 beUI 的 Switch 组件（`ariaLabel` 属性），此前 `aria-label` 会被组件丢弃，屏幕阅读器读不到开关名称。
+- 修复两处发布门禁 flaky：mermaid 图表用例在并行负载下超时、离线 registry 用例在子进程启动稍慢时误判失败；两者都改为等待真实条件而不是假设时序。修复后单测连续三轮全绿。
 
 ### Added
 - 新增「MCP 与技能」面板（智能体菜单 → MCP 与技能）：列出当前内置 MCP 服务、它暴露的 6 个工具与内置技能，显示服务地址、Agent 声明的 MCP 能力（HTTP / stdio）以及每一项的开关状态，并可逐项开关。工具开关立即生效：被关闭的工具会从 MCP 的 `tools/list` 中移除，智能体无法再调用；技能开关对技能目录立即生效，并在智能体下次连接时不再进入它的资源快照。
@@ -29,9 +37,6 @@
 - CI 与 Release 门禁改用 `bun run typecheck`：此前只跑 `tsc --noEmit`，`desktop/` 与 `shared/` 目录从未进入类型检查。单测门禁也从只跑 `tests/universal` 扩到整个 `tests/`（补上 acp-client 集成、代理与桌面策略套件）。CI 新增独立的 Electron E2E 作业（桌面壳此前没有任何流水线覆盖）。
 - 内置 studio-ui 工具的名称、说明与简介收敛到单一来源（`server/universal/studio-tools.ts`），MCP 服务与能力面板共用同一份描述，避免两处漂移。
 - 移除内联审批下线后已无调用方的 `matchPermToToolCalls` 及其断言；所有授权统一由交互坞处理。
-- 修复导入的外部会话因本地线程为空而从侧栏消失的问题：导入引用指向的是 Agent 侧尚未加载的历史，空线程不能作为隐藏它的依据（此前被更早的断言失败掩盖）。
-- 修复能力面板开关缺少无障碍名称的问题：开关改用 beUI 的 Switch 组件（`ariaLabel` 属性），此前 `aria-label` 会被组件丢弃，屏幕阅读器读不到开关名称。
-- 修复两处发布门禁 flaky：mermaid 图表用例在并行负载下超时、离线 registry 用例在子进程启动稍慢时误判失败；两者都改为等待真实条件而不是假设时序。修复后单测连续三轮 783/783 全绿。
 
 ## [0.1.13] - 2026-10-19
 
@@ -365,7 +370,7 @@
   本轮横切另含安全加固、agent 异步按需安装、SSE 发送互斥、前端懒加载拆分，
   细节见各专项条目（此处仅汇总，不编造版本号）。
 
-[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.13...HEAD
+[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.14...HEAD
 [0.1.0]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.0
 [0.1.1]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.1
 [0.1.2]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.2
@@ -380,3 +385,4 @@
 [0.1.11]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.11
 [0.1.12]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.12
 [0.1.13]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.13
+[0.1.14]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.14
