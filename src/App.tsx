@@ -9,8 +9,7 @@ import { StudioHeader } from "@/components/universal/StudioHeader";
 import { StatusBar } from "@/components/universal/StatusBar";
 import { ExternalHistoryDialog } from "@/components/universal/SessionHistoryTools";
 import { Sidebar, type SessionItem } from "@/components/universal/Sidebar";
-import { PermissionDialog } from "@/components/universal/PermissionDialog";
-import { ElicitationCard } from "@/components/universal/ElicitationCard";
+import { InteractionPanel } from "@/components/universal/InteractionPanel";
 import { useElicitationSync } from "@/hooks/useElicitationSync";
 import { Skeleton } from "@/components/ui/skeleton";
 import { TitleBar } from "@/components/universal/TitleBar";
@@ -242,6 +241,8 @@ export default function App() {
     abortRef,
     handleSend,
     handleStop,
+    handleSteer,
+    handleWithdraw,
     handlePermRespond,
     handleElicRespond,
   } = useChatSend({
@@ -476,29 +477,24 @@ export default function App() {
               onGenerativeAction={handleGenerativeAction}
             />
 
-            {/* Human-in-the-Loop Interaction Dock (ApprovalCard for questions & permissions) */}
-            {(s.pendingElic.some(e => !s.authOpen && elicitationInScope(e, s.activeAgentId, s.sessionId)) ||
-              s.pendingPerms.some(p => permissionInScope(p, s.activeAgentId, s.sessionId))) && (
-              <div aria-label="待处理授权与提问" className="px-4 pb-2 z-10 shrink-0 space-y-2 max-h-[340px] overflow-y-auto">
-                {s.pendingElic.filter(e => !s.authOpen && elicitationInScope(e, s.activeAgentId, s.sessionId)).map((e) => (
-                  <ElicitationCard
-                    key={e.elicitationId}
-                    e={e}
-                    onRespond={handleElicRespond}
-                    busy={s.respondingId === e.elicitationId}
-                  />
-                ))}
-                <PermissionDialog
-                  pending={s.pendingPerms.filter(p => permissionInScope(p, s.activeAgentId, s.sessionId))}
-                  onRespond={handlePermRespond}
-                  respondingId={s.respondingId}
-                />
-              </div>
-            )}
+            {/* 权限与提问独立弹窗：它们会阻塞当前这一轮，必须从工具列表里
+                独立出来、明确地弹到台面上。输入框仍然可用。 */}
+            <InteractionPanel
+              permissions={s.pendingPerms.filter(p => permissionInScope(p, s.activeAgentId, s.sessionId))}
+              elicitations={s.pendingElic.filter(e => !s.authOpen && elicitationInScope(e, s.activeAgentId, s.sessionId))}
+              onRespondPermission={handlePermRespond}
+              onRespondElicitation={handleElicRespond}
+              respondingId={s.respondingId}
+            />
 
             <AcpComposer
               onSendAttachmentOnly={() => handleSend("")}
               onStop={handleStop}
+              queuedPrompts={s.queuedPrompts}
+              onWithdraw={handleWithdraw}
+              onQueue={(text) => void handleSend(text)}
+              onSteer={handleSteer}
+              restoredText={s.input}
               onClear={() => !s.isStreaming && s.setMessages([])}
               isStreaming={s.isStreaming}
               commands={s.availableCommands}

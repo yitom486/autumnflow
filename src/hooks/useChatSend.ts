@@ -166,16 +166,63 @@ export function useChatSend({
 }: UseChatSendOptions) {
   const abortRef = useRef<AbortController | null>(null);
   const sendingRef = useRef(false);
+  const handleSendRef = useRef<((text?: string) => Promise<void>) | null>(null);
   const retryMax = retry?.max ?? DEFAULT_RETRY.max;
   const retryDelayMs = retry?.delayMs ?? DEFAULT_RETRY.delayMs;
+
+  /**
+   * Hand the run over to the queue once the current turn is done.
+   *
+   * The queue is the user's explicit intent to keep working, so it drains in
+   * order. A prompt that cannot be sent stays queued for the next round.
+   */
+  const drainQueue = useCallback(async () => {
+    const store = useStudioStore.getState();
+    if (store.isStreaming || store.busy) return;
+    const next = store.queuedPrompts[0];
+    if (!next) return;
+    store.removeQueuedPrompt(next.id);
+    await handleSendRef.current?.(next.text);
+  }, []);
+
+  /**
+   * Refuse every pending approval of this agent.
+   *
+   * The card goes away immediately — the user must not be left staring at a
+   * request the agent has already given up on — and the agent is told
+   * "cancelled" so the turn it blocked can carry on.
+   */
+  const cancelPendingInteractions = useCallback((agentId: string) => {
+    const live = useStudioStore.getState();
+    for (const perm of live.pendingPerms.filter((p) => p.agentId === agentId)) {
+      void respondPermission(perm.agentId, perm.permissionId, { outcome: "cancelled" }).catch(() => {});
+      live.removePermission(perm.permissionId);
+    }
+    for (const elic of live.pendingElic.filter((e) => e.agentId === agentId)) {
+      void respondElicitation(elic.agentId, elic.elicitationId, { action: "cancel" }).catch(() => {});
+      live.removeElicitation(elic.elicitationId);
+    }
+  }, []);
 
   const handleSend = useCallback(
     async (textToSend?: string) => {
       const st = useStudioStore.getState();
-      const prompt = (textToSend ?? st.input).trim();
-      if ((!prompt && st.attachments.length === 0) || st.isStreaming || sendingRef.current) return;
-      sendingRef.current = true;
       const agentId = st.activeAgentId;
+      const prompt = (textToSend ?? st.input).trim();
+      if (!prompt && st.attachments.length === 0) return;
+      // The agent is still working: queue the prompt instead of dropping it.
+      // The user sees it in the composer and can withdraw it. A send that is
+      // still in flight counts as busy too — right after Enter the turn has
+      // not started streaming yet, and the prompt must not vanish there.
+      if (st.isStreaming || sendingRef.current) {
+        if (prompt) useStudioStore.getState().enqueuePrompt(prompt);
+        // A pending approval blocks the turn. Typing a new message is the
+        // third way out: refuse the request so the agent can continue, and
+        // let the queued prompt run afterwards.
+        cancelPendingInteractions(agentId);
+        return;
+      }
+      sendingRef.current = true;
       const blocks: Record<string, unknown>[] = [
         ...st.attachments.map((a) => a.block),
         ...(prompt ? [{ type: "text", text: prompt }] : []),
@@ -249,7 +296,10 @@ export function useChatSend({
         // second can still reattach instead of showing an empty conversation.
         useStudioStore.getState().snapshotThread();
       };
-      abortRef.current = new AbortController();
+      // Keep this turn's controller: a later turn replaces abortRef.current,
+      // and the finally block must judge THIS turn's abort, not the next one's.
+      const controller = new AbortController();
+      abortRef.current = controller;
 
       // Real wall-clock timing (client-observed): tool start = first sighting,
       // tool end = first terminal status; turn end = done/error/abort.
@@ -753,7 +803,7 @@ export function useChatSend({
         if (!turnStarted && !c2.input) c2.setInput(prompt);
         if (c2.activeTurn?.turnId === turnId && c2.activeTurn.status === "running") {
           c2.patchActiveTurn({
-            status: abortRef.current?.signal.aborted ? "interrupted" : "error",
+            status: controller.signal.aborted ? "interrupted" : "error",
             lastSeq: c2.activeTurn.lastSeq,
           });
         }
@@ -770,11 +820,22 @@ export function useChatSend({
             console.error("[App] turn persist failed:", err);
           }
         });
+        // A turn that ended on its own hands the run over to the queue. An
+        // aborted turn (the user stopped it) keeps the queue waiting: the
+        // user decides when the next prompt runs.
+        if (!controller.signal.aborted) void drainQueue();
       }
     },
-    [qc, agentsRef, resolveSession, now]
+    [qc, agentsRef, resolveSession, now, drainQueue, cancelPendingInteractions]
   );
 
+  /**
+   * Stop the current turn.
+   *
+   * A pending approval belongs to the turn being stopped: answering it keeps
+   * the agent from waiting forever, and the card goes away with the turn. The
+   * queue survives — the user decides when the next prompt runs.
+   */
   const handleStop = useCallback(async () => {
     abortRef.current?.abort();
     const st = useStudioStore.getState();
@@ -785,6 +846,8 @@ export function useChatSend({
         // ignore
       }
     }
+    const live = useStudioStore.getState();
+    cancelPendingInteractions(st.activeAgentId);
     const cur = useStudioStore.getState();
     cur.setStreaming(false);
     const t = Date.now();
@@ -805,18 +868,39 @@ export function useChatSend({
     );
   }, []);
 
+  /**
+   * Jump the queue: stop the running turn and send this prompt right away.
+   * The prompts already queued keep their place and run after this one.
+   */
+  const handleSteer = useCallback(
+    async (text: string) => {
+      const prompt = text.trim();
+      if (!prompt) return;
+      await handleStop();
+      await handleSendRef.current?.(prompt);
+    },
+    [handleStop]
+  );
+
+  /** Withdraw a queued prompt before it is sent. */
+  const handleWithdraw = useCallback((id: string) => {
+    useStudioStore.getState().removeQueuedPrompt(id);
+  }, []);
+
   const handlePermRespond = useCallback(
     async (p: PendingPermission, optionId: string | null) => {
       const st = useStudioStore.getState();
       if (st.respondingId || !st.pendingPerms.some(item => item.permissionId === p.permissionId)) return;
       st.setRespondingId(p.permissionId);
+      // The card is invalidated right away: the user must not keep staring at
+      // a request that is already answered.
+      st.removePermission(p.permissionId);
       try {
         await respondPermission(
           p.agentId,
           p.permissionId,
           optionId ? { outcome: "selected", optionId } : { outcome: "cancelled" }
         );
-        useStudioStore.getState().removePermission(p.permissionId);
       } catch (e: any) {
         if (e.status === 404 || e.status === 410) useStudioStore.getState().removePermission(p.permissionId);
         reportRequestError("授权提交失败", e.status === 404 || e.status === 410 ? new Error("授权请求已结束或过期，请重新发起操作。") : e);
@@ -846,10 +930,16 @@ export function useChatSend({
     []
   );
 
+  // The queue drain calls back into handleSend; the ref keeps that from being
+  // a circular dependency between the two callbacks.
+  handleSendRef.current = handleSend;
+
   return {
     abortRef,
     handleSend,
     handleStop,
+    handleSteer,
+    handleWithdraw,
     handlePermRespond,
     handleElicRespond,
   };

@@ -172,6 +172,57 @@ describe("send retry policy", () => {
     } finally { root.unmount(); el.remove(); }
   });
 
+  it("queues a prompt typed while the agent is still working", async () => {
+    const { root, el, send } = await renderHarness({ calls: [], chatBehavior: ["ok"] });
+    try {
+      useStudioStore.getState().setStreaming(true);
+      await act(async () => { await send("排队的这条"); });
+      const queued = useStudioStore.getState().queuedPrompts;
+      expect(queued.map((q) => q.text)).toEqual(["排队的这条"]);
+      // The prompt was not lost: it is neither in the chat nor in the composer.
+      expect(useStudioStore.getState().messages.some((m) => m.role === "user")).toBe(false);
+    } finally { root.unmount(); el.remove(); }
+  });
+
+  it("withdraws a queued prompt", async () => {
+    const { root, el } = await renderHarness({ calls: [], chatBehavior: ["ok"] });
+    try {
+      const store = useStudioStore.getState();
+      const id = store.enqueuePrompt("算了");
+      expect(useStudioStore.getState().queuedPrompts).toHaveLength(1);
+      useStudioStore.getState().removeQueuedPrompt(id);
+      expect(useStudioStore.getState().queuedPrompts).toEqual([]);
+    } finally { root.unmount(); el.remove(); }
+  });
+
+  it("sends the next queued prompt once the turn ends", async () => {
+    const { root, el, send } = await renderHarness({ calls: [], chatBehavior: ["ok", "ok"] });
+    try {
+      useStudioStore.getState().enqueuePrompt("接着做这个");
+      await act(async () => { await send("第一条"); });
+      await act(async () => { await new Promise((r) => setTimeout(r, 120)); });
+      expect((globalThis as any).__chatAttempts).toBe(2);
+      expect(useStudioStore.getState().queuedPrompts).toEqual([]);
+      const prompts = useStudioStore.getState().messages.filter((m) => m.role === "user").map((m) => m.content);
+      expect(prompts).toContain("接着做这个");
+    } finally { root.unmount(); el.remove(); }
+  });
+
+  it("refuses a pending approval when a new message is typed", async () => {
+    // The approval blocks the turn. A new message is the third way out: the
+    // request is refused so the agent can continue, and the message is queued.
+    const { root, el, send } = await renderHarness({ calls: [], chatBehavior: ["ok"] });
+    try {
+      useStudioStore.getState().setStreaming(true);
+      useStudioStore.getState().addPermission({
+        agentId: "codex", sessionId: "s1", permissionId: "perm-1", toolCall: { title: "写文件" }, options: [],
+      } as any);
+      await act(async () => { await send("换个方向"); });
+      expect(useStudioStore.getState().pendingPerms).toEqual([]);
+      expect(useStudioStore.getState().queuedPrompts.map((q) => q.text)).toEqual(["换个方向"]);
+    } finally { root.unmount(); el.remove(); }
+  });
+
   it("control: happy path through handleSend lands text with no retry", async () => {
     const { root, el, send } = await renderHarness({
       calls: [],

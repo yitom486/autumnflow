@@ -34,7 +34,19 @@ export function usePermissionSync() {
         found = pending.length > 0;
         // Live events/responses take precedence over an older in-flight snapshot.
         if (useStudioStore.getState().pendingPerms === before) {
-          useStudioStore.setState(s => ({ pendingPerms: [...s.pendingPerms.filter(p => p.agentId !== agentId), ...pending] }));
+          useStudioStore.setState(s => {
+            const mine = s.pendingPerms.filter(p => p.agentId === agentId);
+            // Only touch the store when the set really changed: replacing the
+            // entries every poll re-created the card mid-interaction.
+            const unchanged =
+              mine.length === pending.length &&
+              mine.every((item, index) => {
+                const next = pending[index];
+                return next && item.permissionId === next.permissionId;
+              });
+            if (unchanged) return s;
+            return { pendingPerms: [...s.pendingPerms.filter(p => p.agentId !== agentId), ...pending] };
+          });
         }
       } catch (err) {
         if (!controller.signal.aborted) console.debug("[ACP] Pending permission refresh failed", err);

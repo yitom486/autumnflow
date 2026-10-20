@@ -37,10 +37,11 @@ test.describe("ACP reverse interactions", () => {
     test(`permission returns ${optionId} to the waiting ACP request`, async () => {
       const { page } = launched;
       await send("E2E_PERMISSION");
-      await expect(page.getByText("【安全授权】执行 [execute] E2E 安全操作", { exact: true })).toBeVisible();
-      await expect(page.locator('[aria-label="待处理授权与提问"]').getByText("【安全授权】执行 [execute] E2E 安全操作", { exact: true })).toBeVisible();
+      // A pending approval blocks the turn, so it pops up as its own dialog.
+      const panel = page.getByRole("dialog", { name: "等待你的选择" });
+      await expect(panel.getByText("【安全授权】执行 [execute] E2E 安全操作", { exact: true })).toBeVisible();
       await expect(page.getByText("ACP_PERMISSION_RESULT", { exact: false })).toHaveCount(0);
-      await page.getByRole("button", { name: label, exact: false }).click();
+      await panel.getByRole("button", { name: label, exact: false }).click();
       await expect(page.getByText("ACP_PERMISSION_RESULT", { exact: false })).toContainText(`"optionId":"${optionId}"`);
       const responses = requests.filter(r => r.path.endsWith("/permission/respond"));
       expect(responses).toHaveLength(1);
@@ -67,13 +68,13 @@ test.describe("ACP reverse interactions", () => {
       else await route.continue();
     });
     await send("E2E_PERMISSION");
-    const dock = page.locator('[aria-label="待处理授权与提问"]');
-    await dock.getByRole("button", { name: "仅允许本次", exact: false }).click();
+    const panel = page.getByRole("dialog", { name: "等待你的选择" });
+    await panel.getByRole("button", { name: "仅允许本次", exact: false }).click();
     await expect(page.getByText("E2E temporary permission failure", { exact: true })).toBeVisible();
-    await expect(dock.getByRole("button", { name: "仅允许本次", exact: false })).toBeEnabled();
+    await expect(panel.getByRole("button", { name: "仅允许本次", exact: false })).toBeEnabled();
     await page.locator("textarea").first().fill("输入框仍可编辑");
     await expect(page.locator("textarea").first()).toHaveValue("输入框仍可编辑");
-    await dock.getByRole("button", { name: "仅允许本次", exact: false }).click();
+    await panel.getByRole("button", { name: "仅允许本次", exact: false }).click();
     await expect(page.getByText("ACP_PERMISSION_RESULT", { exact: false })).toContainText('"optionId":"once"');
     expect(dialogs).toBe(0);
     expect(attempts).toBe(2);
@@ -82,10 +83,10 @@ test.describe("ACP reverse interactions", () => {
   test("expired permission disappears without opening a tool group", async () => {
     const { page } = launched;
     await send("E2E_PERMISSION");
-    const dock = page.locator('[aria-label="待处理授权与提问"]');
-    await expect(dock.getByText("【安全授权】执行 [execute] E2E 安全操作", { exact: true })).toBeVisible();
+    const panel = page.getByRole("dialog", { name: "等待你的选择" });
+    await expect(panel.getByText("【安全授权】执行 [execute] E2E 安全操作", { exact: true })).toBeVisible();
     await expect(page.getByText("ACP_PERMISSION_RESULT", { exact: false })).toContainText('"outcome":"cancelled"');
-    await expect(dock).toHaveCount(0);
+    await expect(panel).toHaveCount(0);
     await page.locator("textarea").first().fill("超时后仍可输入");
     await expect(page.locator("textarea").first()).toHaveValue("超时后仍可输入");
     expect(requests.filter(r => r.path.endsWith("/permission/respond"))).toHaveLength(0);

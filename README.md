@@ -34,7 +34,7 @@ AutumnFlow（秋水）是一个**面向通用 ACP 编码智能体的全能桌面
 - 生成中继续发送会进入队列；支持“插队”；传输类错误自动重试（默认 2 次）（`src/hooks/useChatSend.ts`）
 
 **审批与表单**
-- 智能体请求权限（`session/request_permission`）时弹出审批卡片（`PermissionDialog.tsx`）
+- 智能体请求权限（`session/request_permission`）时弹出独立审批弹窗（`InteractionPanel.tsx`），阻塞当前这一轮
 - 智能体请求结构化输入（`elicitation/create`）时按 JSON Schema 渲染表单（`ElicitationCard.tsx`）
 
 **代码相关**

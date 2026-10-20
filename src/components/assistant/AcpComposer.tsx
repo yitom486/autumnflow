@@ -36,7 +36,7 @@ import { fsList } from "@/lib/fs-api";
 import { matchSlashToken, replaceSlashToken, mergeCommands, filterCommands, type SlashCommand } from "@/lib/slash-commands";
 import { ACP_INSERT_SNIPPET_EVENT, ACP_COMPOSER_DROP_EVENT, formatSnippetPrompt, type CodeSnippetPayload, type ComposerDropPayload } from "@/lib/composer-bridge";
 import { useWorkbenchStore } from "@/stores/useWorkbenchStore";
-import { getWorkspaceEnv } from "@/stores/useStudioStore";
+import { getWorkspaceEnv, type QueuedPrompt } from "@/stores/useStudioStore";
 
 export interface AcpComposerProps {
   onSendAttachmentOnly: () => void;
@@ -61,6 +61,16 @@ export interface AcpComposerProps {
   sessionLoading?: boolean;
   /** 中断当前生成（插队发送用；需等待其落定再发送）。 */
   onStop?: () => Promise<void>;
+  /** Prompts typed while the agent was working; shown so they can be withdrawn. */
+  queuedPrompts?: QueuedPrompt[];
+  /** Withdraw a queued prompt before it is sent. */
+  onWithdraw?: (id: string) => void;
+  /** Queue a prompt typed while the agent is working. */
+  onQueue?: (text: string) => void;
+  /** Interrupt the running turn and send this prompt right away. */
+  onSteer?: (text: string) => Promise<void>;
+  /** Text the app hands back after a failed send (the composer cleared it). */
+  restoredText?: string;
   currentWorkspace?: string | null;
   recentWorkspaces?: Array<{ path: string; name: string; lastOpened: number }>;
   onSelectWorkspace?: (path: string, name?: string) => void;
@@ -255,6 +265,17 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
   };
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    // While the agent is working, assistant-ui's own send() is a no-op
+    // (canSend is false while a message is in flight), so a typed prompt
+    // would never reach the app. Route it to the queue instead.
+    if (p.isStreaming && e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      const text = composerText.trim();
+      if (!text) return;
+      e.preventDefault();
+      p.onQueue?.(text);
+      aui.composer.setText("");
+      return;
+    }
     if (slashOpen && filtered.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -641,6 +662,14 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
   const canSendText = composerText.trim().length > 0;
   const canSendAny = canSendText || p.attachments.length > 0;
 
+  // The composer clears its text on submit. When a send fails the app hands
+  // the prompt back, and it has to land in the composer — not in a field
+  // nobody shows. Only when the composer is empty, so a message the user
+  // typed in the meantime is never overwritten.
+  useEffect(() => {
+    if (p.restoredText && !composerText) aui.composer.setText(p.restoredText);
+  }, [p.restoredText, composerText]);
+
   const handleSendClick = () => {
     if (canSendText) aui.composer.send();
     else if (p.attachments.length > 0) p.onSendAttachmentOnly();
@@ -649,8 +678,9 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
   // 插队发送：中断当前生成，清空跑道后立即发送（排队中的旧消息随后继续）。
   const handleSteer = async () => {
     if (!canSendText) return;
-    await p.onStop?.();
-    aui.composer.send();
+    const text = composerText.trim();
+    await p.onSteer?.(text);
+    aui.composer.setText("");
   };
 
   return (
@@ -696,6 +726,30 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
               ),
             )}
           </div>
+        )}
+
+        {p.queuedPrompts && p.queuedPrompts.length > 0 && (
+          <ul data-testid="composer-queue" className="mb-2 flex flex-col gap-1">
+            {p.queuedPrompts.map((item) => (
+              <li
+                key={item.id}
+                className="flex items-center gap-2 rounded-lg border border-border/70 bg-muted/40 px-2.5 py-1.5 text-[12px] text-foreground"
+              >
+                <Clock className="w-3 h-3 shrink-0 text-muted-foreground" />
+                <span className="min-w-0 flex-1 truncate" title={item.text}>{item.text}</span>
+                <span className="shrink-0 text-[11px] text-muted-foreground">排队中</span>
+                <button
+                  type="button"
+                  onClick={() => p.onWithdraw?.(item.id)}
+                  title="撤回这条排队消息"
+                  aria-label={`撤回排队消息: ${item.text.slice(0, 40)}`}
+                  className="shrink-0 rounded p-0.5 text-muted-foreground hover:text-destructive hover:bg-accent transition-colors"
+                >
+                  <X className="w-3 h-3" />
+                </button>
+              </li>
+            ))}
+          </ul>
         )}
 
         <ComposerPrimitive.Root className="@container">

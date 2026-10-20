@@ -7,7 +7,7 @@
  *
  * 覆盖：用户消息、已完成的一轮（思考 / 计划 / 工具卡 / 用量）、正在流式
  * 输出的一轮（思考中、计划进行中、工具运行中 + 内联授权）、以及一条未挂到
- * 工具卡上的全局授权请求（走 PermissionDialog）。
+ * 工具卡上的全局授权请求（走 InteractionPanel）。
  */
 import type { Message } from "@/lib/message-types";
 import type { PendingPermission } from "@/lib/universal-api";
@@ -195,7 +195,7 @@ export function buildConversationFixture(
       ],
     },
     {
-      // 找不到对应工具卡 → 顶部全局授权卡（PermissionDialog）
+      // 找不到对应工具卡 → 顶部全局授权卡（InteractionPanel）
       permissionId: "perm-global-network",
       agentId: FIXTURE_AGENT_ID,
       sessionId: FIXTURE_SESSION_ID,

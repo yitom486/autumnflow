@@ -206,9 +206,52 @@ export function useSessionLifecycle({
   );
 
   /**
+   * Replace the live view with the agent's own transcript.
+   *
+   * The agent stores the conversation; the app's local thread cache is only
+   * there to paint the first frame. After a re-attach, the agent's replay is
+   * the truth — the cache may be missing turns the agent has since recorded.
+   */
+  const replayAgentTranscript = useCallback(
+    async (agentId: string, sessionId: string, cwd?: string | null) => {
+      try {
+        const { replayed } = await loadSession(agentId, {
+          sessionId,
+          ...(cwd ? { cwd } : {}),
+          mcpServers: useStudioStore.getState().threadMcpServers(agentId) ?? [],
+        });
+        const transcript = buildTranscriptFromReplay(replayed || []);
+        const cur = useStudioStore.getState();
+        if (cur.activeAgentId !== agentId || cur.sessionId !== sessionId) return;
+        if (transcript.messages.length === 0) return;
+        cur.setMessages(
+          transcript.messages.map((m, index) => ({
+            id: `hist-${Date.now()}-${index}`,
+            role: m.role,
+            content: m.content,
+            thought: m.thought,
+            toolCalls: m.toolCalls,
+            images: m.images,
+            contentBlocks: m.contentBlocks,
+            artifacts: m.artifacts,
+            timestamp: now(),
+          }))
+        );
+      } catch (err) {
+        // The replay is a refresh, not a requirement: the cached view stays.
+        console.debug("[App] 回放 agent 历史失败（沿用本地缓存）:", err);
+      }
+    },
+    [now]
+  );
+
+  /**
    * True resume (Inkdown-style layer 2): reattach the remembered ACP session
-   * so model-side context continues. Displayed messages already come from the
-   * persisted thread cache, so no history replay is requested here (avoids duplicate bubbles).
+   * so model-side context continues.
+   *
+   * The agent owns the conversation. The local thread cache only makes the
+   * first paint instant; once the session is re-attached, the agent's own
+   * transcript is replayed and becomes the live view.
    */
   const restoreAgentSession = useCallback(
     async (agentId: string): Promise<{ resumed: boolean; result?: any }> => {
@@ -238,6 +281,7 @@ export function useSessionLifecycle({
         });
         // A late resume must not touch the new agent's view.
         if (useStudioStore.getState().activeAgentId !== agentId) return { resumed: false };
+        await replayAgentTranscript(agentId, sid, thread.cwd || st.currentWorkspace);
         return { resumed: true, result };
       } catch (err) {
         console.warn(`[App] resume 会话失败 (${agentId}/${sid.slice(0, 8)}…):`, err);

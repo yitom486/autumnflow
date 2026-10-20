@@ -64,6 +64,13 @@ export interface AgentPrefs {
   updatedAt: number;
 }
 
+/** A prompt typed while the agent was still working. */
+export interface QueuedPrompt {
+  id: string;
+  text: string;
+  createdAt: number;
+}
+
 interface StudioState {
   // connection (client)
   activeAgentId: string;
@@ -103,6 +110,12 @@ interface StudioState {
   pendingPerms: PendingPermission[];
   pendingElic: PendingElicitation[];
   respondingId: string | null;
+  /**
+   * Prompts typed while the agent is still working. They are shown to the
+   * user (and can be withdrawn) and are sent one by one once the current turn
+   * ends. A prompt is never dropped silently.
+   */
+  queuedPrompts: QueuedPrompt[];
 
   // workspace & desktop tools
   currentWorkspace: string | null;
@@ -150,6 +163,12 @@ interface StudioState {
   setMessages: (m: Message[]) => void;
   appendMessage: (m: Message) => void;
   patchMessage: (id: string, patch: Partial<Message> | ((m: Message) => Message)) => void;
+  /** Queue a prompt typed while the agent is still working. */
+  enqueuePrompt: (text: string) => string;
+  /** Withdraw a queued prompt before it is sent. */
+  removeQueuedPrompt: (id: string) => void;
+  /** Drop every queued prompt (the user stopped the run). */
+  clearQueuedPrompts: () => void;
   setActiveTurn: (turn: ActiveTurn | null) => void;
   patchActiveTurn: (patch: Partial<ActiveTurn>) => void;
   setInput: (v: string) => void;
@@ -219,6 +238,7 @@ const initialThread = {
   sessionInfo: null as any,
   pendingPerms: [] as PendingPermission[],
   pendingElic: [] as PendingElicitation[],
+  queuedPrompts: [] as QueuedPrompt[],
   attachments: [] as Attachment[],
 };
 
@@ -685,6 +705,13 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
   setSessionInfo: (info) => set({ sessionInfo: info }),
   setMessages: (m) => set({ messages: mergeAssistantTurns(m) }),
   appendMessage: (m) => set((s) => ({ messages: mergeAssistantTurns([...s.messages, m]) })),
+  enqueuePrompt: (text) => {
+    const item: QueuedPrompt = { id: `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, text, createdAt: Date.now() };
+    set((s) => ({ queuedPrompts: [...s.queuedPrompts, item] }));
+    return item.id;
+  },
+  removeQueuedPrompt: (id) => set((s) => ({ queuedPrompts: s.queuedPrompts.filter((item) => item.id !== id) })),
+  clearQueuedPrompts: () => set({ queuedPrompts: [] }),
   patchMessage: (id, patch) =>
     set((s) => ({
       messages: s.messages.map((m) => (m.id === id ? (typeof patch === "function" ? patch(m) : { ...m, ...patch }) : m)),
@@ -957,6 +984,9 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       providersOpen: false,
       modelsOpen: false,
       respondingId: null,
+      pendingPerms: [],
+      pendingElic: [],
+      queuedPrompts: [],
       terminalOpen: false,
       terminalPrefill: null,
       terminalCwd: null,
@@ -1010,6 +1040,7 @@ const STUDIO_SHALLOW_SELECTOR = (s: StudioState) => ({
   pendingPerms: s.pendingPerms,
   pendingElic: s.pendingElic,
   respondingId: s.respondingId,
+  queuedPrompts: s.queuedPrompts,
   // workspace & desktop tools
   currentWorkspace: s.currentWorkspace,
   recentWorkspaces: s.recentWorkspaces,
