@@ -892,18 +892,24 @@ export function useChatSend({
       const st = useStudioStore.getState();
       if (st.respondingId || !st.pendingPerms.some(item => item.permissionId === p.permissionId)) return;
       st.setRespondingId(p.permissionId);
-      // The card is invalidated right away: the user must not keep staring at
-      // a request that is already answered.
-      st.removePermission(p.permissionId);
+      // Refusing invalidates the card right away: the user must not keep
+      // staring at a request that is already answered. A selection waits for
+      // the server, so a request that failed can still be retried.
+      if (optionId === null) st.removePermission(p.permissionId);
       try {
         await respondPermission(
           p.agentId,
           p.permissionId,
           optionId ? { outcome: "selected", optionId } : { outcome: "cancelled" }
         );
+        useStudioStore.getState().removePermission(p.permissionId);
       } catch (e: any) {
-        if (e.status === 404 || e.status === 410) useStudioStore.getState().removePermission(p.permissionId);
-        reportRequestError("授权提交失败", e.status === 404 || e.status === 410 ? new Error("授权请求已结束或过期，请重新发起操作。") : e);
+        const gone = e.status === 404 || e.status === 410;
+        if (gone) useStudioStore.getState().removePermission(p.permissionId);
+        // A refusal that did not reach the agent leaves it waiting: give the
+        // card back so the user can refuse it again.
+        else if (optionId === null) useStudioStore.getState().addPermission(p);
+        reportRequestError("授权提交失败", gone ? new Error("授权请求已结束或过期，请重新发起操作。") : e);
       } finally {
         const current = useStudioStore.getState();
         if (current.respondingId === p.permissionId) current.setRespondingId(null);
