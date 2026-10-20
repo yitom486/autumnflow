@@ -28,19 +28,24 @@
 ## 三、组件来源铁律：只用 shadcn / Magic UI 官方组件，禁止手写组件
 
 1. **本项目已正规引入两套组件库**（不再是手抄）：
-   - shadcn：根目录 `components.json` 已配置（new-york 风格，`@/components/ui`），
-     新增基础组件必须走 CLI：`bunx shadcn@latest add <name> -y`，
-     装完如含字面调色板需按第二条改写为变量（以 `skeleton` 为例，官方版
-     `bg-primary/10` 本就是变量，直接合规）。
+   - shadcn：根目录 `components.json` 已配置（**base-nova 风格，即 Base UI**，
+     `@/components/ui`），新增基础组件必须走 CLI：
+     `bunx --bun shadcn@latest add <name> -y`。
+     两条已踩过的坑，装完必须处理：
+     - registry 里的组件写的是 `import { cn } from "cn"`（npm 上的同名包），
+       **必须改写为 `import { cn } from "@/lib/utils"`**（项目自己的 cn 带
+       tailwind-merge），并把 `cn` 从 `package.json` 里删掉；
+     - registry 的 `dependencies` 只声明了 `cn`，`@base-ui/react` 不会自动装，
+       要自己 `bun add @base-ui/react`。
    - Magic UI：无 npm 包，官方分发即复制源码。本项目 `src/components/magicui/`
      即官方登记位：`blur-fade`、`animated-shiny-text` 均为官网实现原样移植；
      新增动效必须从 magicui.design 按官方文档复制（含其要求的 tailwind
      keyframes，一并登记进 `tailwind.config.js`），禁止自创动画组件。
      前置依赖 `framer-motion` 已安装。
 2. **现有库存（复用优先，新需求先查这里）**：
-   `ui/`：button badge card input skeleton（全部为 CLI 官方版；
-   唯一特批扩展是 badge 的 `success`/`warning` 变体，token 实现，
-   见该文件注释）；
+   `ui/`：button badge card dialog input resizable skeleton
+   （全部为 CLI 装的 Base UI 版；唯一特批扩展是 badge 的
+   `success`/`warning`/`neutral` 变体，token 实现，见该文件注释）；
    `magicui/`：blur-fade animated-shiny-text code-comparison
   （code-comparison 需 `shiki` + `@shikijs/transformers` 依赖，
    已安装；移植时去掉 `next-themes`（本应用纯深色，主题固定）、
