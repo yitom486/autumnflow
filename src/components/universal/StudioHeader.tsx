@@ -26,6 +26,7 @@ import { Badge } from "@/components/ui/badge";
 import { agentQuota, type AgentSummary } from "@/lib/universal-api";
 import { supportsCodeMode } from "../../../shared/acp-code-mode";
 import { DeepSeekCredentialsDialog } from "./DeepSeekCredentialsDialog";
+import { CapabilityPanel } from "./CapabilityPanel";
 import { WorkspaceDropdown } from "./WorkspaceDropdown";
 import { GatewayDot } from "./GatewayDot";
 import { useStudioStore, type RecentWorkspace } from "@/stores/useStudioStore";
@@ -96,6 +97,7 @@ export const AgentStatusChip: React.FC<{
   const [open, setOpen] = useState(false);
   const [refreshingQuota, setRefreshingQuota] = useState(false);
   const [deepseekCredOpen, setDeepseekCredOpen] = useState(false);
+  const [capabilityOpen, setCapabilityOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
   const storeQuota = useStudioStore((s) => s.quota);
@@ -305,6 +307,15 @@ export const AgentStatusChip: React.FC<{
                   <KeyRound className="w-3 h-3" /> DeepSeek 凭据
                 </Button>
               )}
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={() => { setOpen(false); setCapabilityOpen(true); }}
+                className="h-7 px-2.5 text-xs gap-1.5 text-muted-foreground hover:text-foreground"
+                title="查看并切换智能体可用的 MCP 工具与内置技能"
+              >
+                <PlugZap className="w-3 h-3" /> MCP 与技能
+              </Button>
             </div>
           </div>
         </div>
@@ -314,6 +325,11 @@ export const AgentStatusChip: React.FC<{
         onClose={() => setDeepseekCredOpen(false)}
         agentId={activeAgentId}
         onChanged={handleRefreshQuota}
+      />
+      <CapabilityPanel
+        isOpen={capabilityOpen}
+        onClose={() => setCapabilityOpen(false)}
+        agentId={activeAgentId}
       />
     </div>
   );

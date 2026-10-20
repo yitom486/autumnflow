@@ -7,6 +7,7 @@ import {
 } from "@yitom/acp-client";
 import { getStudioResourcesDir } from "./studio-resource-path";
 import { getBundledStudioSkillsDir } from "./studio-skills";
+import { isSkillEnabled } from "./capability-registry";
 
 const SYSTEM_TEMPLATE = "# 附加指令\n\n在此填写通过本应用启动的 agent 应持续遵循的指令。\n规则与此文件会一起加载；实际优先级由运行时决定，不替换供应商内置系统提示词。\n";
 const DEFAULT_MCP = '{"mcpServers":[]}\n';
@@ -21,7 +22,13 @@ async function rejectSymlink(file: string): Promise<void> {
   catch (err) { if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err; }
 }
 
-async function copyMarkdown(source: string, destination: string, overwrite: boolean, budget = { bytes: 0 }): Promise<void> {
+async function copyMarkdown(
+  source: string,
+  destination: string,
+  overwrite: boolean,
+  budget = { bytes: 0 },
+  skip?: (name: string) => boolean
+): Promise<void> {
   let entries;
   try { entries = await fs.readdir(source, { withFileTypes: true }); }
   catch (err) { if ((err as NodeJS.ErrnoException).code === "ENOENT") return; throw err; }
@@ -30,8 +37,10 @@ async function copyMarkdown(source: string, destination: string, overwrite: bool
   await fs.mkdir(destination, { recursive: true, mode: 0o700 });
   for (const entry of entries) {
     if (entry.isSymbolicLink()) throw new Error("Skill resources must not contain symlinks");
+    // A skill the user switched off must not reach the agent at all.
+    if (skip?.(entry.name)) continue;
     const from = path.join(source, entry.name), to = path.join(destination, entry.name);
-    if (entry.isDirectory()) await copyMarkdown(from, to, overwrite, budget);
+    if (entry.isDirectory()) await copyMarkdown(from, to, overwrite, budget, skip);
     else if (entry.isFile() && entry.name.toLowerCase().endsWith(".md")) {
       const content = await fs.readFile(from);
       budget.bytes += content.byteLength;
@@ -87,7 +96,7 @@ export class StudioAgentResources {
       if (Buffer.byteLength(this.rules) > 256 * 1024) throw new Error("Application rules exceed 256 KiB");
       await fs.writeFile(path.join(this.snapshot, "AGENTS.md"), this.rules, { mode: 0o600 });
       const skillSource = process.env.AUTUMNFLOW_SKILLS_DIR || path.join(this.source, "skills");
-      await copyMarkdown(skillSource, path.join(this.snapshot, "skills"), true);
+      await copyMarkdown(skillSource, path.join(this.snapshot, "skills"), true, { bytes: 0 }, (name) => !isSkillEnabled(name));
       const config = JSON.parse(await fs.readFile(path.join(this.source, "mcp.json"), "utf8"));
       if (!config || !Array.isArray(config.mcpServers)) throw new Error("mcp.json must contain an ACP mcpServers array");
       for (const server of config.mcpServers) {

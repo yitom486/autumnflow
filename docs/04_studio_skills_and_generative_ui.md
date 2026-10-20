@@ -106,12 +106,36 @@ flowchart TD
 
 ---
 
-## 五、 核心代码清单与模块映射
+## 五、 能力面板：可见可切的工具与技能
+
+Studio 之前只把工具与技能「交给智能体」，用户看不到也切不了。能力面板
+（智能体菜单 → MCP 与技能）补上这一层：
+
+* **可见**：面板列出内置 MCP 服务（名称 / 端口 / 地址）、Agent 在 `initialize`
+  阶段声明的 MCP 能力（HTTP / stdio）、该服务暴露的 6 个工具，以及内置技能目录。
+* **可切**：
+  * *工具开关*立即生效。被关闭的工具会从 MCP 的 `tools/list` 中消失，直接调用
+    也会被拒绝（`Tool X disabled`），智能体感知不到它的存在。
+  * *技能开关*对技能目录立即生效（`list_studio_skills` 不再列出它，
+    `get_studio_skill` 取不到），并在智能体下次连接时不再进入它的资源快照。
+* **单一事实源**：工具名称、说明与简介集中在 `studio-tools.ts`，MCP 服务与面板
+  共用同一份描述，避免两处漂移。
+* **持久化**：开关写在 `~/.autumnflow/capabilities.json`（原子写入），重启后保留。
+
+对应的接口是 `/api/universal/capabilities`（读取）与
+`/api/universal/capabilities/tool|skill`（切换）。
+
+---
+
+## 六、 核心代码清单与模块映射
 
 | 模块文件 | 核心职责 |
 | :--- | :--- |
 | [studio-skills.ts](file:///d:/project/js/Electron/antigravity-acp/server/universal/studio-skills.ts) | 负责技能目录动态解析、Frontmatter 元数据提取与按需文档读取。 |
-| [mcp-ui-server.ts](file:///d:/project/js/Electron/antigravity-acp/server/universal/mcp-ui-server.ts) | 5 位数专用端口 MCP 服务，注册 `list_studio_skills` 与 `get_studio_skill` 等标准工具。 |
+| [studio-tools.ts](file:///d:/project/js/Electron/antigravity-acp/server/universal/studio-tools.ts) | 内置工具的名称 / 说明 / 简介单一事实源，MCP 服务与能力面板共用。 |
+| [capability-registry.ts](file:///d:/project/js/Electron/antigravity-acp/server/universal/capability-registry.ts) | 工具与技能开关的持久化状态（原子写入 `capabilities.json`）。 |
+| [mcp-ui-server.ts](file:///d:/project/js/Electron/antigravity-acp/server/universal/mcp-ui-server.ts) | 5 位数专用端口 MCP 服务，注册 `list_studio_skills` 与 `get_studio_skill` 等标准工具，并按开关实时隐藏工具。 |
+| [CapabilityPanel.tsx](file:///d:/project/js/Electron/antigravity-acp/src/components/universal/CapabilityPanel.tsx) | 能力面板：工具与技能的清单、状态与开关。 |
 | [AgentConnection.ts](file:///d:/project/js/Electron/antigravity-acp/server/universal/AgentConnection.ts) | ACP 会话控制器，在 `new/resume/load/fork` 统一注入环境，并在首轮下发鼓励性引导。 |
 | [EditorialDiagramCard.tsx](file:///d:/project/js/Electron/antigravity-acp/src/components/assistant/EditorialDiagramCard.tsx) | 前端出版级矢量图表渲染引擎，自适应系统暗黑/明亮主题与 SVG 无损缩放。 |
 

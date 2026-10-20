@@ -4,12 +4,14 @@ import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
 import { StudioAgentResources, ensureStudioResources } from "../../server/universal/studio-agent-resources";
+import { setSkillEnabled } from "../../server/universal/capability-registry";
 
 let root: string;
 const owners: StudioAgentResources[] = [];
 beforeEach(async () => {
   root = await fs.mkdtemp(path.join(tmpdir(), "studio-resources-test-"));
   vi.stubEnv("AUTUMNFLOW_RESOURCES_DIR", root);
+  vi.stubEnv("AUTUMNFLOW_HOME", root);
 });
 afterEach(async () => {
   await Promise.all(owners.splice(0).map(owner => owner.dispose()));
@@ -90,5 +92,23 @@ describe("application-owned configuration", () => {
     await expect(resource.prepare("agy", root, "agy", {})).rejects.toThrow("mcpServers array");
     expect(await fs.readdir(path.join(root, "sessions"))).toEqual([]);
     expect(resource.report().snapshotDirectory).toBeNull();
+  });
+
+  it("keeps a switched-off skill out of the agent snapshot", async () => {
+    await ensureStudioResources("rules");
+    const skills = await fs.readdir(path.join(root, "skills"));
+    expect(skills).toContain("diagram-design");
+
+    setSkillEnabled("diagram-design", false);
+    try {
+      const resource = owner();
+      await resource.prepare("agy", root, "agy", {});
+      const snapshot = resource.report().snapshotDirectory!;
+      const copied = await fs.readdir(path.join(snapshot, "skills"));
+      expect(copied).not.toContain("diagram-design");
+      expect(resource.report().skillsFound).not.toContain("diagram-design");
+    } finally {
+      setSkillEnabled("diagram-design", true);
+    }
   });
 });

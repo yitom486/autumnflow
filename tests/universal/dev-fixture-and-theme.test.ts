@@ -2,7 +2,6 @@ import { describe, it, expect } from "vitest";
 import lightTheme from "@shikijs/themes/github-light-high-contrast";
 import { patchLightThemeComments, LIGHT_COMMENT_COLOR } from "../../src/components/magicui/code-comparison";
 import { buildConversationFixture, FIXTURE_SESSION_ID } from "../../src/dev/conversation-fixture";
-import { matchPermToToolCalls } from "../../src/lib/acp-assistant";
 import { badgeVariants } from "../../src/components/ui/badge";
 
 describe("light diff comment contrast", () => {
@@ -37,13 +36,14 @@ describe("dev conversation fixture", () => {
     expect(fx.messages.flatMap((m) => m.toolCalls || []).length).toBeGreaterThanOrEqual(5);
     expect(fx.usage.used).toBeGreaterThan(0);
     expect(fx.pendingPerms).toHaveLength(1);
-    expect(matchPermToToolCalls(fx.pendingPerms[0], fx.messages, fx.sessionId)).not.toBeNull();
+    expect(fx.pendingPerms[0].permissionId).toBeTruthy();
+    expect(fx.pendingPerms[0].options?.length).toBeGreaterThan(0);
   });
 
-  it("approval mode adds a permission that is not attached to any tool card", () => {
+  it("approval mode adds a second permission for the global approval flow", () => {
     const fx = buildConversationFixture({ globalPermission: true });
     expect(fx.pendingPerms).toHaveLength(2);
-    expect(matchPermToToolCalls(fx.pendingPerms[1], fx.messages, fx.sessionId)).toBeNull();
+    expect(fx.pendingPerms[1].toolCall?.title).toBeTruthy();
   });
 });
 

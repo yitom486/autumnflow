@@ -31,6 +31,7 @@ import { terminalRouter } from "./http/terminal";
 import { filesRouter } from "./http/files";
 import { gitRouter } from "./http/git";
 import { searchRouter } from "./http/search";
+import { capabilitiesRouter } from "./http/capabilities";
 import { getMcpUiServerInfo } from "./mcp-ui-server";
 
 export { gatewayErrorBody } from "./http/shared";
@@ -56,6 +57,7 @@ universal.route("/terminal", terminalRouter);
 universal.route("/git", gitRouter);
 universal.route("/search", searchRouter);
 universal.route("/fs", filesRouter);
+universal.route("/capabilities", capabilitiesRouter);
 universal.get("/mcp-info", () => json({ ok: true, info: getMcpUiServerInfo() }));
 
 universal.notFound((c) => json({ ok: false, error: `Unknown universal route ${c.req.method} ${new URL(c.req.url).pathname}` }, 404));

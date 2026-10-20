@@ -11,12 +11,16 @@
  */
 import http from "node:http";
 import { randomUUID } from "node:crypto";
-import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { McpServer, type RegisteredTool, type ToolCallback } from "@modelcontextprotocol/sdk/server/mcp.js";
+import type { AnySchema, ZodRawShapeCompat } from "@modelcontextprotocol/sdk/server/zod-compat.js";
+import type { ToolAnnotations } from "@modelcontextprotocol/sdk/types.js";
 import { StreamableHTTPServerTransport } from "@modelcontextprotocol/sdk/server/streamableHttp.js";
 import { isInitializeRequest } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { listStudioSkills, getStudioSkill } from "./studio-skills";
 import { STUDIO_MCP_INSTRUCTIONS } from "./studio-tool-guidance";
+import { getStudioToolDescriptor } from "./studio-tools";
+import { isSkillEnabled, isToolEnabled } from "./capability-registry";
 import {
   presentResultId,
   PRESENT_SCHEMA_VERSION,
@@ -37,6 +41,8 @@ interface McpUiSession {
   requests: number;
   closed: boolean;
   closing?: Promise<void>;
+  /** Registered tools of this session, so switches apply without a restart. */
+  tools: Map<string, RegisteredTool>;
 }
 
 interface McpUiRuntime {
@@ -68,21 +74,71 @@ export function getMcpUiServerInfo(): McpServerInfo | null {
   return activeRuntime?.info ?? null;
 }
 
+/** Hide the tools the user switched off before the session is handed out. */
+function applyToolSwitches(tools: Map<string, RegisteredTool>): void {
+  for (const [name, tool] of tools) {
+    if (isToolEnabled(name)) tool.enable();
+    else tool.disable();
+  }
+}
+
+/**
+ * Show or hide one studio-ui tool for every live MCP session.
+ *
+ * The switch is visible to the agent immediately: a disabled tool disappears
+ * from tools/list and calls to it are rejected.
+ */
+export function setStudioToolEnabled(name: string, enabled: boolean): boolean {
+  if (!getStudioToolDescriptor(name)) return false;
+  const runtime = activeRuntime;
+  if (runtime) {
+    for (const session of runtime.connections) {
+      const tool = session.tools.get(name);
+      if (!tool) continue;
+      if (enabled) tool.enable();
+      else tool.disable();
+    }
+  }
+  return true;
+}
+
 /**
  * Creates the McpServer instance with registered Generative UI tools.
+ *
+ * The registered handles are returned so a tool can be hidden or shown again
+ * at runtime without restarting the server.
  */
-export function createMcpUiServer(): McpServer {
+export function createMcpUiServer(): { mcp: McpServer; tools: Map<string, RegisteredTool> } {
+  const tools = new Map<string, RegisteredTool>();
+  const registerStudioTool = <
+    OutputArgs extends ZodRawShapeCompat | AnySchema,
+    InputArgs extends undefined | ZodRawShapeCompat | AnySchema = undefined
+  >(
+    name: string,
+    config: {
+      title?: string;
+      description?: string;
+      inputSchema?: InputArgs;
+      outputSchema?: OutputArgs;
+      annotations?: ToolAnnotations;
+      _meta?: Record<string, unknown>;
+    },
+    cb: ToolCallback<InputArgs>
+  ) => {
+    const tool = mcp.registerTool(name, config, cb);
+    tools.set(name, tool);
+    return tool;
+  };
   const mcp = new McpServer({
     name: "studio-ui",
     version: "1.0.0",
   }, { instructions: STUDIO_MCP_INSTRUCTIONS });
 
   // 1. 结构化富交互卡片（决策、指标、核对清单、表单）
-  mcp.registerTool(
+  registerStudioTool(
     "show_interactive_card",
     {
-      description:
-        "【富交互卡片 - 推荐】当向用户提供方案对比与决策(decision)、任务排查或门禁核对清单(checklist)、系统核心性能或监控指标看板(metrics)或配置填报(form)时，鼓励优先调用本工具直接渲染富交互卡片，呈现清晰直观的结构化视觉交互。",
+      description: getStudioToolDescriptor("show_interactive_card")!.description,
       inputSchema: {
         title: z.string().describe("卡片展示标题"),
         cardType: z
@@ -139,11 +195,10 @@ export function createMcpUiServer(): McpServer {
   );
 
   // 2. 自由 React / HTML 沙箱预览
-  mcp.registerTool(
+  registerStudioTool(
     "render_react_sandbox",
     {
-      description:
-        "【动态组件沙箱原型】当设计或展示前端交互式 UI 组件、动态原型、仪表盘或交互小工具时，鼓励调用本工具渲染包含实时状态与响应式的隔离预览沙箱。",
+      description: getStudioToolDescriptor("render_react_sandbox")!.description,
       inputSchema: {
         title: z.string().describe("沙箱组件原型标题"),
         code: z.string().describe("完整的 React TSX/JSX 代码或 HTML+JS 原型代码"),
@@ -180,11 +235,10 @@ export function createMcpUiServer(): McpServer {
   );
 
   // 3. 人机协同表单输入
-  mcp.registerTool(
+  registerStudioTool(
     "prompt_form",
     {
-      description:
-        "【人机协同交互表单】当需要用户提供多个参数配置、数据库凭据、多项筛选条件或填写表单时，推荐调用本工具在聊天流下发表单控件收集用户输入并等待用户填写提交。",
+      description: getStudioToolDescriptor("prompt_form")!.description,
       inputSchema: {
         title: z.string().describe("表单标题"),
         description: z.string().optional().describe("表单目的说明与操作指引"),
@@ -233,11 +287,10 @@ export function createMcpUiServer(): McpServer {
   );
 
   // 4. 出版级精美图表（Editorial Diagram - Architecture, Sequence, Flowchart, Quadrant, Timeline）
-  mcp.registerTool(
+  registerStudioTool(
     "render_editorial_diagram",
     {
-      description:
-        "【出版级高阶图表 - 推荐】当需要向用户展示系统架构拓扑、调用交互时序、流程业务状态机、技术选型四象限或项目演进里程碑时，强烈鼓励优先调用此工具直接生成出版级矢量图表，代替原始简陋的 Mermaid 文本或生硬描述，带来卓越的视觉阅读体验。",
+      description: getStudioToolDescriptor("render_editorial_diagram")!.description,
       inputSchema: {
         title: z.string().describe("图表主标题"),
         description: z.string().optional().describe("图表副标题或背景说明"),
@@ -289,15 +342,14 @@ export function createMcpUiServer(): McpServer {
   );
 
   // 5. 按需检索 Studio 内置技能目录
-  mcp.registerTool(
+  registerStudioTool(
     "list_studio_skills",
     {
-      description:
-        "【Studio 技能清单】列出当前 AutumnFlow 客户端内置提供的专业能力与设计规范清单（例如 diagram-design 出版级矢量图表设计、generative-ui 生成式交互卡片规范）。",
+      description: getStudioToolDescriptor("list_studio_skills")!.description,
       inputSchema: {},
     },
     async () => {
-      const skills = listStudioSkills();
+      const skills = listStudioSkills().filter((skill) => isSkillEnabled(skill.name));
       return {
         content: [
           {
@@ -313,17 +365,16 @@ export function createMcpUiServer(): McpServer {
   );
 
   // 6. 按需读取 Studio 技能指导与 Schema 规范
-  mcp.registerTool(
+  registerStudioTool(
     "get_studio_skill",
     {
-      description:
-        "【Studio 技能按需调取】按需获取特定 Studio 技能的完整指导文档、设计原则与结构化调用示例（如 diagram-design 或 generative-ui）。零 Token 浪费，仅在需要时按需查阅。",
+      description: getStudioToolDescriptor("get_studio_skill")!.description,
       inputSchema: {
         name: z.string().describe("必填技能标识。图表规范传 'diagram-design'，交互卡片规范传 'generative-ui'；不确定时先调用 list_studio_skills 获取 name，不能省略此字段。"),
       },
     },
     async ({ name }) => {
-      const skill = getStudioSkill(name);
+      const skill = isSkillEnabled(name) ? getStudioSkill(name) : null;
       if (!skill) {
         return {
           content: [
@@ -347,7 +398,7 @@ export function createMcpUiServer(): McpServer {
     }
   );
 
-  return mcp;
+  return { mcp, tools };
 }
 
 /**
@@ -445,7 +496,8 @@ async function handleMcpRequest(runtime: McpUiRuntime, req: http.IncomingMessage
 
     if (!session && req.method === "POST" && isInitializeRequest(body)) {
       created = true;
-      const mcp = createMcpUiServer();
+      const { mcp, tools } = createMcpUiServer();
+      applyToolSwitches(tools);
       const transport = new StreamableHTTPServerTransport({
         sessionIdGenerator: () => randomUUID(),
         enableJsonResponse: true,
@@ -455,7 +507,7 @@ async function handleMcpRequest(runtime: McpUiRuntime, req: http.IncomingMessage
         },
         onsessionclosed: () => forgetSession(runtime, session!),
       });
-      session = { mcp, transport, lastActivity: Date.now(), requests: 0, closed: false };
+      session = { mcp, transport, lastActivity: Date.now(), requests: 0, closed: false, tools };
       runtime.connections.add(session);
       await mcp.connect(transport);
       const protocolOnClose = transport.onclose;

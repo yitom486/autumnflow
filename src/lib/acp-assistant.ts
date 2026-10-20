@@ -1,6 +1,5 @@
 import type { ThreadMessageLike } from "@assistant-ui/react";
 import type { Message } from "@/lib/message-types";
-import type { PendingPermission } from "@/lib/universal-api";
 import { partitionTurnContent } from "@/lib/threads";
 import { preprocessMarkdown } from "@/lib/markdown-preprocess";
 import {
@@ -249,39 +248,4 @@ export function extractAppendText(message: {
     .filter((p) => p.type === "text" && typeof p.text === "string")
     .map((p) => p.text as string)
     .join("\n");
-}
-
-export interface InlinePermMatch {
-  messageId: string;
-  toolCallId: string;
-}
-
-/**
- * Match an ACP permission request to a visible tool-call part so it can be
- * approved inline in the tool card. Matches by toolCallId first, falls back
- * to title; requires same session when one is bound.
- */
-export function matchPermToToolCalls(
-  perm: PendingPermission,
-  messages: Message[],
-  sessionId: string | null,
-): InlinePermMatch | null {
-  if (sessionId && perm.sessionId !== sessionId) return null;
-  const tool = (perm.toolCall ?? {}) as {
-    toolCallId?: string;
-    id?: string;
-    title?: string;
-  };
-  const wantId = tool.toolCallId || tool.id || null;
-  const wantTitle = tool.title || null;
-  if (!wantId && !wantTitle) return null;
-  for (const m of messages) {
-    if (m.role !== "assistant" || !m.toolCalls) continue;
-    for (const tc of m.toolCalls) {
-      if ((wantId && tc.id === wantId) || (wantTitle && tc.title === wantTitle)) {
-        return { messageId: m.id, toolCallId: tc.id };
-      }
-    }
-  }
-  return null;
 }
