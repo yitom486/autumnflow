@@ -9,6 +9,12 @@
 
 ## [Unreleased]
 
+### Fixed
+- 修复 Electron E2E 在 CI runner 上失败的问题：渲染最重的 sequence / flowchart 图表在较慢的 runner 上超出 20 秒的等待预算（本地整条用例约 6.7 秒）。等待预算与单用例预算同步放宽到能覆盖慢机器。
+
+### Changed
+- CI 的 E2E 作业现在上传 Playwright 报告与 trace 产物：此前失败时只有一句「哪个 locator 超时」，无法定位。
+
 ### Added
 <!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 

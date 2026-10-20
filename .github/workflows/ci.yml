@@ -54,3 +54,16 @@ jobs:
           # The dev-window spec needs an interactive Windows desktop to assert
           # on visible native windows; it is skipped on CI by the spec itself.
           CI: "true"
+
+      # Without the report and the traces a failed e2e run is undiagnosable:
+      # the console output only says which locator timed out.
+      - name: Upload E2E report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: e2e-report
+          path: |
+            playwright-report
+            test-results
+          retention-days: 14
+          if-no-files-found: ignore

@@ -51,7 +51,7 @@ test.describe("Diagram components through real Electron, ACP and MCP", () => {
   }
 
   async function assertSvg(svg: Locator, labels: readonly string[]) {
-    await expect(svg).toBeVisible({ timeout: 20000 });
+    await expect(svg).toBeVisible({ timeout: 45000 });
     for (const label of labels) await expect(svg).toContainText(label);
     const size = await svg.boundingBox();
     expect(size!.width).toBeGreaterThan(100);
@@ -67,7 +67,9 @@ test.describe("Diagram components through real Electron, ACP and MCP", () => {
       await expect(page.locator("html")).toHaveAttribute("data-theme", theme);
       await prompt(`E2E_DIAGRAM:${scenario.kind}`);
       const title = page.getByText(scenario.title, { exact: true });
-      await expect(title).toBeVisible({ timeout: 20000 });
+      // The heaviest diagrams (sequence, flowchart) need more headroom than a
+      // developer machine gives them: a CI runner is several times slower.
+      await expect(title).toBeVisible({ timeout: 45000 });
       const card = title.locator("xpath=../../..");
       const svg = card.locator('svg[viewBox]:not([viewBox="0 0 24 24"])');
       await assertSvg(svg, scenario.labels);
@@ -118,7 +120,7 @@ test.describe("Diagram components through real Electron, ACP and MCP", () => {
     const { page, app } = launched;
     await prompt(`E2E_MERMAID:${scenario.kind}`);
     const diagram = page.locator("[data-mermaid-diagram]");
-    await expect(diagram).toHaveCount(1, { timeout: 25000 });
+    await expect(diagram).toHaveCount(1, { timeout: 45000 });
     await assertSvg(diagram.locator('svg[id^="aui-mmd-"]'), scenario.labels);
     await diagram.hover();
     const open = diagram.getByRole("button", { name: "放大查看 / 全屏预览", exact: true });
@@ -177,7 +179,7 @@ test.describe("Diagram components through real Electron, ACP and MCP", () => {
 
   test("Mermaid syntax failure preserves source and allows the next valid answer", async () => {
     await prompt("E2E_MERMAID:invalid");
-    await expect(launched.page.getByText(/图表语法无法渲染，已回退为代码/)).toBeVisible({ timeout: 20000 });
+    await expect(launched.page.getByText(/图表语法无法渲染，已回退为代码/)).toBeVisible({ timeout: 45000 });
     await expect(launched.page.locator("pre code").filter({ hasText: "A[broken --> B" })).toBeVisible();
     await expect(launched.page.locator("[data-mermaid-diagram]")).toHaveCount(0);
     await prompt("E2E_MERMAID:flowchart");
@@ -192,7 +194,7 @@ test.describe("Diagram components through real Electron, ACP and MCP", () => {
     await prompt("E2E_MERMAID:mindmap");
     const diagram = page.locator("[data-mermaid-diagram]");
     const forms = () => diagram.getByRole("button", { name: "折叠：表单交互", exact: true });
-    await expect(forms()).toBeVisible({ timeout: 25000 });
+    await expect(forms()).toBeVisible({ timeout: 45000 });
     await expect(diagram.locator('[id$="-node_3"]')).toBeVisible();
     await expect(diagram.locator('[id$="-edge_2_3"]')).toHaveCount(1);
     await expect(diagram.locator('[id$="-node_3"]')).not.toHaveAttribute("role", "button");
