@@ -12,6 +12,12 @@
 ### Added
 <!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 
+## [0.1.16] - 2026-10-20
+
+### Changed
+- shadcn 组件层整体切到 Base UI（CLI 的 `base-nova` 预设）：`components.json` 的风格改为 `base-nova`，`ui/` 下的 button / badge / card / dialog / input / resizable / skeleton 全部由 CLI 重装为 Base UI 版本，项目不再直接依赖 `@radix-ui/*`。以后新增基础组件走 `bunx --bun shadcn@latest add <name>` 拿到的默认就是 Base UI 变体，不必再在 Radix 与 Base UI 之间取舍。
+### Added
+
 ## [0.1.15] - 2026-10-20
 
 ### Added
@@ -27,7 +33,6 @@
 - 修复发送失败时用户输入的提示词凭空消失的问题：提示词在发送开始时就会从输入框清空，如果这一轮没能开始（会话解析失败或被中止），现在会把它放回输入框；普通失败仍然保留在对话里并附上错误说明。
 - 修复 Electron E2E 在 CI runner 上失败的问题：渲染最重的 sequence / flowchart 图表在较慢的 runner 上超出 20 秒的等待预算（本地整条用例约 6.7 秒）。等待预算与单用例预算同步放宽到能覆盖慢机器。
 ### Changed
-- shadcn 组件层整体切到 Base UI（CLI 的 `base-nova` 预设）：`components.json` 的风格改为 `base-nova`，`ui/` 下的 button / badge / card / dialog / input / resizable / skeleton 全部由 CLI 重装为 Base UI 版本，项目不再直接依赖 `@radix-ui/*`。以后新增基础组件走 `bunx --bun shadcn@latest add <name>` 拿到的默认就是 Base UI 变体，不必再在 Radix 与 Base UI 之间取舍。
 - CI 的 E2E 作业现在上传 Playwright 报告与 trace 产物：此前失败时只有一句「哪个 locator 超时」，无法定位。
 - Electron E2E 的图表用例先等用户自己的消息出现、再等图表：失败时能区分「发送失败」和「图表没渲染」。
 - 消息与会话由智能体负责：重启后应用会重新挂接智能体会话并回放它自己的历史，本地线程缓存只用于首帧快速显示，不再充当事实源。
@@ -391,7 +396,7 @@
   本轮横切另含安全加固、agent 异步按需安装、SSE 发送互斥、前端懒加载拆分，
   细节见各专项条目（此处仅汇总，不编造版本号）。
 
-[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.15...HEAD
+[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.16...HEAD
 [0.1.0]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.0
 [0.1.1]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.1
 [0.1.2]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.2
@@ -408,3 +413,4 @@
 [0.1.13]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.13
 [0.1.14]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.14
 [0.1.15]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.15
+[0.1.16]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.16
