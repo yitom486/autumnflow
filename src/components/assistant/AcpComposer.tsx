@@ -264,6 +264,28 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
     }
   };
 
+  // The runtime keeps the composer inside the thread scope, and it rebuilds
+  // that scope whenever the app restores its session. The text the user just
+  // typed lived only in that scope and was gone. Keep a copy here and put it
+  // back; the copy is dropped as soon as the text is sent, queued or steered.
+  const draftRef = useRef("");
+  const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
+    draftRef.current = e.target.value;
+  };
+  const clearDraft = () => {
+    draftRef.current = "";
+  };
+  useEffect(() => {
+    // Whatever the composer holds now (typed or filled in by the app) is the
+    // text to keep. An empty composer is either cleared by the user — the
+    // input handler already dropped the copy — or dropped by the runtime.
+    if (composerText) {
+      draftRef.current = composerText;
+      return;
+    }
+    if (draftRef.current) aui.composer.setText(draftRef.current);
+  }, [composerText]);
+
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // While the agent is working, assistant-ui's own send() is a no-op
     // (canSend is false while a message is in flight), so a typed prompt
@@ -272,6 +294,7 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
       const text = composerText.trim();
       if (!text) return;
       e.preventDefault();
+      clearDraft();
       p.onQueue?.(text);
       aui.composer.setText("");
       return;
@@ -671,14 +694,17 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
   }, [p.restoredText, composerText]);
 
   const handleSendClick = () => {
-    if (canSendText) aui.composer.send();
-    else if (p.attachments.length > 0) p.onSendAttachmentOnly();
+    if (canSendText) {
+      clearDraft();
+      aui.composer.send();
+    } else if (p.attachments.length > 0) p.onSendAttachmentOnly();
   };
 
   // 插队发送：中断当前生成，清空跑道后立即发送（排队中的旧消息随后继续）。
   const handleSteer = async () => {
     if (!canSendText) return;
     const text = composerText.trim();
+    clearDraft();
     await p.onSteer?.(text);
     aui.composer.setText("");
   };
@@ -752,7 +778,7 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
           </ul>
         )}
 
-        <ComposerPrimitive.Root className="@container">
+        <ComposerPrimitive.Root className="@container" onSubmit={clearDraft}>
           <div
             className={`relative flex flex-col rounded-xl border bg-card transition-colors ${
               dragOver
@@ -846,6 +872,7 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
             <ComposerPrimitive.Input
               minRows={2}
               maxRows={8}
+              onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
               onPaste={handlePaste}
               placeholder={p.isStreaming ? `${p.agentTitle} 正在响应中…可继续编辑，发送将排队；或点插队立即打断` : `给 ${p.agentTitle} 描述任务，@ 引用文件，/ 调用命令`}
@@ -982,7 +1009,9 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
                         if (!canSendText && p.attachments.length > 0) {
                           e.preventDefault();
                           p.onSendAttachmentOnly();
+                          return;
                         }
+                        if (canSendText) clearDraft();
                       }}
                       disabled={!canSendAny || (p.isStreaming && !canSendText)}
                       title={p.isStreaming ? "发送（将在当前生成结束后排队执行）" : "发送消息"}
