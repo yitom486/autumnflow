@@ -95,4 +95,23 @@ describe("SessionJournal", () => {
     expect(loaded?.events.map((event) => event.seq)).toEqual([1]);
     expect(await journal.loadTurnById("nope")).toBeNull();
   });
+
+  it("forgets pruned files so the tracked set cannot grow forever", async () => {
+    const dir = tempDir();
+    const journal = new SessionJournal(dir);
+    const registry = journalRegistry(journal);
+    registry.create("turn-old", { agentId: "codex", sessionId: "ses_old" });
+    registry.append("turn-old", { type: "start" });
+    registry.finish("turn-old", "done");
+    await journal.flushAll();
+    expect(journal.trackedFiles).toBe(1);
+
+    // A file older than the retention window is dropped.
+    const file = path.join(dir, "codex", "turn-old.jsonl");
+    const ancient = new Date(Date.now() - 30 * 24 * 60 * 60 * 1000);
+    fs.utimesSync(file, ancient, ancient);
+    await journal.prune();
+    expect(fs.existsSync(file)).toBe(false);
+    expect(journal.trackedFiles).toBe(0);
+  });
 });

@@ -16,6 +16,11 @@ import {
   PreviewRail,
   type PreviewRailItem,
 } from "@/components/primitives/PreviewRail";
+import {
+  buildPreviewRailItems,
+  PREVIEW_DESCRIPTION_MAX,
+  PREVIEW_LABEL_MAX,
+} from "@/components/primitives/preview-items";
 import { cn } from "@/lib/utils";
 
 export interface MessageScrollerHandle {
@@ -63,7 +68,7 @@ export interface MessageScrollerProps extends HTMLAttributes<HTMLDivElement> {
   targetRole?: "user" | "all";
 }
 
-function extractTextSnippet(el: Element, maxLen = 2000): string {
+function extractTextSnippet(el: Element, maxLen = PREVIEW_DESCRIPTION_MAX): string {
   const bubble = el.querySelector('[data-slot="message-bubble-content"]') ||
     el.querySelector('[data-slot="message-content"]') || el.querySelector("p") || el;
   // Prefer message content over rendered tool labels, usage counters and timestamps.
@@ -178,26 +183,19 @@ export const MessageScroller = forwardRef<MessageScrollerHandle, MessageScroller
 
       const scan = () => {
         const allMessages = Array.from(vp.querySelectorAll<HTMLElement>('[data-slot="message"]'));
-        const messageEls = targetRole === "user" ? allMessages.filter(el => el.dataset.from === "user") : allMessages;
-        const found: PreviewRailItem[] = messageEls.map((el, i) => {
-          const id = el.dataset.messageId || el.id || `msg-${i}`;
-          const isUser = el.dataset.from === "user";
-          const question = extractTextSnippet(el);
-          let answer = "";
-          if (isUser) {
-            const replies: string[] = [];
-            for (let index = allMessages.indexOf(el) + 1; index < allMessages.length; index++) {
-              const next = allMessages[index];
-              if (next.dataset.from === "user") break;
-              if (next.dataset.from === "assistant") {
-                const text = extractTextSnippet(next);
-                if (text) replies.push(text);
-              }
-            }
-            answer = replies.join(" ");
-          }
-          const label = isUser ? question || "（附件消息）" : el.dataset.from === "assistant" ? "智能体回复" : "系统消息";
-          return { id, label, ariaLabel: label, description: isUser ? answer || "暂无回答" : question || "（空消息）" };
+        // Read every body exactly once; the pure builder reuses those texts
+        // for the labels and the answers.
+        const messages = allMessages.map((el, index) => ({
+          id: el.dataset.messageId || el.id || `msg-${index}`,
+          from: el.dataset.from || "unknown",
+          text: extractTextSnippet(el, PREVIEW_DESCRIPTION_MAX),
+        }));
+        const found = buildPreviewRailItems(messages, targetRole).map((item) => {
+          // Labels stay short: the rail renders one truncated line, and a full
+          // transcript makes a screen-reader label unreadable.
+          if (item.label.length <= PREVIEW_LABEL_MAX) return item;
+          const label = `${item.label.slice(0, PREVIEW_LABEL_MAX)}…`;
+          return { ...item, label, ariaLabel: label };
         });
 
         setScannedItems((prev) => {
@@ -218,17 +216,33 @@ export const MessageScroller = forwardRef<MessageScrollerHandle, MessageScroller
 
       scan();
 
+      // Structural changes (a message appears, or its explicit preview text
+      // is rewritten) must show up quickly; raw streamed characters only
+      // change the text nodes, and rescanning the whole conversation for
+      // every chunk is what made long chats stutter.
+      const STRUCTURAL_DELAY = 150;
+      const TEXT_DELAY = 600;
       let timer: number | null = null;
-      const debouncedScan = () => {
-        if (timer !== null) return;
+      let dueAt = 0;
+      const scheduleScan = (delay: number) => {
+        const now = Date.now();
+        if (timer !== null) {
+          if (now >= dueAt) return;
+          window.clearTimeout(timer);
+          timer = null;
+        }
+        const wait = Math.max(0, Math.min(delay, dueAt - now));
+        dueAt = now + wait;
         timer = window.setTimeout(() => {
           timer = null;
+          dueAt = 0;
           scan();
-        }, 150);
+        }, wait);
       };
 
-      const observer = new MutationObserver(() => {
-        debouncedScan();
+      const observer = new MutationObserver((records) => {
+        const structural = records.some((record) => record.type === "childList" || record.type === "attributes");
+        scheduleScan(structural ? STRUCTURAL_DELAY : TEXT_DELAY);
       });
 
       observer.observe(vp, { childList: true, subtree: true, characterData: true, attributes: true, attributeFilter: ["data-preview-text"] });

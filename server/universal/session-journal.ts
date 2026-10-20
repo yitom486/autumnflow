@@ -46,6 +46,11 @@ export class SessionJournal {
 
   constructor(private readonly root = resolveJournalRoot()) {}
 
+  /** Journal files this instance still tracks; pruned files are forgotten. */
+  get trackedFiles(): number {
+    return this.seen.size;
+  }
+
   private fileFor(agentId: string, turnId: string): string {
     return path.join(this.root, safePart(agentId), `${safePart(turnId)}.jsonl`);
   }
@@ -223,7 +228,7 @@ export class SessionJournal {
         const file = path.join(dir, name);
         try {
           const info = await stat(file);
-          if (now - info.mtimeMs > RETENTION_MS) await unlink(file);
+          if (now - info.mtimeMs > RETENTION_MS) await this.removeFile(file);
           else files.push({ file, mtime: info.mtimeMs });
         } catch {
           // concurrently pruned
@@ -232,8 +237,18 @@ export class SessionJournal {
     }
     files.sort((a, b) => a.mtime - b.mtime);
     for (const { file } of files.slice(0, Math.max(0, files.length - MAX_TURN_FILES))) {
-      await unlink(file).catch(() => {});
+      await this.removeFile(file);
     }
+  }
+
+  /**
+   * Delete a journal file and forget it. The `seen` set is the only unbounded
+   * structure here: a long-lived host writes one file per turn, so dropping
+   * the file without dropping the marker would grow the set forever.
+   */
+  private async removeFile(file: string): Promise<void> {
+    this.seen.delete(file);
+    await unlink(file).catch(() => {});
   }
 }
 
