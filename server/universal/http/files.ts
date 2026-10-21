@@ -24,6 +24,22 @@ export const FS_NOTEBOOK_MAX = 20 * 1024 * 1024; // .ipynb 带图片输出，放
 export const FS_LIST_MAX = 5000;
 const HIDDEN_DIRS = new Set(["node_modules", ".git"]);
 
+/**
+ * 不参与文件监听的目录：构建产物与工具缓存。
+ *
+ * watcher 一开就会把整棵树走一遍（每个目录一个 watcher）。只忽略
+ * node_modules/.git 时，一个 Go 项目的 .cache/gomod（十几万文件）能把这次
+ * 扫描拖到一分钟以上——网关是单进程，这段时间里文件树、打开文件、聊天流
+ * 全排在后面，看起来就是"打不开"。
+ */
+const WATCH_IGNORED_DIRS = [
+  "node_modules", ".git", ".cache", ".local", ".tools", ".next", ".nuxt", ".turbo",
+  ".gradle", ".venv", "venv", "__pycache__", ".pytest_cache", ".mypy_cache",
+  ".ruff_cache", ".tox", ".parcel-cache", ".sass-cache", ".terraform",
+  "dist", "build", "out", "target", "vendor", "coverage", ".nyc_output",
+];
+const WATCH_IGNORED_RE = new RegExp(`[\\\\/](${WATCH_IGNORED_DIRS.join("|")})([\\\\/]|$)`);
+
 type TrashFn = (abs: string) => Promise<void>;
 let trashImpl: TrashFn | null = null;
 /** Electron 主进程注入系统回收站（shell.trashItem）。 */
@@ -122,45 +138,48 @@ const statOf = (abs: string) => {
 };
 
 // GET /list?cwd=&dir= : 单层目录（懒加载），目录在前，按名称排序
-filesRouter.get("/list", handle((c) => {
+//
+// 只做一次 readdir：以前这里对每个条目还同步 stat 一次（size/mtime），而文件树
+// 根本不用这两个字段——几百个条目的目录就是几百次同步 I/O，把网关的事件循环卡住。
+// 同步 stat 换成异步也不划算（还是白读），索性不读。
+filesRouter.get("/list", handle(async (c) => {
   const root = resolveRoot(c.req.query("cwd") || "");
   const { abs, rel } = resolveInside(root, c.req.query("dir") || "", { allowRoot: true });
-  const st = fs.statSync(abs);
+  const st = await fs.promises.stat(abs);
   if (!st.isDirectory()) throw new FsError(400, "dir 不是目录");
   const showHidden = c.req.query("hidden") === "1";
-  const entries = fs.readdirSync(abs, { withFileTypes: true })
-    .filter((e) => showHidden || !HIDDEN_DIRS.has(e.name))
-    .slice(0, FS_LIST_MAX)
-    .map((e) => {
-      const childAbs = path.join(abs, e.name);
-      const isLink = e.isSymbolicLink();
-      let type: "file" | "dir" | "other" = e.isDirectory() ? "dir" : e.isFile() ? "file" : "other";
-      if (isLink) {
-        try {
-          const real = fs.realpathSync(childAbs);
-          if (!inside(root, real)) type = "other"; // 指向工作区外的软链接不可展开
-          else type = fs.statSync(real).isDirectory() ? "dir" : "file";
-        } catch {
-          type = "other";
-        }
+  const dirents = await fs.promises.readdir(abs, { withFileTypes: true });
+  const entries: Array<{ name: string; path: string; type: "file" | "dir" | "other"; symlink: boolean }> = [];
+  for (const e of dirents) {
+    if (!showHidden && HIDDEN_DIRS.has(e.name)) continue;
+    const childAbs = path.join(abs, e.name);
+    const isLink = e.isSymbolicLink();
+    let type: "file" | "dir" | "other" = e.isDirectory() ? "dir" : e.isFile() ? "file" : "other";
+    if (isLink) {
+      try {
+        const real = await fs.promises.realpath(childAbs);
+        // 指向工作区外的软链接不可展开
+        if (!inside(root, real)) type = "other";
+        else type = (await fs.promises.stat(real)).isDirectory() ? "dir" : "file";
+      } catch {
+        type = "other";
       }
-      let size = 0, mtimeMs = 0;
-      try { ({ size, mtimeMs } = statOf(childAbs)); } catch {}
-      return { name: e.name, path: rel ? `${rel}/${e.name}` : e.name, type, size, mtimeMs, symlink: isLink };
-    })
-    .sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : b.type === "dir" ? 1 : 0));
-  return json({ ok: true, root, dir: rel, entries });
+    }
+    entries.push({ name: e.name, path: rel ? `${rel}/${e.name}` : e.name, type, symlink: isLink });
+  }
+  entries.sort((a, b) => (a.type === b.type ? a.name.localeCompare(b.name) : a.type === "dir" ? -1 : b.type === "dir" ? 1 : 0));
+  return json({ ok: true, root, dir: rel, entries: entries.slice(0, FS_LIST_MAX) });
 }));
 
 // GET /read?cwd=&path= : 文本内容 + mtime（编辑器打开 / 冲突检测用）
-filesRouter.get("/read", handle((c) => {
+filesRouter.get("/read", handle(async (c) => {
   const root = resolveRoot(c.req.query("cwd") || "");
   const { abs, rel } = resolveInside(root, c.req.query("path") || "");
-  const st = fs.statSync(abs);
+  const st = await fs.promises.stat(abs);
   if (!st.isFile()) throw new FsError(400, "不是文件");
   const max = /\.ipynb$/i.test(rel) ? FS_NOTEBOOK_MAX : FS_READ_MAX;
   if (st.size > max) return json({ ok: false, error: `文件超过 ${max / 1024 / 1024}MB，暂不支持在编辑器中打开`, size: st.size }, 413);
-  const buf = fs.readFileSync(abs);
+  const buf = await fs.promises.readFile(abs);
   if (buf.subarray(0, 8000).includes(0)) return json({ ok: false, error: "二进制文件不支持在编辑器中打开", binary: true }, 415);
   return json({ ok: true, path: rel, text: buf.toString("utf8"), size: st.size, mtimeMs: Math.round(st.mtimeMs) });
 }));
@@ -255,7 +274,7 @@ filesRouter.get("/watch", handle(async (c) => {
       send({ type: "ready", root });
       watcher = watch(root, {
         ignoreInitial: true,
-        ignored: (p: string) => /[\\/](node_modules|\.git)([\\/]|$)/.test(p) || /\.acp-\d+-\d+\.tmp$/.test(p),
+        ignored: (p: string) => WATCH_IGNORED_RE.test(p) || /\.acp-\d+-\d+\.tmp$/.test(p),
         awaitWriteFinish: { stabilityThreshold: 80, pollInterval: 20 },
         depth: 20,
       });

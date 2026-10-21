@@ -135,6 +135,38 @@ describe("fs routes", () => {
     ac.abort();
   }, 15000);
 
+  it("does not watch build/cache directories", async () => {
+    // A Go/Node project's .cache can hold hundreds of thousands of files; the
+    // watcher walked all of them and blocked the gateway for a minute, so the
+    // tree and every open file stalled behind it.
+    fs.mkdirSync(path.join(root, ".cache", "gomod"), { recursive: true });
+    const ac = new AbortController();
+    const res = (await handleUniversal(authedRequest(`${U}/watch?${q({})}`, { method: "GET", signal: ac.signal })))!;
+    const reader = res.body!.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    let pending: Promise<ReadableStreamReadResult<Uint8Array>> | null = null;
+    const readUntil = async (pred: (s: string) => boolean, ms: number) => {
+      const end = Date.now() + ms;
+      while (Date.now() < end && !pred(buf)) {
+        pending ??= reader.read();
+        const r = await Promise.race([pending, new Promise<null>((ok) => setTimeout(() => ok(null), 200))]);
+        if (!r) continue;
+        pending = null;
+        if (r.value) buf += dec.decode(r.value);
+        if (r.done) break;
+      }
+      return pred(buf);
+    };
+    expect(await readUntil((s) => s.includes('"ready"'), 3000)).toBe(true);
+    await new Promise((r) => setTimeout(r, 300));
+    fs.writeFileSync(path.join(root, ".cache", "gomod", "blob.bin"), "x");
+    // Keep reading: an event that never arrives must not just sit in the pipe.
+    expect(await readUntil((s) => s.includes("gomod"), 3000)).toBe(false);
+    await reader.cancel();
+    ac.abort();
+  }, 20000);
+
   it("requires the gateway token", async () => {
     const res = (await handleUniversal(new Request(`${U}/list?${q({ dir: "" })}`)))!;
     expect(res.status).toBe(401);

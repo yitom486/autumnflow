@@ -7,9 +7,7 @@ export interface FsEntry {
   name: string;
   path: string;
   type: "file" | "dir" | "other";
-  size: number;
-  mtimeMs: number;
-  symlink: boolean;
+  symlink?: boolean;
 }
 export interface FsFile {
   path: string;
