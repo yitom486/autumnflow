@@ -12,13 +12,15 @@
 ### Added
 <!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 
+## [0.1.17] - 2026-10-21
+
+### Added
 ### Fixed
 - 修复按回车没反应、消息静默留在输入框里的问题：发送原先走 assistant-ui 的 `composer.send()`，它在运行时就绪前是个空操作——刷新页面后恢复会话的那段时间里按回车，消息根本没发出去（生成中同理）。现在发送一律交给应用自己处理（忙就排队、不忙就发），不再依赖那个库的内部状态。
 - 修复打开工作区文件夹很慢的问题：目录选择器每次都会顺带探测 WSL 发行版（`wsl.exe -l -q` 冷启动要十几秒），而 WSL 快捷项和目录列表在同一个响应里——**哪怕你选的是本地 Windows 目录，也一样被它拖住**，实测本地目录要 1.8 秒。现在发行版列表改为后台预热 + 缓存（10 分钟），请求路径不再等 wsl.exe，家目录探测结果也缓存下来；目录列表本身改成异步并行 stat。本地目录实测从 1.8 秒降到 50 毫秒左右，WSL 快捷项在弹窗里异步补上。
 - 修复提交时界面卡在「提交中…」的问题：git 路由用同步子进程执行 git 命令，会把整个网关的事件循环堵住。智能体提交时会连续写文件，文件树每次变动都问一次 git status，于是回应提问、聊天流全排在后面——你点「提交」后按钮一直转圈。现在 git 与工作区搜索都改成异步执行，慢的 git 命令不再拖住其它请求。
 - 修复工作台文件树极慢、甚至完全打不开文件的问题：文件监听的初始化会遍历整棵工作区，而忽略名单里只有 node_modules 和 .git——一个 Go 项目的 .cache/gomod（十几万文件）能把这次遍历拖到一分钟以上，期间网关的 fs 队列被占满，打开一个文件要等上几分钟。现在构建产物与工具缓存目录（.cache、.local、dist、target、vendor、.venv 等）不再参与监听，实测扫描从 63 秒降到 0.15 秒、打开文件从 3 分钟降到 1 毫秒。
 - 修复文件接口占用网关事件循环的问题：列目录原本对每个条目同步 stat 一次（文件树根本不用 size/mtime），读文件也是同步读取。现在全部改成异步，列目录只做一次 readdir。
-
 ### Changed
 - 文件树的展开动效换成弹簧：树枝连接线向下生长、文件夹开合图标弹簧互换、展开箭头弹簧旋转（移植自 beUI 的 file-tree，用户开启"减少动态效果"时不播）。文件树仍是懒加载 + 虚拟滚动的实现，拖拽引用、行内重命名与 git 徽标都保留。
 - Markdown 文件的视图切换改名：**预览 / 所见即所得 / 源码 → 阅读 / 编辑 / 源码**。三个都是两字，宽度一致；「所见即所得」是老派直译，说的是技术特性而不是"我能不能直接改"；「预览」一词在应用里原本还表示"临时标签页"，容易混淆。
@@ -410,7 +412,7 @@
   本轮横切另含安全加固、agent 异步按需安装、SSE 发送互斥、前端懒加载拆分，
   细节见各专项条目（此处仅汇总，不编造版本号）。
 
-[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.16...HEAD
+[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.17...HEAD
 [0.1.0]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.0
 [0.1.1]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.1
 [0.1.2]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.2
@@ -428,3 +430,4 @@
 [0.1.14]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.14
 [0.1.15]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.15
 [0.1.16]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.16
+[0.1.17]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.17
