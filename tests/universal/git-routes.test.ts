@@ -58,6 +58,24 @@ describe("git inspection routes", () => {
     expect(data.unified).toContain("+TWO");
   });
 
+  it("never blocks the event loop while git runs", async () => {
+    // spawnSync 会把整个网关堵住：文件树每次文件变动都问一次 git status，
+    // 智能体提交时会连续写文件，于是回应提问、聊天流全排在后面，
+    // 界面就停在"提交中…"。所以这里要求 git 路由走异步 spawn：
+    // 定时器必须先于 git 响应跑出来。
+    if (!hasGit || !repo) return;
+    const order: string[] = [];
+    const pending = handleUniversal(req(`/api/universal/git/status?cwd=${encodeURIComponent(repo)}`))!
+      .then(async (res) => {
+        await res.json();
+        order.push("response");
+      });
+    await new Promise((r) => setTimeout(r, 0));
+    order.push("timer");
+    await pending;
+    expect(order[0]).toBe("timer");
+  });
+
   it("stages and restores a file change", async () => {
     if (!hasGit || !repo) return;
     // Stage new.txt

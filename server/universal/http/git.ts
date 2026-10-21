@@ -5,7 +5,7 @@
  * outputs are byte-capped.
  */
 import { Hono, type Context } from "hono";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { z } from "zod";
@@ -14,26 +14,46 @@ import { gitSpawnForCwd, parseWslCwd, wslUncFromLinux } from "../wsl";
 
 const GIT_MAX_BYTES = 300_000;
 
-function runGit(cwd: string, args: string[]): { ok: boolean; out: string } {
-  try {
-    // WSL 工作区：UNC 做不了子进程 cwd，改走 wsl.exe --cd（仓库语义不变）。
-    const plan = gitSpawnForCwd(process.platform, cwd, args, process.cwd());
-    const r = spawnSync(plan.shell, plan.args, {
-      cwd: plan.spawnCwd,
-      encoding: "utf8",
-      timeout: 15000,
-      maxBuffer: GIT_MAX_BYTES * 2,
-      windowsHide: true,
-    });
-    if (r.error) return { ok: false, out: String(r.error.message || r.error) };
-    const out = typeof r.stdout === "string" ? r.stdout : "";
-    return { ok: r.status === 0, out: out.slice(0, GIT_MAX_BYTES) };
-  } catch (err) {
-    return { ok: false, out: (err as Error).message };
-  }
+/**
+ * 跑一条 git 命令。
+ *
+ * 必须是异步的：spawnSync 会把整个网关的事件循环堵住——文件树在每次文件变动
+ * 后都会问一次 git status，智能体提交时会连续写文件，于是 git status 一次次
+ * 同步执行，其它请求（回应提问、聊天流）全排在后面，界面就成了"提交中…"卡住。
+ */
+function runGit(cwd: string, args: string[]): Promise<{ ok: boolean; out: string }> {
+  return new Promise((resolve) => {
+    try {
+      // WSL 工作区：UNC 做不了子进程 cwd，改走 wsl.exe --cd（仓库语义不变）。
+      const plan = gitSpawnForCwd(process.platform, cwd, args, process.cwd());
+      const child = spawn(plan.shell, plan.args, {
+        cwd: plan.spawnCwd,
+        windowsHide: true,
+      });
+      let out = "";
+      let err = "";
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ ok, out: (out || err).slice(0, GIT_MAX_BYTES) });
+      };
+      const timer = setTimeout(() => {
+        try { child.kill(); } catch {}
+        finish(false);
+      }, 15_000);
+      child.stdout?.on("data", (d) => { out += String(d); });
+      child.stderr?.on("data", (d) => { err += String(d); });
+      child.on("error", () => finish(false));
+      child.on("close", (code) => finish(code === 0));
+    } catch (err) {
+      resolve({ ok: false, out: (err as Error).message });
+    }
+  });
 }
 
-function resolveRepo(cwd: string): { repo?: string; error?: string } {
+async function resolveRepo(cwd: string): Promise<{ repo?: string; error?: string }> {
   if (!cwd || !fs.existsSync(cwd)) {
     if (process.platform === "win32" && String(cwd || "").trim().startsWith("/")) {
       return { error: "cwd 不存在：Windows 网关不认 Linux 路径，WSL 目录请用 \\\\wsl$\\<distro>\\... 形式" };
@@ -41,7 +61,7 @@ function resolveRepo(cwd: string): { repo?: string; error?: string } {
     return { error: "cwd 不存在" };
   }
   const wsl = process.platform === "win32" ? parseWslCwd(cwd) : null;
-  const top = runGit(cwd, ["rev-parse", "--show-toplevel"]);
+  const top = await runGit(cwd, ["rev-parse", "--show-toplevel"]);
   if (!top.ok || !top.out.trim()) return { error: "该目录不是 git 仓库" };
   // WSL 下 rev-parse 吐的是 Linux 路径：映回 UNC，下游 fs 读盘与 prefix 检查才一致。
   const root = wsl ? wslUncFromLinux(wsl.distro, top.out.trim()) : top.out.trim();
@@ -89,11 +109,11 @@ function fileOp(gitArgs: string[], label: string) {
   return async (c: Context<BodyEnv<z.infer<typeof fileOpBody>>>) => {
     try {
       const body = c.get("body");
-      const resolved = resolveRepo(String(body.cwd || ""));
+      const resolved = await resolveRepo(String(body.cwd || ""));
       if (!resolved.repo) return json({ ok: false, error: resolved.error }, 400);
       const target = repoRelative(resolved.repo, String(body.file || ""));
       if (!target) return json({ ok: false, error: "file 必须位于仓库内" }, 400);
-      const res = runGit(resolved.repo, [...gitArgs, "--", target.rel]);
+      const res = await runGit(resolved.repo, [...gitArgs, "--", target.rel]);
       if (!res.ok) return json({ ok: false, error: res.out || `${label} 失败` }, 500);
       return json({ ok: true });
     } catch (err: any) {
@@ -107,12 +127,12 @@ export const gitRouter = new Hono();
 gitRouter.post("/stage", jsonBody(fileOpBody), fileOp(["add"], "git add"));
 gitRouter.post("/restore", jsonBody(fileOpBody), fileOp(["restore"], "git restore"));
 
-gitRouter.get("/status", (c) => {
-  const resolved = resolveRepo(c.req.query("cwd") || "");
+gitRouter.get("/status", async (c) => {
+  const resolved = await resolveRepo(c.req.query("cwd") || "");
   if (!resolved.repo) return json({ ok: false, error: resolved.error }, 400);
   const repo = resolved.repo;
-  const branch = runGit(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
-  const porcelain = runGit(repo, ["status", "--porcelain=v1", "-uall"]);
+  const branch = await runGit(repo, ["rev-parse", "--abbrev-ref", "HEAD"]);
+  const porcelain = await runGit(repo, ["status", "--porcelain=v1", "-uall"]);
   if (!porcelain.ok) return json({ ok: false, error: porcelain.out.slice(0, 300) || "git status 失败" }, 500);
   return json({
     ok: true,
@@ -123,20 +143,20 @@ gitRouter.get("/status", (c) => {
 });
 
 // GET /file?cwd=&file= : before (HEAD) + after (worktree) texts.
-gitRouter.get("/file", (c) => {
-  const resolved = resolveRepo(c.req.query("cwd") || "");
+gitRouter.get("/file", async (c) => {
+  const resolved = await resolveRepo(c.req.query("cwd") || "");
   if (!resolved.repo) return json({ ok: false, error: resolved.error }, 400);
   const repo = resolved.repo;
   const target = repoRelative(repo, c.req.query("file") || "");
   if (!target) return json({ ok: false, error: "file 必须位于仓库内" }, 400);
   const { abs, rel } = target;
-  const numstat = runGit(repo, ["diff", "--numstat", "--", rel]);
+  const numstat = await runGit(repo, ["diff", "--numstat", "--", rel]);
   const binary = numstat.ok && numstat.out.split("\n").some((l) => l.startsWith("-\t-\t"));
   let before: string | null = null;
   let after: string | null = null;
   let unified: string | null = null;
   if (!binary) {
-    const show = runGit(repo, ["show", `HEAD:${rel}`]);
+    const show = await runGit(repo, ["show", `HEAD:${rel}`]);
     if (show.ok) before = show.out.slice(0, GIT_MAX_BYTES);
     try {
       if (fs.existsSync(abs) && fs.statSync(abs).isFile()) {
@@ -148,7 +168,7 @@ gitRouter.get("/file", (c) => {
       console.warn(`[Universal] git/file worktree read failed ${abs}: ${(err as Error).message}`);
       after = null;
     }
-    const diff = runGit(repo, ["diff", "HEAD", "--no-color", "-U3", "--", rel]);
+    const diff = await runGit(repo, ["diff", "HEAD", "--no-color", "-U3", "--", rel]);
     if (diff.ok && diff.out.trim()) unified = diff.out.slice(0, GIT_MAX_BYTES);
   }
   return json({

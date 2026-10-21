@@ -5,7 +5,7 @@
  * WSL 工作区：rg 经 wsl.exe 起（与 git 同式）；walk 经 \\wsl$ 直读，本来就行。
  */
 import { Hono } from "hono";
-import { spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as path from "node:path";
 import { parseWslCwd } from "../wsl";
@@ -42,28 +42,50 @@ function toRel(cwd: string, abs: string): string {
   return path.relative(cwd, abs).split(path.sep).join("/");
 }
 
-/** 同 git.ts 的 WSL 式 spawn：UNC 做不了子进程 cwd，wsl.exe --cd 中转。 */
+/**
+ * 同 git.ts 的 WSL 式 spawn：UNC 做不了子进程 cwd，wsl.exe --cd 中转。
+ *
+ * 异步跑：spawnSync 会把网关的事件循环堵住——全工作区搜索可能要跑十几秒，
+ * 那段时间里聊天流、回应提问全排在后面。
+ */
 function runTool(
   tool: string,
   args: string[],
   cwd: string
-): { ok: boolean; stdout: string; error: string } {
-  try {
-    const wsl = process.platform === "win32" ? parseWslCwd(cwd) : null;
-    const cmd = wsl ? "wsl.exe" : tool;
-    const full = wsl ? ["-d", wsl.distro, "--cd", wsl.linuxPath, "--", tool, ...args] : args;
-    const r = spawnSync(cmd, full, {
-      cwd: wsl ? process.cwd() : cwd,
-      encoding: "utf8",
-      timeout: 15000,
-      maxBuffer: 8 * 1024 * 1024,
-      windowsHide: true,
-    });
-    if (r.error) return { ok: false, stdout: "", error: String(r.error.message || r.error) };
-    return { ok: r.status === 0, stdout: typeof r.stdout === "string" ? r.stdout : "", error: "" };
-  } catch (err) {
-    return { ok: false, stdout: "", error: (err as Error).message };
-  }
+): Promise<{ ok: boolean; stdout: string; error: string }> {
+  return new Promise((resolve) => {
+    try {
+      const wsl = process.platform === "win32" ? parseWslCwd(cwd) : null;
+      const cmd = wsl ? "wsl.exe" : tool;
+      const full = wsl ? ["-d", wsl.distro, "--cd", wsl.linuxPath, "--", tool, ...args] : args;
+      const child = spawn(cmd, full, {
+        cwd: wsl ? process.cwd() : cwd,
+        windowsHide: true,
+      });
+      let stdout = "";
+      let stderr = "";
+      let settled = false;
+      const finish = (ok: boolean) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolve({ ok, stdout, error: stderr });
+      };
+      const timer = setTimeout(() => {
+        try { child.kill(); } catch {}
+        finish(false);
+      }, 15000);
+      child.stdout?.on("data", (d) => { stdout += String(d); });
+      child.stderr?.on("data", (d) => { stderr += String(d); });
+      child.on("error", (e) => {
+        stderr = String(e?.message || e);
+        finish(false);
+      });
+      child.on("close", (code) => finish(code === 0));
+    } catch (err) {
+      resolve({ ok: false, stdout: "", error: (err as Error).message });
+    }
+  });
 }
 
 function pushMatch(
@@ -164,7 +186,7 @@ export function walkSearch(cwd: string, q: string, limit: number): { matches: Se
 
 export const searchRouter = new Hono();
 
-searchRouter.get("/", (c) => {
+searchRouter.get("/", async (c) => {
   const t0 = Date.now();
   const cwd = (c.req.query("cwd") || "").trim();
   const q = (c.req.query("q") || "").trim();
@@ -186,7 +208,7 @@ searchRouter.get("/", (c) => {
   let engine: "rg" | "walk" = "walk";
   let matches: SearchMatch[] = [];
   let truncated = false;
-  const r = runTool("rg", [
+  const r = await runTool("rg", [
     "--json",
     "--line-number",
     "--column",
