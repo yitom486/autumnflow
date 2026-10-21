@@ -493,6 +493,7 @@ export default function App() {
               queuedPrompts={s.queuedPrompts}
               onWithdraw={handleWithdraw}
               onQueue={(text) => void handleSend(text)}
+              onSubmitPrompt={(text) => void handleSend(text)}
               onSteer={handleSteer}
               restoredText={s.input}
               onClear={() => !s.isStreaming && s.setMessages([])}

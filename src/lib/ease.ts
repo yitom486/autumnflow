@@ -48,6 +48,9 @@ export const SPRING_MOUSE = {
   mass: 0.3,
 } as const;
 
+/** Tree branch connectors drawing themselves downwards when a folder opens. */
+export const BRANCH_DRAW = { duration: 0.3, ease: EASE_OUT } as const;
+
 /** Dragged handles and fills (sliders) — critically damped `useSpring` config,
  * so the value follows the pointer butterily and never rebounds off an end. */
 export const SPRING_GLIDE = {

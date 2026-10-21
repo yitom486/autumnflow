@@ -67,6 +67,13 @@ export interface AcpComposerProps {
   onWithdraw?: (id: string) => void;
   /** Queue a prompt typed while the agent is working. */
   onQueue?: (text: string) => void;
+  /**
+   * 把输入框里的内容交给应用：忙就排队，不忙就发。
+   *
+   * 不走 assistant-ui 的 composer.send()——它在运行时就绪前是个空操作（刷新页面
+   * 后恢复会话的那段时间里按 Enter，消息会静默留在输入框里发不出去）。
+   */
+  onSubmitPrompt?: (text: string) => void;
   /** Interrupt the running turn and send this prompt right away. */
   onSteer?: (text: string) => Promise<void>;
   /** Text the app hands back after a failed send (the composer cleared it). */
@@ -287,15 +294,18 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
   }, [composerText]);
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
-    // While the agent is working, assistant-ui's own send() is a no-op
-    // (canSend is false while a message is in flight), so a typed prompt
-    // would never reach the app. Route it to the queue instead.
-    if (p.isStreaming && e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    // 发送一律交给应用（应用自己决定排队还是发送）。
+    //
+    // 不能用 assistant-ui 的 composer.send()：它在运行时就绪前是个空操作——刷新
+    // 页面后恢复会话的那段时间里按 Enter，消息会静默留在输入框里发不出去；生成
+    // 中同理（canSend 为 false）。用户看到的就是"按了回车没反应"。
+    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
       const text = composerText.trim();
       if (!text) return;
       e.preventDefault();
       clearDraft();
-      p.onQueue?.(text);
+      if (p.onSubmitPrompt) p.onSubmitPrompt(text);
+      else if (p.isStreaming) p.onQueue?.(text);
       aui.composer.setText("");
       return;
     }
@@ -695,8 +705,11 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
 
   const handleSendClick = () => {
     if (canSendText) {
+      const text = composerText.trim();
       clearDraft();
-      aui.composer.send();
+      // 同 Enter：走应用，不走 assistant-ui 的 send()（就绪前是空操作）。
+      if (p.onSubmitPrompt) p.onSubmitPrompt(text);
+      else aui.composer.send();
     } else if (p.attachments.length > 0) p.onSendAttachmentOnly();
   };
 

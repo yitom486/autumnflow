@@ -20,6 +20,7 @@ afterEach(() => {
 function Harness(props: {
   isStreaming: boolean;
   onQueue: (text: string) => void;
+  onSubmitPrompt?: (text: string) => void;
   onWithdraw: (id: string) => void;
   queuedPrompts?: QueuedPrompt[];
   restoredText?: string;
@@ -42,6 +43,7 @@ function Harness(props: {
     connected: false,
     currentWorkspace: "D:/repo",
     onQueue: props.onQueue,
+    onSubmitPrompt: props.onSubmitPrompt,
     onWithdraw: props.onWithdraw,
     queuedPrompts: props.queuedPrompts,
     restoredText: props.restoredText,
@@ -96,6 +98,22 @@ describe("composer queue", () => {
       // The composer is emptied: the prompt now lives in the queue.
       await act(async () => {});
       expect((el.querySelector("textarea") as HTMLTextAreaElement).value).toBe("");
+    } finally {
+      root.unmount();
+      el.remove();
+    }
+  });
+
+  it("hands the prompt to the app even when the agent is not working", async () => {
+    // assistant-ui 的 composer.send() 在运行时就绪前是空操作：刷新页面后恢复会话的
+    // 那段时间里按 Enter，消息会静默留在输入框里发不出去。所以发送一律走应用。
+    const onSubmitPrompt = vi.fn();
+    const { el, root } = await renderComposer({ isStreaming: false, onQueue: () => {}, onSubmitPrompt, initialText: "这条要发出去" });
+    try {
+      pressEnter(el);
+      expect(onSubmitPrompt).toHaveBeenCalledWith("这条要发出去");
+      await act(async () => {});
+      expect(textareaValue(el)).toBe("");
     } finally {
       root.unmount();
       el.remove();

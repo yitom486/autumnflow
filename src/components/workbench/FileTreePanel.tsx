@@ -4,6 +4,7 @@
  */
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from "react-arborist";
+import { AnimatePresence, motion, useReducedMotion } from "framer-motion";
 import {
   ChevronRight, File, FileCode2, FileJson, FileText, Folder, FolderOpen, FilePlus2, FolderPlus, RefreshCw, ChevronsDownUp, Image as ImageIcon, Link2, Search, Eye,
 } from "lucide-react";
@@ -12,6 +13,7 @@ import { gitStatus, searchWorkspace, type SearchMatch } from "@/lib/universal-ap
 import { openDiff, openFile, applyWatchEvents } from "@/lib/workbench-actions";
 import { useWorkbenchStore } from "@/stores/useWorkbenchStore";
 import { cn } from "@/lib/utils";
+import { BRANCH_DRAW, SPRING_SWAP } from "@/lib/ease";
 import { ACP_PATH_MIME, encodeDragRefs, setActiveDragRefs } from "@/lib/composer-drop";
 import { reportError } from "@/lib/error-bus";
 
@@ -134,6 +136,34 @@ function fileColor(name: string): string {
   return "text-muted-foreground";
 }
 
+/**
+ * 文件夹图标：开合两个图标弹簧互换（移植自 beUI 的 file-tree）。
+ * 用户开了"减少动态效果"时就不播动画，直接换图标。
+ */
+function FolderSwap({ open, reduce }: { open: boolean; reduce: boolean }) {
+  if (reduce) {
+    return open
+      ? <FolderOpen className="h-3.5 w-3.5 text-primary" />
+      : <Folder className="h-3.5 w-3.5 text-primary/75" />;
+  }
+  return (
+    <AnimatePresence initial={false} mode="popLayout">
+      <motion.span
+        key={open ? "open" : "closed"}
+        initial={{ opacity: 0, scale: 0.75, rotate: open ? -8 : 8 }}
+        animate={{ opacity: 1, scale: 1, rotate: 0 }}
+        exit={{ opacity: 0, scale: 0.75, rotate: open ? 8 : -8 }}
+        transition={SPRING_SWAP}
+        className="absolute inset-0 grid place-items-center"
+      >
+        {open
+          ? <FolderOpen className="h-3.5 w-3.5 text-primary" />
+          : <Folder className="h-3.5 w-3.5 text-primary/75" />}
+      </motion.span>
+    </AnimatePresence>
+  );
+}
+
 const joinAbs = (cwd: string, rel: string) => {
   const sep = cwd.includes("\\") && !cwd.includes("/") ? "\\" : "/";
   return rel ? `${cwd.replace(/[\\/]$/, "")}${sep}${rel.split("/").join(sep)}` : cwd;
@@ -142,6 +172,8 @@ const joinAbs = (cwd: string, rel: string) => {
 interface MenuState { x: number; y: number; node: TreeNode | null }
 
 export const FileTreePanel: React.FC<{ cwd: string | null }> = ({ cwd }) => {
+  // 用户在系统里开了"减少动态效果"时，展开/收起的动画就不播。
+  const reduce = useReducedMotion() ?? false;
   const [data, setData] = useState<TreeNode[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [git, setGit] = useState(() => buildGitMaps([]));
@@ -373,7 +405,7 @@ export const FileTreePanel: React.FC<{ cwd: string | null }> = ({ cwd }) => {
       const isDir = d.type === "dir";
       const st = isDir ? null : git.fileMap.get(d.id);
       const dirChanged = isDir && git.dirSet.has(d.id);
-      const Icon = isDir ? (node.isOpen ? FolderOpen : Folder) : d.type === "other" ? Link2 : fileIcon(d.name);
+      const Icon = d.type === "other" ? Link2 : fileIcon(d.name);
       return (
         <div
           ref={dragHandle}
@@ -416,33 +448,48 @@ export const FileTreePanel: React.FC<{ cwd: string | null }> = ({ cwd }) => {
           }}
           title={st ? `${d.id} · ${STATUS_LABEL[st] || st}` : d.id}
         >
-          {/* beUI Branch connecting lines for nested depth */}
+          {/* 树枝连接线：展开时向下生长（与 beUI file-tree 同款动效） */}
           {node.level > 0 &&
             Array.from({ length: node.level }).map((_, i) => (
-              <span
+              <motion.span
                 key={i}
                 aria-hidden="true"
-                className="pointer-events-none absolute top-0 bottom-0 w-px bg-border/60"
+                initial={reduce ? false : { opacity: 0, scaleY: 0 }}
+                animate={{ opacity: 1, scaleY: 1 }}
+                transition={reduce ? { duration: 0 } : BRANCH_DRAW}
+                className="pointer-events-none absolute top-0 bottom-0 w-px origin-top bg-border/60"
                 style={{ left: `${8 + i * 16}px` }}
               />
             ))}
 
           <span className="w-3.5 shrink-0 flex justify-center z-10">
             {isDir && (
-              <ChevronRight
-                className={cn(
-                  "h-3.5 w-3.5 transition-transform duration-200 ease-out",
-                  node.isOpen ? "rotate-90 text-foreground" : "text-muted-foreground/80"
-                )}
-              />
+              <motion.span
+                animate={{ rotate: node.isOpen ? 90 : 0 }}
+                transition={reduce ? { duration: 0 } : SPRING_SWAP}
+                className="grid place-items-center"
+              >
+                <ChevronRight
+                  className={cn(
+                    "h-3.5 w-3.5",
+                    node.isOpen ? "text-foreground" : "text-muted-foreground/80"
+                  )}
+                />
+              </motion.span>
             )}
           </span>
-          <Icon
-            className={cn(
-              "h-3.5 w-3.5 shrink-0 z-10 transition-colors",
-              isDir ? (node.isOpen ? "text-primary" : "text-primary/75") : fileColor(d.name)
-            )}
-          />
+          {isDir ? (
+            <span className="relative z-10 grid h-3.5 w-3.5 shrink-0 place-items-center">
+              <FolderSwap open={node.isOpen} reduce={!!reduce} />
+            </span>
+          ) : (
+            <Icon
+              className={cn(
+                "h-3.5 w-3.5 shrink-0 z-10 transition-colors",
+                d.type === "other" ? "" : fileColor(d.name)
+              )}
+            />
+          )}
           {node.isEditing ? (
             <input
               autoFocus
@@ -466,7 +513,7 @@ export const FileTreePanel: React.FC<{ cwd: string | null }> = ({ cwd }) => {
       );
     };
     return Comp;
-  }, [git, activeId, schedulePrefetch, cancelPrefetch]);
+  }, [git, activeId, schedulePrefetch, cancelPrefetch, reduce]);
 
   if (!cwd) {
     return <div className="p-4 text-xs text-muted-foreground">先在左侧选择一个工作区，或用“文件 → 打开文件夹”。</div>;
