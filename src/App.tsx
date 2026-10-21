@@ -506,7 +506,6 @@ export default function App() {
               onQueue={(text) => void handleSend(text)}
               onSubmitPrompt={(text) => void handleSend(text)}
               onSteer={handleSteer}
-              restoredText={s.input}
               onClear={() => !sessionBusy && s.setMessages([])}
               isStreaming={sessionBusy}
               commands={s.availableCommands}

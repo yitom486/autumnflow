@@ -23,7 +23,6 @@ function Harness(props: {
   onSubmitPrompt?: (text: string) => void;
   onWithdraw: (id: string) => void;
   queuedPrompts?: QueuedPrompt[];
-  restoredText?: string;
   initialText?: string;
 }) {
   const aui = useAui();
@@ -46,7 +45,6 @@ function Harness(props: {
     onSubmitPrompt: props.onSubmitPrompt,
     onWithdraw: props.onWithdraw,
     queuedPrompts: props.queuedPrompts,
-    restoredText: props.restoredText,
   } as any);
 }
 
@@ -143,10 +141,12 @@ describe("composer queue", () => {
   });
 
   it("puts a prompt the app handed back into the composer", async () => {
-    const { el, root } = await renderComposer({ restoredText: "别把我弄丢了" });
+    // 发送失败时应用把提示词还回这个会话的草稿，composer 要把它显示出来。
+    const { el, root } = await renderComposer();
     try {
-      await act(async () => {});
-      expect((el.querySelector("textarea") as HTMLTextAreaElement).value).toBe("别把我弄丢了");
+      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
+      await act(async () => { useStudioStore.getState().setDraft("s-1", "别把我弄丢了"); });
+      expect(textareaValue(el)).toBe("别把我弄丢了");
     } finally {
       root.unmount();
       el.remove();
@@ -154,10 +154,13 @@ describe("composer queue", () => {
   });
 
   it("never overwrites what the user typed in the meantime", async () => {
-    const { el, root } = await renderComposer({ restoredText: "别把我弄丢了", initialText: "我刚打的字" });
+    const { el, root } = await renderComposer();
     try {
-      await act(async () => {});
-      expect((el.querySelector("textarea") as HTMLTextAreaElement).value).toBe("我刚打的字");
+      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
+      await act(async () => type(el, "我刚打的字"));
+      // 应用把失败的提示词还回来——但用户正在打的字不能被顶掉。
+      await act(async () => { useStudioStore.getState().setDraft("s-1", "别把我弄丢了"); });
+      expect(textareaValue(el)).toBe("我刚打的字");
     } finally {
       root.unmount();
       el.remove();
@@ -166,13 +169,18 @@ describe("composer queue", () => {
 });
 
 describe("composer draft", () => {
-  it("keeps the text the user typed when the runtime rebuilds its thread scope", async () => {
+  it("keeps each session's own text when switching between them", async () => {
     const { el, root } = await renderComposer();
     try {
+      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
       await act(async () => type(el, "我刚打的字"));
       expect(textareaValue(el)).toBe("我刚打的字");
-      // The app learns the session id: the runtime drops its thread scope and
-      // the composer goes with it.
+
+      // 切到另一个会话：那边是空的
+      await act(async () => { useStudioStore.setState({ sessionId: "s-2" }); });
+      expect(textareaValue(el)).toBe("");
+
+      // 切回来：自己的字还在
       await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
       expect(textareaValue(el)).toBe("我刚打的字");
     } finally {
@@ -184,10 +192,11 @@ describe("composer draft", () => {
   it("does not bring back what the user cleared themselves", async () => {
     const { el, root } = await renderComposer();
     try {
+      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
       await act(async () => type(el, "先写点东西"));
       await act(async () => type(el, ""));
       expect(textareaValue(el)).toBe("");
-      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
+      await act(async () => { useStudioStore.setState({ sessionId: "s-2" }); });
       expect(textareaValue(el)).toBe("");
     } finally {
       root.unmount();
@@ -198,10 +207,11 @@ describe("composer draft", () => {
   it("does not bring back a prompt that was already sent", async () => {
     const { el, root } = await renderComposer();
     try {
+      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
       await act(async () => type(el, "发出去的消息"));
       await act(async () => pressEnter(el));
       expect(textareaValue(el)).toBe("");
-      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
+      await act(async () => { useStudioStore.setState({ sessionId: "s-2" }); });
       expect(textareaValue(el)).toBe("");
     } finally {
       root.unmount();

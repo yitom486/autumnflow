@@ -102,7 +102,6 @@ export const AgentStatusChip: React.FC<{
 
   const storeQuota = useStudioStore((s) => s.quota);
   const setQuota = useStudioStore((s) => s.setQuota);
-  const setInput = useStudioStore((s) => s.setInput);
   const codeModeOn = useStudioStore((s) => (s.activeThreadId ? s.threads[s.activeThreadId]?.codeMode === true : false));
   const setThreadCodeMode = useStudioStore((s) => s.setThreadCodeMode);
 

@@ -92,10 +92,13 @@ interface StudioState {
   /** Durable pointer used by refresh/window recovery to follow a live turn. */
   activeTurn: ActiveTurn | null;
   // composer
-  input: string;
   attachments: Attachment[];
   /** 正在生成的那一轮属于哪个会话：会话之间互不影响。 */
   streamingSessionId: string | null;
+  /** 消息 id → 它属于哪个会话（后台那轮的输出要写回自己的会话）。 */
+  messageOwner: Record<string, string>;
+  /** 每个会话的输入框草稿：切来切去不丢自己打的字。 */
+  drafts: Record<string, string>;
   /** 正在生成（全局：应用手里有一轮在跑）；是否"本会话在忙"看 streamingSessionId。 */
   isStreaming: boolean;
   busy: boolean;
@@ -170,7 +173,8 @@ interface StudioState {
   clearQueuedPrompts: () => void;
   setActiveTurn: (turn: ActiveTurn | null) => void;
   patchActiveTurn: (patch: Partial<ActiveTurn>) => void;
-  setInput: (v: string) => void;
+  /** 记下这个会话的输入框内容（按会话存，切会话不丢）。 */
+  setDraft: (sessionId: string | null | undefined, text: string) => void;
   setAttachments: (a: Attachment[]) => void;
   setStreaming: (v: boolean) => void;
   setBusy: (v: boolean) => void;
@@ -489,9 +493,10 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
   // Show the last known catalog instantly; a fresh session/new will replace it.
   models: initialCatalog?.models ?? null,
   configOptions: initialCatalog?.configOptions ?? null,
-  input: "",
   isStreaming: false,
   streamingSessionId: null,
+  messageOwner: {} as Record<string, string>,
+  drafts: {} as Record<string, string>,
   busy: false,
   discovering: false,
   authOpen: false,
@@ -603,7 +608,6 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
             sessionId: null,
             activeThreadId: null,
             messages: [],
-            input: "",
           };
         }
       }
@@ -634,9 +638,10 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
             activeThreadId: null,
             // A switch also stops treating the old turn/draft as live input.
             isStreaming: false,
-  streamingSessionId: null,
+            streamingSessionId: null,
+            messageOwner: {} as Record<string, string>,
+            drafts: {} as Record<string, string>,
             busy: false,
-            input: "",
           }
     );
   },
@@ -705,7 +710,12 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
   setQuota: (q) => set({ quota: q }),
   setSessionInfo: (info) => set({ sessionInfo: info }),
   setMessages: (m) => set({ messages: mergeAssistantTurns(m) }),
-  appendMessage: (m) => set((s) => ({ messages: mergeAssistantTurns([...s.messages, m]) })),
+  appendMessage: (m) => set((s) => ({
+    messages: mergeAssistantTurns([...s.messages, m]),
+    // 记住这条消息属于哪个会话：后台那一轮的输出要写回它自己的会话，
+    // 不能掉进用户正在看的那个会话里。
+    messageOwner: s.activeThreadId ? { ...s.messageOwner, [m.id]: s.activeThreadId } : s.messageOwner,
+  })),
   enqueuePrompt: (text) => {
     const item: QueuedPrompt = { id: `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, text, createdAt: Date.now() };
     // 排队是会话内的事：挂在所属会话上，别让 A 会话的队列跑到 B 会话去。
@@ -740,13 +750,33 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
     return { queuedPrompts: [] };
   }),
   patchMessage: (id, patch) =>
-    set((s) => ({
-      messages: s.messages.map((m) => (m.id === id ? (typeof patch === "function" ? patch(m) : { ...m, ...patch }) : m)),
-    })),
+    set((s) => {
+      const apply = (m: any) =>
+        m.id === id ? (typeof patch === "function" ? patch(m) : { ...m, ...patch }) : m;
+      // 这条消息可能属于后台正在跑的那个会话：改在它自己的会话里，
+      // 当前视图只有正好是同一个会话时才跟着更新。
+      const owner = s.messageOwner[id];
+      if (owner && owner !== s.activeThreadId) {
+        const thread = s.threads[owner];
+        if (!thread) return { messages: s.messages.map(apply) };
+        return {
+          threads: { ...s.threads, [owner]: { ...thread, messages: thread.messages.map(apply) } },
+        };
+      }
+      return { messages: s.messages.map(apply) };
+    }),
   setActiveTurn: (turn) => set({ activeTurn: turn }),
   patchActiveTurn: (patch) =>
     set((s) => ({ activeTurn: s.activeTurn ? { ...s.activeTurn, ...patch } : null })),
-  setInput: (v) => set({ input: v }),
+  setDraft: (sessionId, text) => set((s) => {
+    const key = sessionId || "";
+    if (!text) {
+      if (!(key in s.drafts)) return s;
+      const { [key]: _dropped, ...rest } = s.drafts;
+      return { drafts: rest };
+    }
+    return { drafts: { ...s.drafts, [key]: text } };
+  }),
   setAttachments: (a) => set({ attachments: a }),
   setStreaming: (v) => set({ isStreaming: v, streamingSessionId: v ? get().sessionId : null }),
   setBusy: (v) => set({ busy: v }),
@@ -1002,9 +1032,10 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       activeThreadId: null,
       // Persisted thread records survive a full reset (tests clear storage).
       threads: s.threads,
-      input: "",
       isStreaming: false,
-  streamingSessionId: null,
+      streamingSessionId: null,
+      messageOwner: {} as Record<string, string>,
+      drafts: {} as Record<string, string>,
       busy: false,
       discovering: false,
       authOpen: false,
@@ -1054,7 +1085,8 @@ const STUDIO_SHALLOW_SELECTOR = (s: StudioState) => ({
   quota: s.quota,
   sessionInfo: s.sessionInfo,
   // composer / busy
-  input: s.input,
+  drafts: s.drafts,
+  setDraft: s.setDraft,
   attachments: s.attachments,
   isStreaming: s.isStreaming,
   streamingSessionId: s.streamingSessionId,
@@ -1094,7 +1126,6 @@ const STUDIO_SHALLOW_SELECTOR = (s: StudioState) => ({
   setSettingsOpen: s.setSettingsOpen,
   setProvidersOpen: s.setProvidersOpen,
   setModelsOpen: s.setModelsOpen,
-  setInput: s.setInput,
   setAttachments: s.setAttachments,
   setMessages: s.setMessages,
   setQuota: s.setQuota,

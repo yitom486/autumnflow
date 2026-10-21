@@ -216,7 +216,10 @@ export function useChatSend({
     async (textToSend?: string) => {
       const st = useStudioStore.getState();
       const agentId = st.activeAgentId;
-      const prompt = (textToSend ?? st.input).trim();
+      // 草稿按会话存：这里读的是"当前会话"那份。
+      const sendSessionId = st.sessionId;
+      const draft = st.drafts[sendSessionId ?? ""] ?? "";
+      const prompt = (textToSend ?? draft).trim();
       if (!prompt && st.attachments.length === 0) return;
       // The agent is still working: queue the prompt instead of dropping it.
       // The user sees it in the composer and can withdraw it. A send that is
@@ -245,9 +248,9 @@ export function useChatSend({
         (st.attachments.length > 0
           ? `\n\n[附件: ${st.attachments.map((a) => a.name).join(", ")}]`
           : "");
-      st.setInput("");
+      // 草稿清掉（按会话）——发出去的内容不该留在输入框里。
+      st.setDraft(sendSessionId, "");
       st.setAttachments([]);
-
       // If currently active thread was marked stale (historical view), start fresh thread for this prompt
       const curThread0 = st.activeThreadId ? st.threads[st.activeThreadId] : undefined;
       if (curThread0?.stale) {
@@ -814,7 +817,9 @@ export function useChatSend({
         // The prompt leaves the composer as soon as the send starts. If the
         // turn never began (the session could not be resolved, the request was
         // aborted), give it back instead of dropping what the user typed.
-        if (!turnStarted && !c2.input) c2.setInput(prompt);
+        // 还给"发起这一轮的那个会话"，别还到用户现在看的那个会话去。
+        const draftKey = sendSessionId ?? "";
+        if (!turnStarted && !(c2.drafts[draftKey] ?? "")) c2.setDraft(draftKey, prompt);
         if (c2.activeTurn?.turnId === turnId && c2.activeTurn.status === "running") {
           c2.patchActiveTurn({
             status: controller.signal.aborted ? "interrupted" : "error",

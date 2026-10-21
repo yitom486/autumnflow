@@ -167,7 +167,8 @@ describe("send retry policy", () => {
     try {
       await act(async () => { await send("别把我弄丢了"); });
       const state = useStudioStore.getState();
-      expect(state.input).toBe("别把我弄丢了");
+      // 草稿按会话存：还给"发起这一轮的那个会话"
+      expect(state.drafts[state.sessionId ?? ""] ?? "").toBe("别把我弄丢了");
       expect(state.messages.some((m) => m.role === "user")).toBe(false);
     } finally { root.unmount(); el.remove(); }
   });

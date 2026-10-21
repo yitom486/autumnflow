@@ -36,7 +36,7 @@ import { fsList } from "@/lib/fs-api";
 import { matchSlashToken, replaceSlashToken, mergeCommands, filterCommands, type SlashCommand } from "@/lib/slash-commands";
 import { ACP_INSERT_SNIPPET_EVENT, ACP_COMPOSER_DROP_EVENT, formatSnippetPrompt, type CodeSnippetPayload, type ComposerDropPayload } from "@/lib/composer-bridge";
 import { useWorkbenchStore } from "@/stores/useWorkbenchStore";
-import { getWorkspaceEnv, type QueuedPrompt } from "@/stores/useStudioStore";
+import { getWorkspaceEnv, useStudioStore, type QueuedPrompt } from "@/stores/useStudioStore";
 
 export interface AcpComposerProps {
   onSendAttachmentOnly: () => void;
@@ -76,8 +76,6 @@ export interface AcpComposerProps {
   onSubmitPrompt?: (text: string) => void;
   /** Interrupt the running turn and send this prompt right away. */
   onSteer?: (text: string) => Promise<void>;
-  /** Text the app hands back after a failed send (the composer cleared it). */
-  restoredText?: string;
   currentWorkspace?: string | null;
   recentWorkspaces?: Array<{ path: string; name: string; lastOpened: number }>;
   onSelectWorkspace?: (path: string, name?: string) => void;
@@ -271,27 +269,38 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
     }
   };
 
-  // The runtime keeps the composer inside the thread scope, and it rebuilds
-  // that scope whenever the app restores its session. The text the user just
-  // typed lived only in that scope and was gone. Keep a copy here and put it
-  // back; the copy is dropped as soon as the text is sent, queued or steered.
-  const draftRef = useRef("");
+  // 输入框的内容归 store 按会话管：切会话不会丢自己打的字，切回来还在。
+  // 运行时的 composer 只是显示层，事实源是 store 里的草稿。
+  const sessionId = useStudioStore((s) => s.sessionId);
+  const sessionDraft = useStudioStore((s) => s.drafts[s.sessionId ?? ""] ?? "");
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    draftRef.current = e.target.value;
+    useStudioStore.getState().setDraft(sessionId, e.target.value);
   };
   const clearDraft = () => {
-    draftRef.current = "";
+    useStudioStore.getState().setDraft(sessionId, "");
   };
+
+  // 会话 id 是连上 agent 之后才有的。在那之前用户打的字先记在"未绑定"那一份里，
+  // 会话 id 一到就搬过去——否则运行时会话作用域重建时那字就白打了。
+  const prevSessionRef = useRef(sessionId);
   useEffect(() => {
-    // Whatever the composer holds now (typed or filled in by the app) is the
-    // text to keep. An empty composer is either cleared by the user — the
-    // input handler already dropped the copy — or dropped by the runtime.
-    if (composerText) {
-      draftRef.current = composerText;
-      return;
-    }
-    if (draftRef.current) aui.composer.setText(draftRef.current);
-  }, [composerText]);
+    const prev = prevSessionRef.current;
+    prevSessionRef.current = sessionId;
+    if (prev !== null || !sessionId) return;
+    const st = useStudioStore.getState();
+    const unbound = st.drafts[""];
+    if (!unbound) return;
+    if (!st.drafts[sessionId]) st.setDraft(sessionId, unbound);
+    st.setDraft("", "");
+  }, [sessionId]);
+
+  // 每次渲染都校一次，而不是等某个"会话切换"的信号：运行时会异步重建线程作用域
+  // （重建完输入框就空了），没有"重建完成"的钩子可等。输入框空着而这个会话的草稿
+  // 还在，就把它放回去；用户正在打的字不碰。
+  useEffect(() => {
+    if (composerText || !sessionDraft) return;
+    aui.composer.setText(sessionDraft);
+  });
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // 发送一律交给应用（应用自己决定排队还是发送）。
@@ -694,14 +703,6 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
 
   const canSendText = composerText.trim().length > 0;
   const canSendAny = canSendText || p.attachments.length > 0;
-
-  // The composer clears its text on submit. When a send fails the app hands
-  // the prompt back, and it has to land in the composer — not in a field
-  // nobody shows. Only when the composer is empty, so a message the user
-  // typed in the meantime is never overwritten.
-  useEffect(() => {
-    if (p.restoredText && !composerText) aui.composer.setText(p.restoredText);
-  }, [p.restoredText, composerText]);
 
   const handleSendClick = () => {
     if (canSendText) {
