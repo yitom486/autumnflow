@@ -1012,27 +1012,31 @@ const AssistantMessageView: React.FC<{
                 }
                 summary={activitySummary}
                 renderWorkingStatus={({ label, duration }) => (
-                  <div className="flex items-center gap-2 text-xs">
+                  <div className="flex items-center gap-2 text-xs min-w-0">
                     <Loader
                       variant="ascii-braille"
                       size={13}
                       speed={0.8}
                       className="text-primary font-bold shrink-0"
                     />
-                    {typeof label === "string" ? (
-                      <ThinkingShimmer duration={1.8} className="font-medium text-foreground">
-                        {label}
-                      </ThinkingShimmer>
-                    ) : (
-                      label
-                    )}
+                    {/* 状态标签只占一行：工具名可能是一整条命令，展开成三行会把
+                        下面的工具列表挤到屏外。 */}
+                    <span className="min-w-0 flex-1 truncate" title={typeof label === "string" ? label : undefined}>
+                      {typeof label === "string" ? (
+                        <ThinkingShimmer duration={1.8} className="font-medium text-foreground">
+                          {label}
+                        </ThinkingShimmer>
+                      ) : (
+                        label
+                      )}
+                    </span>
                     {regularTools.length > 0 && (
-                      <span className="font-mono text-[10px] text-muted-foreground">
+                      <span className="shrink-0 whitespace-nowrap font-mono text-[10px] text-muted-foreground">
                         · 工具调用 · {regularTools.length}
                       </span>
                     )}
                     {duration > 0 && (
-                      <span className="font-mono text-[10px] tabular-nums text-muted-foreground ml-auto">
+                      <span className="shrink-0 whitespace-nowrap font-mono text-[10px] tabular-nums text-muted-foreground ml-auto">
                         {Math.round(duration)}s
                       </span>
                     )}

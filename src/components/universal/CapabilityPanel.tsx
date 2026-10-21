@@ -93,7 +93,7 @@ export const CapabilityPanel: React.FC<CapabilityPanelProps> = ({ isOpen, onClos
 
   return (
     <Dialog open={isOpen} onOpenChange={(open) => { if (!open) onClose(); }}>
-      <DialogContent className="max-w-[min(680px,calc(100vw-32px))] max-h-[88vh] overflow-y-auto border-border bg-card p-5">
+      <DialogContent className="max-w-[min(880px,calc(100vw-32px))] max-h-[88vh] overflow-y-auto border-border bg-card p-5">
         <DialogHeader className="text-left">
           <DialogTitle className="flex items-center gap-2 text-base">
             <PlugZap className="w-5 h-5 text-primary" /> MCP 与技能
@@ -159,7 +159,7 @@ export const CapabilityPanel: React.FC<CapabilityPanelProps> = ({ isOpen, onClos
                     <div className="min-w-0">
                       <div className="text-xs font-medium text-foreground">{tool.title}</div>
                       <div className="text-[11px] text-muted-foreground">{tool.summary}</div>
-                      <div className="text-[11px] font-mono text-muted-foreground/80 break-all">{tool.name}</div>
+                      <div className="truncate text-[11px] font-mono text-muted-foreground/80" title={tool.name}>{tool.name}</div>
                     </div>
                     <Switch
                       checked={tool.enabled}
@@ -190,7 +190,7 @@ export const CapabilityPanel: React.FC<CapabilityPanelProps> = ({ isOpen, onClos
                       <div className="min-w-0">
                         <div className="text-xs font-medium text-foreground">{skill.title || skill.name}</div>
                         <div className="text-[11px] text-muted-foreground">{skill.description}</div>
-                        <div className="text-[11px] font-mono text-muted-foreground/80 break-all">{skill.name}</div>
+                        <div className="truncate text-[11px] font-mono text-muted-foreground/80" title={skill.name}>{skill.name}</div>
                       </div>
                       <Switch
                         checked={skill.enabled}

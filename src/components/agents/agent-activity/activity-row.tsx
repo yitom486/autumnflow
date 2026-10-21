@@ -53,14 +53,15 @@ function StepRow({ item }: { item: AgentActivityStep }) {
       </span>
       <span
         className={cn(
-          "min-w-0 flex-1 leading-5",
+          "min-w-0 flex-1 truncate leading-5",
           state === "pending" ? "text-muted-foreground/55" : "text-foreground/90",
         )}
+        title={typeof item.label === "string" ? item.label : undefined}
       >
         {item.label}
       </span>
       {item.meta ? (
-        <span className="shrink-0 leading-5 text-muted-foreground/55">
+        <span className="shrink-0 whitespace-nowrap leading-5 text-muted-foreground/55">
           {item.meta}
         </span>
       ) : null}
@@ -197,8 +198,8 @@ function ToolRow({ item }: { item: AgentActivityTool }) {
         >
           <ActionIcon action={item.action} />
         </span>
-        <span className="shrink-0 font-medium text-foreground/90">{action}</span>
-        <span className="min-w-0 flex-1 truncate rounded-lg bg-muted/80 px-2.5 py-1 font-mono text-xs text-muted-foreground/70">
+        <span className="shrink-0 whitespace-nowrap font-medium text-foreground/90">{action}</span>
+        <span className="min-w-0 flex-1 truncate rounded-lg bg-muted/80 px-2.5 py-1 font-mono text-xs text-muted-foreground/70" title={typeof item.target === "string" ? item.target : undefined}>
           {item.target}
         </span>
         {typeof item.additions === "number" || typeof item.deletions === "number" ? (
