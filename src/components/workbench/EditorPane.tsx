@@ -404,7 +404,7 @@ export const EditorPane: React.FC<{ cwd: string | null }> = ({ cwd }) => {
                 onClick={() => useWorkbenchStore.getState().patchTab(active.id, { view: v })}
                 className={cn("rounded px-2 py-0.5", viewOf(active) === v ? "bg-accent text-foreground" : "text-muted-foreground hover:text-foreground")}
               >
-                {v === "preview" ? "预览" : v === "wysiwyg" ? "所见即所得" : v === "notebook" ? "笔记本" : "源码"}
+                {v === "preview" ? "阅读" : v === "wysiwyg" ? "编辑" : v === "notebook" ? "笔记本" : "源码"}
               </button>
             ))}
           </div>
@@ -463,7 +463,7 @@ export const EditorPane: React.FC<{ cwd: string | null }> = ({ cwd }) => {
             </div>
           </div>
         ) : viewOf(active) === "wysiwyg" ? (
-          <Suspense fallback={<div className="p-4 text-xs text-muted-foreground">正在加载所见即所得编辑器…</div>}>
+          <Suspense fallback={<div className="p-4 text-xs text-muted-foreground">正在加载编辑器…</div>}>
             <MarkdownWysiwyg
               key={active.id + ":wysiwyg"}
               value={active.text}

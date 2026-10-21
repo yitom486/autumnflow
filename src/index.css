@@ -623,7 +623,7 @@ code, pre, kbd, samp {
   .cm-ai-flash { animation: none !important; background-color: hsl(var(--warning) / 0.12); }
 }
 
-/* Milkdown 所见即所得：沿用聊天 Markdown 的排版 + 主题变量 */
+/* Milkdown 可视化编辑：沿用聊天 Markdown 的排版 + 主题变量 */
 .acp-wysiwyg .ProseMirror { outline: none; min-height: 100%; max-width: 760px; margin: 0 auto; color: hsl(var(--foreground)); }
 .acp-wysiwyg .ProseMirror h1 { font-size: 1.6em; font-weight: 700; margin: 0.6em 0 0.4em; }
 .acp-wysiwyg .ProseMirror h2 { font-size: 1.3em; font-weight: 650; margin: 0.8em 0 0.4em; padding-bottom: 0.2em; border-bottom: 1px solid hsl(var(--border)); }

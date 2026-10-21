@@ -30,6 +30,8 @@ export async function launchElectronApp(options?: {
   port?: number;
   developmentUrl?: string;
   env?: NodeJS.ProcessEnv;
+  /** 往临时工作区里铺文件（相对路径 → 内容），用来测文件树 / 编辑器。 */
+  workspaceFiles?: Record<string, string>;
 }): Promise<LaunchedApp> {
   const port = options?.port || await availablePort();
   const mcpPort = await availablePort();
@@ -40,6 +42,11 @@ export async function launchElectronApp(options?: {
   fs.mkdirSync(tmpDir, { recursive: true });
   const workspace = path.join(tmpDir, "workspace");
   fs.mkdirSync(workspace);
+  for (const [rel, content] of Object.entries(options?.workspaceFiles || {})) {
+    const target = path.join(workspace, rel);
+    fs.mkdirSync(path.dirname(target), { recursive: true });
+    fs.writeFileSync(target, content);
+  }
 
   // The desktop shell keeps running in the tray when the last window closes
   // with work in flight, so app.close() would never resolve and the temp dir

@@ -1,6 +1,6 @@
 /**
- * Markdown 所见即所得（Milkdown：CommonMark + GFM + 历史 + 监听）。随 EditorPane 再懒加载一层，
- * 只有用户切到“所见即所得”时才下载。保存走 preserveUnchangedBlocks，避免只有格式变化的 diff。
+ * Markdown 可视化编辑（Milkdown：CommonMark + GFM + 历史 + 监听）。随 EditorPane 再懒加载一层，
+ * 只有用户切到"编辑"视图时才下载。保存走 preserveUnchangedBlocks，避免只有格式变化的 diff。
  */
 import React, { useEffect, useRef, useState } from "react";
 import { Editor, rootCtx, defaultValueCtx, editorViewCtx, serializerCtx } from "@milkdown/kit/core";
