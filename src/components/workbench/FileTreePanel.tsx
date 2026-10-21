@@ -5,7 +5,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Tree, type NodeApi, type NodeRendererProps, type TreeApi } from "react-arborist";
 import {
-  ChevronRight, File, FileCode2, FileJson, FileText, Folder, FolderOpen, FilePlus2, FolderPlus, RefreshCw, ChevronsDownUp, Image as ImageIcon, Link2, Search,
+  ChevronRight, File, FileCode2, FileJson, FileText, Folder, FolderOpen, FilePlus2, FolderPlus, RefreshCw, ChevronsDownUp, Image as ImageIcon, Link2, Search, Eye,
 } from "lucide-react";
 import { fsCreate, fsDelete, fsList, fsRename, fsWatch, type FsEntry } from "@/lib/fs-api";
 import { gitStatus, searchWorkspace, type SearchMatch } from "@/lib/universal-api";
@@ -157,6 +157,12 @@ export const FileTreePanel: React.FC<{ cwd: string | null }> = ({ cwd }) => {
   const [size, setSize] = useState({ w: 240, h: 400 });
   const cwdRef = useRef(cwd);
   cwdRef.current = cwd;
+  /** 被 .gitignore 忽略的条目默认不显示（VS Code 的默认行为），这里可以临时打开。 */
+  const [showIgnored, setShowIgnored] = useState(false);
+  const showIgnoredRef = useRef(showIgnored);
+  showIgnoredRef.current = showIgnored;
+  /** 当前目录有多少条目被截断了（null = 没有截断）。 */
+  const [truncated, setTruncated] = useState<{ total: number; shown: number } | null>(null);
   const dataRef = useRef(data);
   dataRef.current = data;
   const activeId = useWorkbenchStore((s) => s.activeId);
@@ -223,8 +229,9 @@ export const FileTreePanel: React.FC<{ cwd: string | null }> = ({ cwd }) => {
   const loadDir = useCallback(async (dir: string) => {
     if (!cwd) return;
     try {
-      const entries = await fsList(cwd, dir);
-      setData((d) => replaceChildren(d, dir, entries.map(toNode)));
+      const res = await fsList(cwd, dir, { hidden: showIgnoredRef.current });
+      setData((d) => replaceChildren(d, dir, res.entries.map(toNode)));
+      setTruncated(res.truncated ? { total: res.total ?? res.entries.length, shown: res.entries.length } : null);
       setError(null);
     } catch (e) {
       if (dir === "") setError((e as Error).message);
@@ -476,8 +483,27 @@ export const FileTreePanel: React.FC<{ cwd: string | null }> = ({ cwd }) => {
           <button className="rounded p-1 hover:bg-accent hover:text-foreground" title="内容搜索" onClick={() => { setSearchOpen((v) => !v); setQuery(""); setResults(null); setSearchErr(null); }}><Search className="h-3.5 w-3.5" /></button>
           <button className="rounded p-1 hover:bg-accent hover:text-foreground" title="刷新" onClick={() => { void loadDir(""); void refreshGit(); }}><RefreshCw className="h-3.5 w-3.5" /></button>
           <button className="rounded p-1 hover:bg-accent hover:text-foreground" title="全部折叠" onClick={() => treeRef.current?.closeAll()}><ChevronsDownUp className="h-3.5 w-3.5" /></button>
+          <button
+            className={cn("rounded p-1 hover:bg-accent hover:text-foreground", showIgnored && "bg-accent text-foreground")}
+            title={showIgnored ? "隐藏被 .gitignore 忽略的文件" : "显示被 .gitignore 忽略的文件"}
+            aria-pressed={showIgnored}
+            onClick={() => {
+              const next = !showIgnored;
+              setShowIgnored(next);
+              showIgnoredRef.current = next;
+              setData([]);
+              void loadDir("");
+            }}
+          >
+            <Eye className={cn("h-3.5 w-3.5", !showIgnored && "opacity-60")} />
+          </button>
         </div>
       </div>
+      {truncated && (
+        <div className="shrink-0 border-b border-border bg-warning/10 px-2 py-1 text-[11px] text-warning">
+          该目录有 {truncated.total.toLocaleString()} 个条目，已显示前 {truncated.shown.toLocaleString()} 个
+        </div>
+      )}
       {searchOpen && (
         <div className="shrink-0 border-b border-border px-2 py-1.5">
           <input

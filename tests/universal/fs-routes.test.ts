@@ -167,6 +167,40 @@ describe("fs routes", () => {
     ac.abort();
   }, 20000);
 
+  it("hides .gitignore'd entries like VS Code does, and can show them again", async () => {
+    fs.writeFileSync(path.join(root, ".gitignore"), "build/\n*.log\nsecret.txt\n");
+    fs.mkdirSync(path.join(root, "build"), { recursive: true });
+    fs.writeFileSync(path.join(root, "build", "out.js"), "x");
+    fs.writeFileSync(path.join(root, "debug.log"), "x");
+    fs.writeFileSync(path.join(root, "secret.txt"), "x");
+    fs.writeFileSync(path.join(root, "keep.ts"), "x");
+
+    const shown = (await get(`/list?${q({ dir: "" })}`)).data.entries.map((e: any) => e.name);
+    expect(shown).not.toContain("build");
+    expect(shown).not.toContain("debug.log");
+    expect(shown).not.toContain("secret.txt");
+    expect(shown).toContain("keep.ts");
+
+    const all = (await get(`/list?${q({ dir: "", hidden: "1" })}`)).data.entries.map((e: any) => e.name);
+    expect(all).toContain("build");
+    expect(all).toContain("debug.log");
+    fs.rmSync(path.join(root, ".gitignore"));
+    fs.rmSync(path.join(root, "build"), { recursive: true, force: true });
+    fs.rmSync(path.join(root, "debug.log"), { force: true });
+    fs.rmSync(path.join(root, "secret.txt"), { force: true });
+    fs.rmSync(path.join(root, "keep.ts"), { force: true });
+  });
+
+  it("reports when a directory had more entries than it returns", async () => {
+    const many = path.join(root, "many");
+    fs.mkdirSync(many, { recursive: true });
+    for (let i = 0; i < 12; i++) fs.writeFileSync(path.join(many, `f${i}.txt`), "x");
+    const r = await get(`/list?${q({ dir: "many" })}`);
+    expect(r.data.total).toBeGreaterThanOrEqual(12);
+    expect(r.data.truncated).toBe(false); // 12 条远不到上限
+    fs.rmSync(many, { recursive: true, force: true });
+  });
+
   it("requires the gateway token", async () => {
     const res = (await handleUniversal(new Request(`${U}/list?${q({ dir: "" })}`)))!;
     expect(res.status).toBe(401);

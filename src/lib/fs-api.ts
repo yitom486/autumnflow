@@ -33,8 +33,18 @@ async function call<T>(url: string, init?: RequestInit): Promise<T> {
 const post = <T,>(p: string, body: unknown) =>
   call<T>(`${BASE}${p}`, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
 
-export const fsList = (cwd: string, dir = "") =>
-  call<{ entries: FsEntry[] }>(`${BASE}/list?${new URLSearchParams({ cwd, dir })}`).then((d) => d.entries);
+export interface FsListResult {
+  entries: FsEntry[];
+  /** 该目录实际有多少条目（可能被截断）。 */
+  total?: number;
+  truncated?: boolean;
+}
+
+/** 列一层目录。hidden=true 时连被 .gitignore 忽略的条目一起返回（VS Code 的开关）。 */
+export const fsList = (cwd: string, dir = "", opts: { hidden?: boolean } = {}) =>
+  call<FsListResult>(
+    `${BASE}/list?${new URLSearchParams({ cwd, dir, ...(opts.hidden ? { hidden: "1" } : {}) })}`
+  );
 export const fsRead = (cwd: string, path: string) => call<FsFile>(`${BASE}/read?${new URLSearchParams({ cwd, path })}`);
 export const fsWrite = (cwd: string, path: string, text: string, baseMtimeMs: number | null, force = false) =>
   post<{ path: string; size: number; mtimeMs: number }>("/write", { cwd, path, text, baseMtimeMs, force });

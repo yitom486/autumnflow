@@ -430,7 +430,7 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
         if (r.kind === "dir") {
           let files: string[] = [];
           try {
-            const res = await collectFolderFiles(r.path, (d) => fsList(cwd, d));
+            const res = await collectFolderFiles(r.path, (d) => fsList(cwd, d).then((x) => x.entries));
             files = res.files;
             if (res.truncated) notes.push(`文件夹 ${r.path || "."} 只引用了前 ${FOLDER_FILE_CAP} 个文件`);
           } catch (e: any) {
