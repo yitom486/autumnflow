@@ -524,7 +524,8 @@ export function useSessionLifecycle({
       }
       st.snapshotThread();
       st.newThread(agentId, cwd || st.currentWorkspace);
-      st.setStreaming(false);
+      // 不清 isStreaming：新建会话不等于那一轮结束。智能体那边继续跑，切回来
+      // 还能挂上（/follow 按 seq 续读）。"本会话在不在忙"按会话判断。
       st.setBusy(false);
       st.setSessionError(null);
       st.setSessionLoading(false);

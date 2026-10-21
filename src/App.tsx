@@ -430,8 +430,8 @@ export default function App() {
             hasChangesCwd={!!effectiveCwd}
             supportsFork={supportsFork}
             supportsProviders={supportsProviders}
-            busy={s.busy || s.isStreaming}
-            isStreaming={s.isStreaming}
+            busy={s.busy || sessionBusy}
+            isStreaming={sessionBusy}
             onNewSession={handleNewSession}
             onForkSession={() => handleForkSession()}
             onOpenProviders={() => s.setProvidersOpen(true)}
