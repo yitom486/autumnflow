@@ -39,6 +39,7 @@ import {
 } from "@/hooks";
 import { isDefaultSessionTitle, titleForThread } from "@/lib/threads";
 import { visibleSessions } from "@/lib/session-visibility";
+import { appSessionList } from "@/lib/app-sessions";
 import {
   formatGenerativeActionPrompt,
   type GenerativeCardAction,
@@ -143,11 +144,19 @@ export default function App() {
   const connected = !!activeAgent?.status?.connected;
   const sessionsQuery = useSessionsQuery(s.activeAgentId, connected);
   const sessionsRaw = sessionsQuery.data ?? [];
-  // Local thread cache is authoritative for "this session has a conversation"
-  // and for a human title until the Agent supplies one via session/list.
+  // 本应用打开过/使用过的会话（跨运行时）：本地线程缓存是主干——每个线程都知道
+  // 自己绑的是哪个运行时；再加上当前运行时的 agent 侧历史（应用外建的）。
+  // 一个会话只对应一个运行时，一个运行时可以有多个会话。
   const sessions = useMemo<SessionItem[]>(
-    () => visibleSessions(sessionsRaw, s.threads, s.activeAgentId),
-    [sessionsRaw, s.threads, s.activeAgentId]
+    () =>
+      appSessionList({
+        threads: s.threads,
+        agentSessions: visibleSessions(sessionsRaw, s.threads, s.activeAgentId),
+        activeAgentId: s.activeAgentId,
+        agentTitle: (id) => agents.find((a) => a.id === id)?.title || id,
+        streamingSessionId: s.streamingSessionId,
+      }),
+    [agents, s.threads, sessionsRaw, s.activeAgentId, s.streamingSessionId]
   );
   const activeThread = s.activeThreadId ? s.threads[s.activeThreadId] : undefined;
   /** 本会话是否在生成：别的会话在跑不该让这个会话排队。 */

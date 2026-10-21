@@ -361,8 +361,25 @@ export const Sidebar: React.FC<SidebarProps> = (p) => {
         kind: "session",
         metadata: { session: s, project: grp },
         badge: (
-          <span className="font-mono text-[10px] text-muted-foreground/60 shrink-0">
-            {compactTimeAgo(s.updatedAt)}
+          <span className="flex items-center gap-1.5 shrink-0">
+            {s.running && (
+              <span
+                className="size-1.5 rounded-full bg-success animate-pulse"
+                title="正在运行"
+                aria-label="正在运行"
+              />
+            )}
+            {s.agentLabel && (
+              <span
+                className="rounded bg-muted px-1 py-px font-mono text-[9px] text-muted-foreground/80"
+                title={`绑定运行时：${s.agentLabel}`}
+              >
+                {s.agentLabel}
+              </span>
+            )}
+            <span className="font-mono text-[10px] text-muted-foreground/60">
+              {compactTimeAgo(s.updatedAt)}
+            </span>
           </span>
         ),
       }));

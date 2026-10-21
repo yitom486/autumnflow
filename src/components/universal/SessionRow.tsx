@@ -27,6 +27,12 @@ export interface SessionItem {
   origin?: "created" | "imported" | "subagent";
   kind?: "main" | "subagent";
   parentSessionId?: string;
+  /** 这个会话绑定的智能体（会话与运行时绑定，左侧列表跨运行时展示）。 */
+  agentId?: string;
+  /** 绑定运行时的显示名（列表里标出来）。 */
+  agentLabel?: string;
+  /** 这一轮正在跑。 */
+  running?: boolean;
   _meta?: Record<string, unknown> | null;
 }
 
@@ -53,10 +59,14 @@ export interface SessionRowProps {
   onOpen: (s: SessionItem) => void;
   onFork: (s: SessionItem) => void;
   onDelete: (s: SessionItem) => void;
+  /** 这一轮正在跑（智能体还在干活）。 */
+  running?: boolean;
+  /** 会话绑定的运行时名字，显示在标题前面。 */
+  agentLabel?: string;
 }
 
 export const SessionRow = React.memo<SessionRowProps>(
-  ({ session, active, supportsFork, onOpen, onFork, onDelete }) => {
+  ({ session, active, supportsFork, onOpen, onFork, onDelete, running, agentLabel }) => {
     const time = compactTimeAgo(session.updatedAt);
     const [hovered, setHovered] = useState(false);
     const sessionTitle = session.title || "未命名会话";
@@ -80,6 +90,21 @@ export const SessionRow = React.memo<SessionRowProps>(
           >
             {/* 彻底去除原生 title 属性，告别生硬白底遮挡 tooltip */}
             <div className="min-w-0 flex-1 pr-1.5 flex items-center gap-1.5 overflow-hidden">
+              {running && (
+                <span
+                  className="size-1.5 shrink-0 rounded-full bg-success animate-pulse"
+                  title="正在运行"
+                  aria-label="正在运行"
+                />
+              )}
+              {agentLabel && (
+                <span
+                  className="shrink-0 rounded bg-muted px-1 py-px font-mono text-[9px] text-muted-foreground group-hover:bg-accent"
+                  title={`绑定运行时：${agentLabel}`}
+                >
+                  {agentLabel}
+                </span>
+              )}
               <MarqueeLabel active={hovered || active} className="text-xs">
                 {sessionTitle}
               </MarqueeLabel>

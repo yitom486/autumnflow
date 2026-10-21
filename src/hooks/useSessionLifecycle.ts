@@ -390,16 +390,17 @@ export function useSessionLifecycle({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [agents]);
 
-  // Switching agent resets session-scoped state (sessions live per-agent on gateway)
+  // 切换运行时：会话与运行时是一对一绑定的，所以换运行时 = 打开那个运行时 +
+  // 新建一个会话；已经在跑的会话不受影响（那边继续跑，回来还能挂上）。
   const handleSelectAgent = useCallback(
     (id: string) => {
       const st = useStudioStore.getState();
       if (id === st.activeAgentId) return;
+      // 只断开前端的流，不取消智能体那一轮：换运行时不该把活停了。
       abortRef?.current?.abort();
       snapshotThread();
       setActiveAgentId(id);
-      // Per-agent isolation: only this agent's own thread (and its sessionId)
-      // ever enters the live view.
+      // 新运行时自己的会话：能接上它的旧会话就接上，否则开一个新的。
       if (!restoreThread(id)) newThread(id);
       const target = agentsRef.current.find((a) => a.id === id);
       invalidateSessions(qc, id);
@@ -549,15 +550,23 @@ export function useSessionLifecycle({
   const handleOpenSession = useCallback(
     async (item: SessionItem) => {
       const st = useStudioStore.getState();
+      const prevAgentId = st.activeAgentId;
+      // 会话绑定运行时：点别的运行时的会话，先切到那个运行时再打开。
+      if (item.agentId && item.agentId !== prevAgentId) {
+        abortRef?.current?.abort();
+        snapshotThread();
+        setActiveAgentId(item.agentId);
+        if (!restoreThread(item.agentId)) newThread(item.agentId);
+      }
       // 不清 isStreaming：切走不等于那一轮结束。智能体那边继续跑，前端只是
       // 不再盯着它；回到这个会话时会重新挂上（/follow 按 seq 续读）。
-      const agentId = st.activeAgentId;
+      const agentId = item.agentId || prevAgentId;
 
       // Auto-cleanup abandoned empty draft when switching to another session
       const prevSid = st.sessionId;
       const prevHasUserMsg = st.messages.some((m) => m.role === "user");
       if (prevSid && prevSid !== item.sessionId && !prevHasUserMsg) {
-        void sessionRpc(agentId, "delete", { sessionId: prevSid }).catch(() => {});
+        void sessionRpc(prevAgentId, "delete", { sessionId: prevSid }).catch(() => {});
       }
 
       // 1. 乐观渲染：0ms 瞬间把会话切换到主视口（本地缓存历史立即可见，无全屏菊花阻塞）
