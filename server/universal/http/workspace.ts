@@ -3,7 +3,7 @@
  * workspace in the UI) and the read-only file browser used by @-mentions.
  */
 import { Hono, type Context } from "hono";
-import { spawn, spawnSync } from "node:child_process";
+import { spawn } from "node:child_process";
 import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
@@ -40,13 +40,21 @@ export function parseWslDistros(raw: string): string[] {
 
 let cachedDistros: { time: number; list: string[] } | null = null;
 let inFlightDistros: Promise<string[]> | null = null;
+/** 发行版列表的缓存时长：wsl.exe 冷启动很慢，别让它进请求路径。 */
+const WSL_DISTRO_TTL = 10 * 60_000;
 
 export async function getWslDistrosAsync(force = false): Promise<string[]> {
   if (process.platform !== "win32") return [];
-  if (!force && cachedDistros && Date.now() - cachedDistros.time < 60_000) {
+  const fresh = cachedDistros && Date.now() - cachedDistros.time < WSL_DISTRO_TTL;
+  if (!force && fresh) return cachedDistros!.list;
+  if (inFlightDistros) return inFlightDistros;
+
+  // 缓存还在但过期了：先用旧值，后台刷新。wsl.exe 冷启动要十几秒，
+  // 目录选择器不该为它等——旧值顶多差一个刚装的发行版。
+  if (!force && cachedDistros?.list?.length) {
+    void getWslDistrosAsync(true).catch(() => {});
     return cachedDistros.list;
   }
-  if (inFlightDistros) return inFlightDistros;
 
   inFlightDistros = new Promise<string[]>((resolve, reject) => {
     const child = spawn("wsl.exe", ["-l", "-q"], {
@@ -97,15 +105,49 @@ export async function getWslDistrosAsync(force = false): Promise<string[]> {
   return inFlightDistros;
 }
 
+/**
+ * 不阻塞的发行版列表：只用缓存。
+ *
+ * 缓存是热的就直接用；冷了就后台去跑（wsl.exe 冷启动要十几秒），这一次先不给
+ * WSL 快捷项——目录选择器打开时本地目录要立刻能看。
+ */
+function cachedWslDistros(): string[] {
+  if (cachedDistros?.list?.length) {
+    if (Date.now() - cachedDistros.time >= WSL_DISTRO_TTL) void getWslDistrosAsync(true).catch(() => {});
+    return cachedDistros.list;
+  }
+  void getWslDistrosAsync().catch(() => {});
+  return [];
+}
+
 workspaceRouter.get("/wsl-distros", async () => {
-  if (process.platform !== "win32") return json({ ok: true, distros: [] as string[] });
+  if (process.platform !== "win32") return json({ ok: true, distros: [] as string[], roots: [] as DirectoryRoot[] });
   try {
     const distros = await getWslDistrosAsync();
-    return json({ ok: true, distros });
+    const roots: DirectoryRoot[] = [];
+    for (const d of distros) roots.push({ label: `WSL: ${d}`, path: await wslHomePath(d), distro: d });
+    return json({ ok: true, distros, roots });
   } catch (err) {
     return json({ ok: false, error: (err as Error).message || "获取 WSL 发行版失败" }, 500);
   }
 });
+
+/**
+ * 后台预热快捷根目录：发行版列表 + 各发行版的家目录。
+ *
+ * wsl.exe 冷启动要十几秒，\\wsl.localhost 的网络路径探测也要几百毫秒。网关启动
+ * 时先在后台跑一遍，目录选择器打开时就不用等——哪怕选的是本地 Windows 目录，
+ * 快捷项和列表也在同一个响应里。
+ */
+export async function warmWorkspaceRoots(): Promise<void> {
+  if (process.platform !== "win32") return;
+  try {
+    const distros = await getWslDistrosAsync(true);
+    await Promise.all(distros.map((d) => wslHomePath(d)));
+  } catch {
+    // 预热失败不影响功能：真正要用时会重试
+  }
+}
 
 workspaceRouter.get("/default", () => {
   let cwd = process.cwd();
@@ -163,22 +205,45 @@ export interface DirectoryRoot {
   distro?: string;
 }
 
-/** 获取快捷根目录列表（磁盘驱动器、用户目录、WSL 实例）。按目标发行版/平台严格隔离。 */
-export function getSystemDirectoryRoots(distro?: string): DirectoryRoot[] {
+/**
+ * WSL 家目录路径的缓存。
+ *
+ * `\\wsl.localhost\<distro>\home` 是网络路径，探测一次要几百毫秒到几秒；打开
+ * 目录选择器时每个发行版都要探一次，缓存住才不至于每次都卡。
+ */
+const wslHomeCache = new Map<string, { time: number; path: string }>();
+const WSL_HOME_TTL = 5 * 60_000;
+
+/** 发行版里的家目录（第一个用户目录），探测结果缓存 5 分钟。 */
+async function wslHomePath(distro: string): Promise<string> {
+  const wslRoot = `\\\\wsl.localhost\\${distro}`;
+  const wslHome = `${wslRoot}\\home`;
+  const hit = wslHomeCache.get(distro);
+  if (hit && Date.now() - hit.time < WSL_HOME_TTL) return hit.path;
+  let target = wslRoot;
+  try {
+    const subs = await fs.promises.readdir(wslHome, { withFileTypes: true });
+    const userDir = subs.find((s) => s.isDirectory() && s.name !== "lost+found");
+    target = userDir ? path.join(wslHome, userDir.name) : wslHome;
+  } catch {
+    target = wslRoot;
+  }
+  wslHomeCache.set(distro, { time: Date.now(), path: target });
+  return target;
+}
+
+/**
+ * 获取快捷根目录列表（磁盘驱动器、用户目录、WSL 实例）。按目标发行版/平台严格隔离。
+ *
+ * 必须是异步的：这里要跑 wsl.exe 并访问 WSL 的网络路径，两样都慢；同步做会把
+ * 整个网关堵住，目录选择器要等好几秒，其它请求也一起排队。
+ */
+export async function getSystemDirectoryRoots(distro?: string): Promise<DirectoryRoot[]> {
   const roots: DirectoryRoot[] = [];
 
   // 1. 若指定了 WSL 发行版，只返回该 WSL 实例内部的专用快捷根，彻底隔离 Windows 驱动器
   if (distro && process.platform === "win32") {
-    const wslHome = `\\\\wsl.localhost\\${distro}\\home`;
-    let targetPath = `\\\\wsl.localhost\\${distro}`;
-    try {
-      if (fs.existsSync(wslHome)) {
-        const subs = fs.readdirSync(wslHome, { withFileTypes: true });
-        const userDir = subs.find((s) => s.isDirectory() && s.name !== "lost+found");
-        targetPath = userDir ? path.join(wslHome, userDir.name) : wslHome;
-      }
-    } catch {}
-    roots.push({ label: `WSL: ${distro} 家目录 (~)`, path: targetPath, distro });
+    roots.push({ label: `WSL: ${distro} 家目录 (~)`, path: await wslHomePath(distro), distro });
     roots.push({ label: `WSL: ${distro} 根目录 (/)`, path: `\\\\wsl.localhost\\${distro}`, distro });
     return roots;
   }
@@ -208,48 +273,11 @@ export function getSystemDirectoryRoots(distro?: string): DirectoryRoot[] {
         }
       } catch {}
     }
-    // 快速探测已安装的 WSL 发行版
+    // 快速探测已安装的 WSL 发行版（不阻塞：冷启动时先不给 WSL 快捷项）
     try {
-      const distros = cachedDistros?.list || [];
-      if (distros.length > 0) {
-        for (const d of distros) {
-          const wslHome = `\\\\wsl.localhost\\${d}\\home`;
-          const wslRoot = `\\\\wsl.localhost\\${d}`;
-          let targetPath = wslRoot;
-          try {
-            if (fs.existsSync(wslHome)) {
-              const subs = fs.readdirSync(wslHome, { withFileTypes: true });
-              const userDir = subs.find((s) => s.isDirectory() && s.name !== "lost+found");
-              targetPath = userDir ? path.join(wslHome, userDir.name) : wslHome;
-            }
-          } catch {}
-          roots.push({ label: `WSL: ${d}`, path: targetPath, distro: d });
-        }
-      } else {
-        const r = spawnSync("wsl.exe", ["-l", "-q"], {
-          encoding: "utf16le",
-          timeout: 3000,
-          windowsHide: true,
-        });
-        if (!r.error && r.stdout) {
-          const parsed = parseWslDistros(String(r.stdout));
-          if (parsed.length > 0) {
-            cachedDistros = { time: Date.now(), list: parsed };
-            for (const d of parsed) {
-              const wslHome = `\\\\wsl.localhost\\${d}\\home`;
-              const wslRoot = `\\\\wsl.localhost\\${d}`;
-              let targetPath = wslRoot;
-              try {
-                if (fs.existsSync(wslHome)) {
-                  const subs = fs.readdirSync(wslHome, { withFileTypes: true });
-                  const userDir = subs.find((s) => s.isDirectory() && s.name !== "lost+found");
-                  targetPath = userDir ? path.join(wslHome, userDir.name) : wslHome;
-                }
-              } catch {}
-              roots.push({ label: `WSL: ${d}`, path: targetPath, distro: d });
-            }
-          }
-        }
+      const distros = cachedWslDistros();
+      for (const d of distros) {
+        roots.push({ label: `WSL: ${d}`, path: await wslHomePath(d), distro: d });
       }
     } catch {}
   }
@@ -257,7 +285,7 @@ export function getSystemDirectoryRoots(distro?: string): DirectoryRoot[] {
 }
 
 /** 供内置工作区选择器浏览目录的只读接口。 */
-workspaceRouter.get("/directories", (c) => {
+workspaceRouter.get("/directories", async (c) => {
   const requestedDir = c.req.query("dir")?.trim();
   const requestedDistro = c.req.query("distro")?.trim();
 
@@ -266,18 +294,7 @@ workspaceRouter.get("/directories", (c) => {
   // 1. 若无指定路径，按发行版或用户家目录初始化
   if (!targetDir) {
     if (requestedDistro && process.platform === "win32") {
-      const wslHome = `\\\\wsl.localhost\\${requestedDistro}\\home`;
-      try {
-        if (fs.existsSync(wslHome)) {
-          const subs = fs.readdirSync(wslHome, { withFileTypes: true });
-          const userDir = subs.find((s) => s.isDirectory() && s.name !== "lost+found");
-          targetDir = userDir ? path.join(wslHome, userDir.name) : wslHome;
-        } else {
-          targetDir = `\\\\wsl.localhost\\${requestedDistro}`;
-        }
-      } catch {
-        targetDir = `\\\\wsl.localhost\\${requestedDistro}`;
-      }
+      targetDir = await wslHomePath(requestedDistro);
     } else {
       targetDir = os.homedir();
     }
@@ -303,7 +320,7 @@ workspaceRouter.get("/directories", (c) => {
         error: `目录不存在: ${targetDir}`,
         current: os.homedir(),
         parent: null,
-        roots: getSystemDirectoryRoots(requestedDistro),
+        roots: await getSystemDirectoryRoots(requestedDistro),
         entries: [],
       },
       404
@@ -312,7 +329,7 @@ workspaceRouter.get("/directories", (c) => {
 
   let stat: fs.Stats;
   try {
-    stat = fs.statSync(targetDir);
+    stat = await fs.promises.stat(targetDir);
   } catch (err: any) {
     return json({ ok: false, error: `无法访问该目录: ${err?.message || err}` }, 403);
   }
@@ -352,33 +369,31 @@ workspaceRouter.get("/directories", (c) => {
 
   const entries: DirectoryEntry[] = [];
   try {
-    const rawItems = fs.readdirSync(targetDir, { withFileTypes: true });
-    for (const item of rawItems) {
-      if (!item.isDirectory() && !item.isSymbolicLink()) continue;
-      if (IGNORED_NAMES.has(item.name)) continue;
-      if (item.name.startsWith("$")) continue;
-
-      const fullSubPath = path.join(targetDir, item.name);
-      let isGit = false;
-      let mtimeMs: number | undefined;
-      try {
-        isGit = fs.existsSync(path.join(fullSubPath, ".git"));
-        const subStat = fs.statSync(fullSubPath);
-        if (!subStat.isDirectory()) continue;
-        mtimeMs = Math.round(subStat.mtimeMs);
-      } catch {
-        // 权限不足跳过
-      }
-
-      entries.push({
-        name: item.name,
-        path: fullSubPath,
-        isGit,
-        mtimeMs,
-      });
-
-      if (entries.length >= 300) break;
-    }
+    const rawItems = await fs.promises.readdir(targetDir, { withFileTypes: true });
+    // 每个条目要 stat 一次、再探一次 .git；同步做会把网关堵住（WSL 网络路径上
+    // 尤其慢）。异步并行，I/O 还能重叠。
+    const candidates = rawItems
+      .filter((item) => (item.isDirectory() || item.isSymbolicLink()) && !IGNORED_NAMES.has(item.name) && !item.name.startsWith("$"))
+      .slice(0, 300);
+    const probed = await Promise.all(
+      candidates.map(async (item) => {
+        const fullSubPath = path.join(targetDir, item.name);
+        try {
+          const [isGit, subStat] = await Promise.all([
+            fs.promises
+              .access(path.join(fullSubPath, ".git"))
+              .then(() => true)
+              .catch(() => false),
+            fs.promises.stat(fullSubPath),
+          ]);
+          if (!subStat.isDirectory()) return null;
+          return { name: item.name, path: fullSubPath, isGit, mtimeMs: Math.round(subStat.mtimeMs) };
+        } catch {
+          return null; // 权限不足跳过
+        }
+      }),
+    );
+    for (const e of probed) if (e) entries.push(e);
   } catch (err: any) {
     return json({ ok: false, error: `读取目录内容失败: ${err?.message || err}` }, 500);
   }
@@ -391,7 +406,7 @@ workspaceRouter.get("/directories", (c) => {
     displayPath,
     distro,
     parent,
-    roots: getSystemDirectoryRoots(distro || requestedDistro),
+    roots: await getSystemDirectoryRoots(distro || requestedDistro),
     entries,
   });
 });

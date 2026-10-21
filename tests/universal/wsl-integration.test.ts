@@ -70,9 +70,9 @@ describe("WSL Native Environment Integration & E2E Isolation Tests", () => {
   });
 
   describe("3. Workspace Directory Picker Isolation", () => {
-    it("strictly isolates directory roots for WSL without leaking Windows drive letters", () => {
+    it("strictly isolates directory roots for WSL without leaking Windows drive letters", async () => {
       if (process.platform === "win32") {
-        const wslRoots = getSystemDirectoryRoots("Ubuntu");
+        const wslRoots = await getSystemDirectoryRoots("Ubuntu");
         expect(wslRoots.length).toBeGreaterThanOrEqual(1);
 
         for (const root of wslRoots) {
@@ -86,7 +86,7 @@ describe("WSL Native Environment Integration & E2E Isolation Tests", () => {
         }
 
         // 本机 Windows 模式下的 roots 必须包含盘符
-        const localRoots = getSystemDirectoryRoots();
+        const localRoots = await getSystemDirectoryRoots();
         const hasWindowsDrive = localRoots.some((r) => /本地磁盘\s*\([a-zA-Z]:\)/i.test(r.label));
         expect(hasWindowsDrive).toBe(true);
       }

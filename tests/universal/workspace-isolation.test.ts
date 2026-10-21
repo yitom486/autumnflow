@@ -30,9 +30,9 @@ describe("WSL and Windows Environment Isolation", () => {
     expect(getWorkspaceStorageKey()).toBe("acp_workspace_wsl_ubuntu");
   });
 
-  it("isolates directory roots for WSL distros without exposing Windows drive letters", () => {
+  it("isolates directory roots for WSL distros without exposing Windows drive letters", async () => {
     if (process.platform === "win32") {
-      const wslRoots = getSystemDirectoryRoots("Ubuntu");
+      const wslRoots = await getSystemDirectoryRoots("Ubuntu");
       expect(wslRoots.length).toBeGreaterThanOrEqual(1);
       // 必须包含 WSL 专属标签
       const labels = wslRoots.map((r) => r.label);
@@ -42,7 +42,7 @@ describe("WSL and Windows Environment Isolation", () => {
       expect(labels.some((l) => l.includes("本地磁盘 (D:)"))).toBe(false);
 
       // 本地 Windows 模式应返回 Windows 驱动器
-      const localRoots = getSystemDirectoryRoots();
+      const localRoots = await getSystemDirectoryRoots();
       const localLabels = localRoots.map((r) => r.label);
       expect(localLabels.some((l) => l.includes("本地磁盘"))).toBe(true);
     }

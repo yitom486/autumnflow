@@ -104,8 +104,8 @@ describe("wsl paths", () => {
     expect(parseWslDistros(help)).toEqual([]);
   });
 
-  it("getSystemDirectoryRoots returns home and roots", () => {
-    const roots = getSystemDirectoryRoots();
+  it("getSystemDirectoryRoots returns home and roots", async () => {
+    const roots = await getSystemDirectoryRoots();
     expect(roots.length).toBeGreaterThan(0);
     expect(roots[0].label).toContain("用户目录");
   });

@@ -17,6 +17,7 @@ import {
 import { assertPortAvailable } from "../server/port-availability";
 import { attachPtyUpgrade } from "../server/universal/pty";
 import { setTrashImpl } from "../server/universal/http/files";
+import { warmWorkspaceRoots } from "../server/universal/http/workspace";
 import { flushSessionJournal, getSessionJournal } from "../server/universal/session-journal";
 import { startMcpUiServer, stopMcpUiServer } from "../server/universal/mcp-ui-server";
 
@@ -92,6 +93,9 @@ async function main(): Promise<void> {
   void getSessionJournal()?.prune().catch((err) => {
     console.warn("[Host] session journal prune failed:", err);
   });
+  // 预热 WSL 发行版列表：wsl.exe 冷启动要十几秒，放在后台跑，目录选择器
+  // 就不会再被它卡住（本地 Windows 工作区也一样——快捷项和列表在同一个响应里）。
+  void warmWorkspaceRoots();
   await assertPortAvailable(PORT, "127.0.0.1");
   await startMcpUiServer(MCP_PORT).catch((err) => {
     console.warn(`[Host] MCP UI server failed to start: ${(err as Error)?.message || err}`);

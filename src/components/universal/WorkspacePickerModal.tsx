@@ -24,7 +24,7 @@ import {
   AlertCircle,
 } from "lucide-react";
 import { useWorkbenchStore } from "@/stores/useWorkbenchStore";
-import { browseDirectories, launchWslGateway, DEFAULT_WSL_GATEWAY_PORT, type BrowseDirectoriesResult, type BrowseDirectoryEntry } from "@/lib/universal-api";
+import { browseDirectories, launchWslGateway, listWslRoots, DEFAULT_WSL_GATEWAY_PORT, type BrowseDirectoriesResult, type BrowseDirectoryEntry } from "@/lib/universal-api";
 import { getGatewayBase, setGatewayBase, setGatewayToken } from "@/lib/gateway-auth";
 import { runCommand } from "@/lib/commands";
 import { cn } from "@/lib/utils";
@@ -73,7 +73,12 @@ export const WorkspacePickerModal: React.FC = () => {
         setCurrentPath(res.current);
         setDisplayPath(res.displayPath || res.current);
         setParentPath(res.parent);
-        setRoots(res.roots || []);
+        // 合并：WSL 快捷项可能已经单独取回来了，别被这一次的响应覆盖掉。
+        setRoots((prev) => {
+          const next = res.roots || [];
+          const have = new Set(next.map((r) => r.label));
+          return [...next, ...prev.filter((r) => r.distro && !have.has(r.label))];
+        });
         setEntries(res.entries || []);
         setSelectedIndex(-1);
         setFilterQuery("");
@@ -93,6 +98,18 @@ export const WorkspacePickerModal: React.FC = () => {
     setManualInputOpen(false);
     setManualInputPath("");
     void loadPath(initialPath || undefined, activeDistro);
+    // WSL 快捷项单独补：wsl.exe 可能要十几秒，不能让它挡住本地目录。
+    let alive = true;
+    void listWslRoots()
+      .then((wslRoots) => {
+        if (!alive || !wslRoots.length) return;
+        setRoots((prev) => {
+          const merged = [...prev.filter((r) => !r.distro), ...wslRoots];
+          return merged.sort((a, b) => a.label.localeCompare(b.label));
+        });
+      })
+      .catch(() => {});
+    return () => { alive = false; };
   }, [open, activeDistro, initialPath]);
 
   // 过滤后的目录列表

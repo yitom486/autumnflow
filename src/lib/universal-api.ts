@@ -589,6 +589,14 @@ export async function listWslDistros(): Promise<string[]> {
   return Array.isArray(data.distros) ? data.distros : [];
 }
 
+/** WSL 快捷根目录（家目录 + 根目录），供目录选择器把快捷项补上。 */
+export async function listWslRoots(): Promise<BrowseDirectoryRoot[]> {
+  const res = await apiFetch("/api/universal/workspace/wsl-distros");
+  const data = await res.json();
+  if (!data.ok) return [];
+  return Array.isArray(data.roots) ? data.roots : [];
+}
+
 export interface WorkspaceValidateResult {
   ok: boolean;
   path?: string;

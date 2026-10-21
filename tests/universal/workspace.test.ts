@@ -21,6 +21,25 @@ describe("workspace and terminal routes", () => {
     expect(typeof data.name).toBe("string");
   });
 
+  it("lists directories without blocking the event loop", async () => {
+    // 目录选择器会顺带查 WSL 快捷项，而 wsl.exe 冷启动要十几秒。同步查会把
+    // 整个网关堵住——本地 Windows 工作区也一样被拖慢（快捷项和列表在同一个
+    // 响应里）。所以这条路径上不允许同步起子进程。
+    const source = fs.readFileSync(path.join(process.cwd(), "server", "universal", "http", "workspace.ts"), "utf8");
+    expect(source).not.toMatch(/\bspawnSync\b/);
+    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acp-ws-list-"));
+    try {
+      const req = authedRequest(`http://localhost/api/universal/workspace/directories?dir=${encodeURIComponent(tmp)}`, { method: "GET" });
+      const res = (await handleUniversal(req))!;
+      expect(res.status).toBe(200);
+      const data = await res.json();
+      expect(data.ok).toBe(true);
+      expect(Array.isArray(data.entries)).toBe(true);
+    } finally {
+      fs.rmSync(tmp, { recursive: true, force: true });
+    }
+  });
+
   it("validates existing directory and detects git", async () => {
     const tmp = fs.mkdtempSync(path.join(os.tmpdir(), "acp-ws-"));
     try {
