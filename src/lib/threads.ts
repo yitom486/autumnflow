@@ -10,6 +10,13 @@ import { mergeArtifacts } from "../../shared/acp-session-state";
  * store only ever binds ids obtained while that agent is active.
  */
 
+/** A prompt typed while the agent was still working. */
+export interface QueuedPrompt {
+  id: string;
+  text: string;
+  createdAt: number;
+}
+
 export interface ActiveTurn {
   turnId: string;
   lastSeq: number;
@@ -18,6 +25,8 @@ export interface ActiveTurn {
   status: "running" | "done" | "error" | "interrupted";
   /** Assistant message this turn writes into (stable across reload). */
   assistantId?: string;
+  /** 这轮属于哪个会话：会话之间必须互不影响（一个在跑不该让另一个排队）。 */
+  sessionId?: string | null;
   startedAt: number;
 }
 
@@ -38,6 +47,8 @@ export interface ChatThread {
   stale?: boolean;
   /** Durable pointer to a turn that may still be running after reload. */
   activeTurn?: ActiveTurn;
+  /** 这个会话排队等发的提示词（排队是会话内的事，不能跨会话串）。 */
+  queuedPrompts?: QueuedPrompt[];
 }
 
 export const THREADS_KEY = "acp_threads_v1";
@@ -386,7 +397,7 @@ export function pruneThreads(
   preserveIds: string[] = [],
 ): Record<string, ChatThread> {
   const kept = Object.values(threads).filter(
-    (t) => preserveIds.includes(t.id) || hasUserMessage(t),
+    (t) => preserveIds.includes(t.id) || hasUserMessage(t) || (t.queuedPrompts?.length ?? 0) > 0,
   );
   kept.sort((a, b) => b.updatedAt - a.updatedAt);
   const out: Record<string, ChatThread> = {};

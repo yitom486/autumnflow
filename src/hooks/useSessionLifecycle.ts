@@ -549,11 +549,8 @@ export function useSessionLifecycle({
   const handleOpenSession = useCallback(
     async (item: SessionItem) => {
       const st = useStudioStore.getState();
-      // If currently marked streaming or busy, clear it so user isn't stuck
-      if (st.isStreaming) {
-        st.setStreaming(false);
-        st.setBusy(false);
-      }
+      // 不清 isStreaming：切走不等于那一轮结束。智能体那边继续跑，前端只是
+      // 不再盯着它；回到这个会话时会重新挂上（/follow 按 seq 续读）。
       const agentId = st.activeAgentId;
 
       // Auto-cleanup abandoned empty draft when switching to another session

@@ -166,6 +166,8 @@ export function useChatSend({
 }: UseChatSendOptions) {
   const abortRef = useRef<AbortController | null>(null);
   const sendingRef = useRef(false);
+  /** 这次发送属于哪个会话：别的会话不该被它挡住。 */
+  const sendingSessionRef = useRef<string | null>(null);
   const handleSendRef = useRef<((text?: string) => Promise<void>) | null>(null);
   const retryMax = retry?.max ?? DEFAULT_RETRY.max;
   const retryDelayMs = retry?.delayMs ?? DEFAULT_RETRY.delayMs;
@@ -178,9 +180,15 @@ export function useChatSend({
    */
   const drainQueue = useCallback(async () => {
     const store = useStudioStore.getState();
-    if (store.isStreaming || store.busy) return;
-    const next = store.queuedPrompts[0];
+    // 只排空"本会话"的队列：别的会话排着的东西不能塞到这边来。
+    const threadId = store.activeThreadId;
+    const queued = [
+      ...(threadId ? store.threads[threadId]?.queuedPrompts || [] : []),
+      ...store.queuedPrompts,
+    ];
+    const next = queued[0];
     if (!next) return;
+    if (store.isStreaming || store.busy) return;
     store.removeQueuedPrompt(next.id);
     await handleSendRef.current?.(next.text);
   }, []);
@@ -214,7 +222,11 @@ export function useChatSend({
       // The user sees it in the composer and can withdraw it. A send that is
       // still in flight counts as busy too — right after Enter the turn has
       // not started streaming yet, and the prompt must not vanish there.
-      if (st.isStreaming || sendingRef.current) {
+      //
+      // 只有"本会话"在忙才算忙：别的会话在跑时，这里照发不误（会话之间要隔离）。
+      const thisSessionBusy =
+        st.isStreaming && (!st.streamingSessionId || st.streamingSessionId === st.sessionId);
+      if (thisSessionBusy || (sendingRef.current && sendingSessionRef.current === st.sessionId)) {
         if (prompt) useStudioStore.getState().enqueuePrompt(prompt);
         // A pending approval blocks the turn. Typing a new message is the
         // third way out: refuse the request so the agent can continue, and
@@ -223,6 +235,7 @@ export function useChatSend({
         return;
       }
       sendingRef.current = true;
+      sendingSessionRef.current = st.sessionId;
       const blocks: Record<string, unknown>[] = [
         ...st.attachments.map((a) => a.block),
         ...(prompt ? [{ type: "text", text: prompt }] : []),
@@ -796,6 +809,7 @@ export function useChatSend({
         flushPending();
         disposeBatching();
         sendingRef.current = false;
+        sendingSessionRef.current = null;
         const c2 = useStudioStore.getState();
         // The prompt leaves the composer as soon as the send starts. If the
         // turn never began (the session could not be resolved, the request was

@@ -20,7 +20,10 @@ import {
   toEnvironmentNativeCwd,
   type ActiveTurn,
   type ChatThread,
+  type QueuedPrompt,
 } from "@/lib/threads";
+
+export type { QueuedPrompt };
 
 export interface ModeState {
   currentModeId?: string;
@@ -64,13 +67,6 @@ export interface AgentPrefs {
   updatedAt: number;
 }
 
-/** A prompt typed while the agent was still working. */
-export interface QueuedPrompt {
-  id: string;
-  text: string;
-  createdAt: number;
-}
-
 interface StudioState {
   // connection (client)
   activeAgentId: string;
@@ -98,6 +94,9 @@ interface StudioState {
   // composer
   input: string;
   attachments: Attachment[];
+  /** 正在生成的那一轮属于哪个会话：会话之间互不影响。 */
+  streamingSessionId: string | null;
+  /** 正在生成（全局：应用手里有一轮在跑）；是否"本会话在忙"看 streamingSessionId。 */
   isStreaming: boolean;
   busy: boolean;
   discovering: boolean;
@@ -492,6 +491,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
   configOptions: initialCatalog?.configOptions ?? null,
   input: "",
   isStreaming: false,
+  streamingSessionId: null,
   busy: false,
   discovering: false,
   authOpen: false,
@@ -634,6 +634,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
             activeThreadId: null,
             // A switch also stops treating the old turn/draft as live input.
             isStreaming: false,
+  streamingSessionId: null,
             busy: false,
             input: "",
           }
@@ -707,11 +708,37 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
   appendMessage: (m) => set((s) => ({ messages: mergeAssistantTurns([...s.messages, m]) })),
   enqueuePrompt: (text) => {
     const item: QueuedPrompt = { id: `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, text, createdAt: Date.now() };
-    set((s) => ({ queuedPrompts: [...s.queuedPrompts, item] }));
+    // 排队是会话内的事：挂在所属会话上，别让 A 会话的队列跑到 B 会话去。
+    set((s) => {
+      const id = s.activeThreadId;
+      if (!id) return { queuedPrompts: [...s.queuedPrompts, item] };
+      const thread = s.threads[id];
+      if (!thread) return { queuedPrompts: [...s.queuedPrompts, item] };
+      return {
+        queuedPrompts: s.queuedPrompts,
+        threads: { ...s.threads, [id]: { ...thread, queuedPrompts: [...(thread.queuedPrompts || []), item] } },
+      };
+    });
     return item.id;
   },
-  removeQueuedPrompt: (id) => set((s) => ({ queuedPrompts: s.queuedPrompts.filter((item) => item.id !== id) })),
-  clearQueuedPrompts: () => set({ queuedPrompts: [] }),
+  removeQueuedPrompt: (id) => set((s) => {
+    const threadId = s.activeThreadId;
+    const thread = threadId ? s.threads[threadId] : undefined;
+    const rest = s.queuedPrompts.filter((item) => item.id !== id);
+    if (thread) {
+      return {
+        queuedPrompts: rest,
+        threads: { ...s.threads, [threadId!]: { ...thread, queuedPrompts: (thread.queuedPrompts || []).filter((item) => item.id !== id) } },
+      };
+    }
+    return { queuedPrompts: rest };
+  }),
+  clearQueuedPrompts: () => set((s) => {
+    const threadId = s.activeThreadId;
+    const thread = threadId ? s.threads[threadId] : undefined;
+    if (thread) return { threads: { ...s.threads, [threadId!]: { ...thread, queuedPrompts: [] } } };
+    return { queuedPrompts: [] };
+  }),
   patchMessage: (id, patch) =>
     set((s) => ({
       messages: s.messages.map((m) => (m.id === id ? (typeof patch === "function" ? patch(m) : { ...m, ...patch }) : m)),
@@ -721,7 +748,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
     set((s) => ({ activeTurn: s.activeTurn ? { ...s.activeTurn, ...patch } : null })),
   setInput: (v) => set({ input: v }),
   setAttachments: (a) => set({ attachments: a }),
-  setStreaming: (v) => set({ isStreaming: v }),
+  setStreaming: (v) => set({ isStreaming: v, streamingSessionId: v ? get().sessionId : null }),
   setBusy: (v) => set({ busy: v }),
   setDiscovering: (v) => set({ discovering: v }),
   setAuthOpen: (v) => set({ authOpen: v }),
@@ -977,6 +1004,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       threads: s.threads,
       input: "",
       isStreaming: false,
+  streamingSessionId: null,
       busy: false,
       discovering: false,
       authOpen: false,
@@ -1029,6 +1057,7 @@ const STUDIO_SHALLOW_SELECTOR = (s: StudioState) => ({
   input: s.input,
   attachments: s.attachments,
   isStreaming: s.isStreaming,
+  streamingSessionId: s.streamingSessionId,
   busy: s.busy,
   discovering: s.discovering,
   // overlays
