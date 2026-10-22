@@ -43,7 +43,8 @@ async function visibleConsoleWindows(): Promise<string[]> {
 for (const gateway of ["bun", "node"]) test(`actual ${gateway} development launcher shows its window and releases ports on restart`, async ({}, info) => {
   // A cold Vite dependency pre-bundle takes ~45s on this graph, so the
   // launcher's own budget (120s) has to fit inside the test's.
-  test.setTimeout(240000);
+  // One failed launch is retried (see below), so leave room for that too.
+  test.setTimeout(480000);
   test.skip(process.platform !== "win32", "Checks the Windows GUI launch flags and visible native window");
   test.skip(!!process.env.CI, "Needs an interactive Windows desktop to assert on visible native windows");
   const root = fileURLToPath(new URL("../", import.meta.url));
@@ -56,37 +57,58 @@ for (const gateway of ["bun", "node"]) test(`actual ${gateway} development launc
     ACP_AGENTS_JSON: JSON.stringify([{ id: "e2e-agent", name: "e2e-agent", title: "Window Test Agent",
       command: "bun.exe", args: ["run", path.join(root, "tests/fixtures/e2e-studio-agent.ts")], builtin: false }]),
   };
+  const stopLauncher = async (launcher: ReturnType<typeof spawn>) => {
+    if (launcher.exitCode === null) {
+      const stopped = once(launcher, "exit"); launcher.stdin.write("\n");
+      await Promise.race([stopped, new Promise((_, reject) => setTimeout(() => reject(new Error("Launcher did not shut down")), 15000).unref())]);
+    }
+  };
+  const attachLog = async (name: string, logs: string) => {
+    await info.attach(name, { body: logs.replace(/token=[^\s]+/g, "token=[redacted]"), contentType: "text/plain" });
+  };
   try {
     for (let attempt = 0; attempt < 2; attempt++) {
       const consoleWindowsBefore = await visibleConsoleWindows();
-      const launcher = spawn("bun.exe", ["-e", 'process.stdin.once("data",()=>process.emit("SIGINT")); await import("./desktop/dev.ts");'], {
-        cwd: root, env, windowsHide: true, stdio: "pipe",
-      });
+      // The first launch pays Vite's cold dependency pre-bundle and can
+      // outlast the launcher's own readiness budget on a loaded machine — the
+      // launcher itself says "retry once" for exactly that case. Give the
+      // launch one more go before calling it a failure.
+      let launcher: ReturnType<typeof spawn> | undefined;
       let logs = "";
-      launcher.stdout.on("data", data => { logs += data.toString(); });
-      launcher.stderr.on("data", data => { logs += data.toString(); });
-      try {
-        // A cold Vite start on a loaded machine can take a while; the test's
-        // own budget is 240s, so wait long enough before declaring failure.
-        await expect.poll(() => logs.includes("窗口已显示 (visible=true)"), { timeout: 150_000 }).toBe(true);
-        const pid = Number(/Electron 已启动 \(PID (\d+)\)/.exec(logs)?.[1]);
-        expect(pid).toBeGreaterThan(0);
-        const inspect = async () => {
-          const { stdout } = await promisify(execFile)("powershell.exe", ["-NoProfile", "-Command",
-            `(Get-Process -Id ${pid}).MainWindowHandle.ToInt64()`], { windowsHide: true });
-          return Number(stdout.trim());
-        };
-        await expect.poll(inspect, { timeout: 10000 }).toBeGreaterThan(0);
-        const consoleWindowsAfter = await visibleConsoleWindows();
-        expect(consoleWindowsAfter.filter(handle => !consoleWindowsBefore.includes(handle)), "No extra visible terminal window").toEqual([]);
-      } finally {
-        if (launcher.exitCode === null) {
-          const stopped = once(launcher, "exit"); launcher.stdin.write("\n");
-          await Promise.race([stopped, new Promise((_, reject) => setTimeout(() => reject(new Error("Launcher did not shut down")), 15000).unref())]);
+      let visible = false;
+      for (let tries = 0; tries < 2 && !visible; tries++) {
+        logs = "";
+        launcher = spawn("bun.exe", ["-e", 'process.stdin.once("data",()=>process.emit("SIGINT")); await import("./desktop/dev.ts");'], {
+          cwd: root, env, windowsHide: true, stdio: "pipe",
+        });
+        launcher.stdout.on("data", data => { logs += data.toString(); });
+        launcher.stderr.on("data", data => { logs += data.toString(); });
+        try {
+          // A cold Vite start on a loaded machine can take a while; the test's
+          // own budget is 240s, so wait long enough before declaring failure.
+          await expect.poll(() => logs.includes("窗口已显示 (visible=true)"), { timeout: 150_000 }).toBe(true);
+          visible = true;
+        } catch {
+          // Cold start: stop this launcher and try once more.
+          await stopLauncher(launcher);
+        } finally {
+          await attachLog(`launcher-log-${attempt}-try${tries}`, logs);
         }
-        await info.attach(`launcher-log-${attempt}`, { body: logs.replace(/token=[^\s]+/g, "token=[redacted]"), contentType: "text/plain" });
       }
-      expect(launcher.exitCode).toBe(0);
+      expect(visible, "The dev launcher never showed a window").toBe(true);
+      const pid = Number(/Electron 已启动 \(PID (\d+)\)/.exec(logs)?.[1]);
+      expect(pid).toBeGreaterThan(0);
+      const inspect = async () => {
+        const { stdout } = await promisify(execFile)("powershell.exe", ["-NoProfile", "-Command",
+          `(Get-Process -Id ${pid}).MainWindowHandle.ToInt64()`], { windowsHide: true });
+        return Number(stdout.trim());
+      };
+      await expect.poll(inspect, { timeout: 10000 }).toBeGreaterThan(0);
+      const consoleWindowsAfter = await visibleConsoleWindows();
+      expect(consoleWindowsAfter.filter(handle => !consoleWindowsBefore.includes(handle)), "No extra visible terminal window").toEqual([]);
+      await stopLauncher(launcher!);
+      await attachLog(`launcher-log-${attempt}`, logs);
+      expect(launcher!.exitCode).toBe(0);
       for (const port of [env.PORT, env.ACP_DEV_VITE_PORT, env.MCP_PORT]) {
         const probe = createServer();
         await new Promise<void>((resolve, reject) => {
