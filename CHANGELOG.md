@@ -10,10 +10,12 @@
 ## [Unreleased]
 
 ### Added
-- 工作台新增会话隔离的端到端测试：一个会话在跑时，另一个会话发消息直接发出去（不进队列），换会话不会取消正在跑的那一轮；同一个会话里再发一条仍然进队列。
-
 <!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 
+## [0.1.18] - 2026-10-22
+
+### Added
+- 工作台新增会话隔离的端到端测试：一个会话在跑时，另一个会话发消息直接发出去（不进队列），换会话不会取消正在跑的那一轮；同一个会话里再发一条仍然进队列。
 ### Changed
 - 输入框的草稿改成**按会话保存**：每个会话各存各的输入内容，在会话之间来回切换不会丢自己打的字，切回来还在。草稿归全局状态管（不再寄居在聊天库的临时作用域里），发送失败时还回来的提示词也走同一条路。
 - 左侧会话列表改成**跨运行时**展示本应用用过/打开过的会话：每个会话绑定一个运行时（一个会话只对应一个运行时，一个运行时可以有多个会话），列表里标出绑的是谁，正在跑的那一轮会亮一个点。点别的运行时的会话会先切到那个运行时再打开。
@@ -423,7 +425,7 @@
   本轮横切另含安全加固、agent 异步按需安装、SSE 发送互斥、前端懒加载拆分，
   细节见各专项条目（此处仅汇总，不编造版本号）。
 
-[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.17...HEAD
+[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.18...HEAD
 [0.1.0]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.0
 [0.1.1]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.1
 [0.1.2]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.2
@@ -442,3 +444,4 @@
 [0.1.15]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.15
 [0.1.16]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.16
 [0.1.17]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.17
+[0.1.18]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.18
