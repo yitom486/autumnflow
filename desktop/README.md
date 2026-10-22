@@ -11,7 +11,7 @@ Electron main (Node, electron-dist/main.cjs)
  └─ Gateway Host child (ELECTRON_RUN_AS_NODE, electron-dist/host.cjs)
      ├─ /api/universal/*  → 通用 Agent stdio 适配器（codex / antigravity / opencode / …）
      ├─ /*                → dist/ 前端静态文件（ACP_PUBLIC_DIR 覆盖，见下）
-     ├─ MCP UI server     → studio-ui（13920+ 层叠端口）
+     ├─ MCP UI server     → studio-ui（25920+ 层叠端口）
      └─ PTY WebSocket     → node-pty（真交互终端）
 ```
 
@@ -78,15 +78,18 @@ ACP_GATEWAY=node bun run dev:desktop   # 要体验真 PTY 终端：改跑 Node �
 
 # 亦可分步调试：
 bun run build:electron   # 仅打包 main+preload 到 electron-dist/
-bun run dev              # 启动开发网关 (13015) + Vite (5188)
-bun run dev:electron     # 外接已启动的 vite(5188)+网关，只启动 Electron 窗口调试
+bun run dev              # 启动开发网关 (25015) + Vite (25188)
+bun run dev:electron     # 外接已启动的 vite(25188)+网关，只启动 Electron 窗口调试
 ```
 
-开发版和正式版可以同时运行：开发 HTTP 网关默认 `13015`、MCP 默认 `13930`，
-正式版分别为 `13005`、`13920`；开发页面仍使用 `5188`。`PORT`、`MCP_PORT`、
+开发版和正式版可以同时运行：开发 HTTP 网关默认 `25015`、MCP 默认 `25930`，
+正式版分别为 `25005`、`25920`；开发页面仍使用 `25188`。`PORT`、`MCP_PORT`、
 `ACP_DEV_VITE_PORT` 可显式覆盖，开发启动器会把同一配置传给网关、Vite 和桌面窗口。
 开发与正式版分别使用 `autumnflow-dev`、`autumnflow` 的 Electron 数据目录和单实例锁。
 端口被占用时会报错退出，不再强杀占用进程；退出开发环境只结束本次启动的子进程树。
+端口被别的程序当成"临时端口"占着时（Windows 动态端口范围 1024–15000，出站连接会
+随机占用里面的端口，此时绑定报的是 EACCES 而不是"已被占用"）会自动顺延到邻近端口，
+页面基址跟着实际端口走。
 Windows 下启动器直接管理 Vite 和网关，不为后台服务创建独立控制台窗口，
 由启动器统一关闭并确认退出，避免脚本包装进程先退出后遗留 Vite 占用端口。
 页面加载或网关启动失败会显示错误提示，不会留下空白窗口。

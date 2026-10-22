@@ -145,8 +145,8 @@ function requestHost(req: Request): string {
 }
 
 /**
- * 可信 Origin：http/https + loopback 主机。端口不限——5188（vite）、
- * 3004（网关）及自定义本地端口同属一台机器，一律信任。
+ * 可信 Origin：http/https + loopback 主机。端口不限——25188（vite）、
+ * 25005（网关）及自定义本地端口同属一台机器，一律信任。
  * 注意：Opaque Origin "null"（沙箱 file://）不在此列，由鉴权函数单独放行，
  * CORS 头里不回显 "null"。
  */
@@ -336,7 +336,7 @@ const ALLOW_HEADERS = "Content-Type, Authorization";
 
 /**
  * 受限 CORS：不再返回 `*`。只当请求携带可信本地 Origin
- * （http(s)://localhost:* / http(s)://127.0.0.1:*，含 5188/3004）时才回显该 Origin；
+ * （http(s)://localhost:* / http(s)://127.0.0.1:*，含 25188/25005）时才回显该 Origin；
  * 无 Origin（curl / 同源 / Electron file://）或不可信 Origin 时不设
  * Access-Control-Allow-Origin（同源请求不需要它，非浏览器请求不受 CORS 约束）。
  * 恒带 `Vary: Origin`，保留 Allow-Methods/Headers。

@@ -5,9 +5,9 @@
 import { spawn, execSync } from "node:child_process";
 
 const isWin = process.platform === "win32";
-const gatewayPort = process.env.PORT ? parseInt(process.env.PORT, 10) : 13005;
-const wslPort = process.env.ACP_WSL_PORT ? parseInt(process.env.ACP_WSL_PORT, 10) : 13006;
-const vitePort = process.env.VITE_PORT ? parseInt(process.env.VITE_PORT, 10) : 5188;
+const gatewayPort = process.env.PORT ? parseInt(process.env.PORT, 10) : 25005;
+const wslPort = process.env.ACP_WSL_PORT ? parseInt(process.env.ACP_WSL_PORT, 10) : 25006;
+const vitePort = process.env.VITE_PORT ? parseInt(process.env.VITE_PORT, 10) : 25188;
 
 const PORTS_TO_CLEAN = [
   { port: vitePort, name: "Vite Dev Server" },

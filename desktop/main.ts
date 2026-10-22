@@ -1,14 +1,14 @@
 /**
  * AutumnFlow desktop shell (Electron main).
  * Starts the Node gateway in-process, then opens the Studio window on it.
- * Dev: ELECTRON_DEV=1 ELECTRON_START_URL=http://localhost:5188 (external vite+gateway).
+ * Dev: ELECTRON_DEV=1 ELECTRON_START_URL=http://localhost:25188 (external vite+gateway).
  */
 import { app, BrowserWindow, clipboard, dialog, ipcMain, Menu, nativeImage, Notification, shell, Tray } from "electron";
 import * as path from "node:path";
 import * as fs from "node:fs";
 import { fork, type ChildProcess } from "node:child_process";
 import { resolveRuntimeConfig } from "../shared/runtime-config";
-import { assertPortAvailable } from "../server/port-availability";
+import { assertPortAvailable, PortUnavailableError } from "../server/port-availability";
 import { ensureGatewayToken, gatewayTokenPreview } from "../server/universal/security";
 import { initUpdater, checkForUpdatesFromMenu } from "./updater";
 import { buildAppMenu, type MenuActions } from "./menu";
@@ -33,8 +33,14 @@ import {
 const isDev = !app.isPackaged && process.env.ELECTRON_DEV === "1";
 const runtime = resolveRuntimeConfig(process.env, process.argv, isDev ? "development" : "production");
 const PORT = runtime.gatewayPort;
-const START_URL = process.env.ELECTRON_START_URL || (isDev
-  ? `http://localhost:${runtime.vitePort}` : `http://127.0.0.1:${PORT}`);
+// 实际用的端口：默认就是 PORT，但被别的程序当成"临时端口"占着时，host 会
+// 往后找一个能用的并报回来（生产版页面由网关自己伺服，基址跟着它走）。
+let gatewayPort = PORT;
+/** 生产版页面由网关伺服，所以基址要跟着实际端口走。 */
+function startUrl(): string {
+  return process.env.ELECTRON_START_URL || (isDev
+    ? `http://localhost:${runtime.vitePort}` : `http://127.0.0.1:${gatewayPort}`);
+}
 
 // 设置 Windows 任务栏应用标识与独立分组，确保任务栏图标显示 AutumnFlow 图标而非 Electron 默认原子图标
 if (process.platform === "win32") {
@@ -195,7 +201,7 @@ async function inspectActiveWork(): Promise<ActiveWorkSnapshot | null> {
   if (!gatewayReady || !gateway) return null;
   try {
     const token = ensureGatewayToken();
-    const res = await fetch(`http://127.0.0.1:${PORT}/api/universal/active-work`, {
+    const res = await fetch(`http://127.0.0.1:${gatewayPort}/api/universal/active-work`, {
       headers: { Authorization: `Bearer ${token}` },
       signal: AbortSignal.timeout(2500),
     });
@@ -470,7 +476,14 @@ async function startGateway() {
   // 同一机器前后端共享同一 token。
   const token = ensureGatewayToken();
   if (!process.env.ACP_GATEWAY_TOKEN) process.env.ACP_GATEWAY_TOKEN = token;
-  await assertPortAvailable(PORT);
+  // 端口被别的程序当成"临时端口"占着（EACCES）不是致命错误：host 会自己往后
+  // 找一个能用的。真有人监听（另一个实例）才在这里拦下并说明。
+  try {
+    await assertPortAvailable(PORT);
+  } catch (error) {
+    if (!(error instanceof PortUnavailableError) || error.code !== "EACCES") throw error;
+    console.warn(`[Electron] 网关端口 ${PORT} 暂时被占用，host 会改用邻近端口: ${(error as Error).message}`);
+  }
 
   const publicDir = resolvePublicDir();
   process.env.ACP_PUBLIC_DIR = publicDir;
@@ -532,7 +545,9 @@ async function startGateway() {
     child.on("message", (message: any) => {
       if (message?.type === "ready") {
         gatewayReady = true;
-        console.log(`[Electron] gateway host ready at http://127.0.0.1:${PORT} (token ${gatewayTokenPreview()})`);
+        // host 可能往后挪了端口（默认端口被临时占用），页面基址要跟着走。
+        if (typeof message.port === "number" && message.port > 0) gatewayPort = message.port;
+        console.log(`[Electron] gateway host ready at http://127.0.0.1:${gatewayPort} (token ${gatewayTokenPreview()})`);
         settle();
       } else if (message?.type === "fatal") {
         const error = new Error(`Gateway host fatal: ${message.error || "unknown"}\n${hostStderr}`);
@@ -647,7 +662,7 @@ function getPreloadPath(): string {
 }
 
 function windowUrl(cwd?: string): string {
-  const u = new URL(START_URL);
+  const u = new URL(startUrl());
   if (cwd) u.searchParams.set("cwd", cwd);
   if (process.env.ACP_DEFAULT_AGENT_ID) {
     u.searchParams.set("agent", process.env.ACP_DEFAULT_AGENT_ID);
@@ -663,7 +678,7 @@ const isOurWindow = (e: Electron.IpcMainInvokeEvent) => {
 
 /** Only the app-owned main frame may invoke native IPC. */
 function assertOurSender(e: Electron.IpcMainInvokeEvent, channel: string): void {
-  if (!isOurWindow(e) || !isTrustedSenderUrl(e.senderFrame?.url, START_URL)) {
+  if (!isOurWindow(e) || !isTrustedSenderUrl(e.senderFrame?.url, startUrl())) {
     throw new Error(`${channel} denied: caller is not the AutumnFlow main window`);
   }
 }

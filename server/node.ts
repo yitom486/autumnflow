@@ -13,7 +13,7 @@ import { flushSessionJournal } from "./universal/session-journal";
 setupEnv();
 await assertPortAvailable(PORT, "127.0.0.1");
 
-// Start dedicated 5-digit MCP Server (auto-cascade starting from 13920)
+// Start dedicated 5-digit MCP Server (auto-cascade starting from 25920)
 await startMcpUiServer(MCP_PORT).catch((err) => {
   console.warn(`[Server] 启动 MCP UI 端口服务失败: ${(err as Error)?.message || err}`);
 });

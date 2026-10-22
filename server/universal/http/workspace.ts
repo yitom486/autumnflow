@@ -553,8 +553,8 @@ workspaceRouter.post("/wsl-launch", jsonBody(wslLaunchBody), async (c) => {
   }
   const body = c.get("body");
   const distro = body.distro.trim();
-  // WSL 专用独立端口默认为 13006，彻底避免与 Windows 本地宿主机网关 (13005) 端口冲突
-  const port = body.port || 13006;
+  // WSL 专用独立端口默认为 25006，彻底避免与 Windows 本地宿主机网关 (25005) 端口冲突
+  const port = body.port || 25006;
   const token = ensureGatewayToken();
 
   // 1. 探针：检查 port 是否已经有健康的 WSL 原生 Linux 网关且令牌匹配

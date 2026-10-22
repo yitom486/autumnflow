@@ -7,27 +7,27 @@ import { assertPortAvailable } from "../../server/port-availability";
 describe("development and release isolation", () => {
   it("uses different gateway and MCP ports in every development entry point", () => {
     const release = resolveRuntimeConfig({}, []);
-    expect(release.gatewayPort).toBe(13005);
-    expect(release.mcpPort).toBe(13920);
+    expect(release.gatewayPort).toBe(25005);
+    expect(release.mcpPort).toBe(25920);
     for (const development of [
       resolveRuntimeConfig({ ACP_RUNTIME_MODE: "development" }, []),
       resolveRuntimeConfig({ ELECTRON_DEV: "1" }, []),
       resolveRuntimeConfig({}, ["--development"]),
       resolveRuntimeConfig({}, [], "development"),
     ]) {
-      expect(development.gatewayPort).toBe(13015);
-      expect(development.mcpPort).toBe(13930);
-      expect(development.vitePort).toBe(5188);
+      expect(development.gatewayPort).toBe(25015);
+      expect(development.mcpPort).toBe(25930);
+      expect(development.vitePort).toBe(25188);
     }
     // A packaged app cannot accidentally become a dev app through inherited mode flags.
     expect(resolveRuntimeConfig({ ELECTRON_DEV: "1" }, [], "production")).toEqual(release);
   });
 
   it("keeps explicit ports consistent and rejects invalid configuration", () => {
-    expect(resolveRuntimeConfig({ PORT: "23105", MCP_PORT: "23930", ACP_DEV_VITE_PORT: "25188" }, [], "development"))
-      .toMatchObject({ gatewayPort: 23105, mcpPort: 23930, vitePort: 25188 });
-    expect(resolveRuntimeConfig({}, ["--port", "23106", "--host", "0.0.0.0"]).gatewayPort).toBe(23106);
-    for (const PORT of ["", "0", "65536", "13015extra", "1.5", "-1"]) {
+    expect(resolveRuntimeConfig({ PORT: "25105", MCP_PORT: "25930", ACP_DEV_VITE_PORT: "25188" }, [], "development"))
+      .toMatchObject({ gatewayPort: 25105, mcpPort: 25930, vitePort: 25188 });
+    expect(resolveRuntimeConfig({}, ["--port", "25106", "--host", "0.0.0.0"]).gatewayPort).toBe(25106);
+    for (const PORT of ["", "0", "65536", "25015extra", "1.5", "-1"]) {
       expect(() => resolveRuntimeConfig({ PORT }, [])).toThrow("PORT must be an integer");
     }
     expect(() => resolveRuntimeConfig({}, ["--port"])).toThrow("requires a value");

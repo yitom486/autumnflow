@@ -19,20 +19,27 @@ describe("WSL Native Environment Integration & E2E Isolation Tests", () => {
   });
 
   describe("1. Gateway Port & Base Lifecycle", () => {
-    it("preserves WSL gateway base at port 13006 when WSL distro is active", () => {
+    it("preserves WSL gateway base at port 25006 when WSL distro is active", () => {
       localStorage.setItem("acp_wsl_native_distro", "Ubuntu");
-      setGatewayBase("http://127.0.0.1:13006");
+      setGatewayBase("http://127.0.0.1:25006");
 
-      // 在 WSL 模式下，13006 端口绝不能被当作本地同源网关清空
-      expect(getGatewayBase()).toBe("http://127.0.0.1:13006");
+      // 在 WSL 模式下，25006 端口绝不能被当作本地同源网关清空
+      expect(getGatewayBase()).toBe("http://127.0.0.1:25006");
       expect(getWorkspaceEnv()).toBe("wsl_ubuntu");
       expect(isLocalMode()).toBe(false);
+    });
+
+    it("moves the WSL gateway base from the old port to the current one", () => {
+      // 旧版本把 WSL 网关放在 13006，升级后端口换了，存的基址要跟着搬。
+      localStorage.setItem("acp_wsl_native_distro", "Ubuntu");
+      setGatewayBase("http://127.0.0.1:13006");
+      expect(getGatewayBase()).toBe("http://127.0.0.1:25006");
     });
 
     it("clears local gateway base when switching back to Windows local mode", () => {
       // 模拟先处于 WSL 模式
       localStorage.setItem("acp_wsl_native_distro", "Ubuntu");
-      setGatewayBase("http://127.0.0.1:13006");
+      setGatewayBase("http://127.0.0.1:25006");
       expect(isLocalMode()).toBe(false);
 
       // 模拟 backToLocal 操作

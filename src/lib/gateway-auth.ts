@@ -39,24 +39,32 @@ function readStoredBase(): string {
     if (typeof localStorage === "undefined") return "";
     let val = localStorage.getItem(GATEWAY_BASE_STORAGE_KEY) || "";
     const isWsl = Boolean(localStorage.getItem("acp_wsl_native_distro"));
-    // 只有在非 WSL 模式下（纯本地 Windows 环境），才将本地默认网关 13005 收敛为空（同源代理）
-    // WSL 原生网关 (13006) 或 WSL 原生模式下的基址绝不清空，必须保留
+    // 只有在非 WSL 模式下（纯本地 Windows 环境），才将本地默认网关收敛为空（同源代理）
+    // WSL 原生网关 (25006) 或 WSL 原生模式下的基址绝不清空，必须保留
     if (!isWsl) {
       if (
         val === "http://127.0.0.1:3004" ||
         val === "http://localhost:3004" ||
         val === "http://127.0.0.1:3005" ||
         val === "http://localhost:3005" ||
+        // 旧的本机默认端口（13005）和新的（25005）都收敛为空：用户升级后
+        // 本机网关换了端口，存的旧地址不该再指向别处。
         val === "http://127.0.0.1:13005" ||
-        val === "http://localhost:13005"
+        val === "http://localhost:13005" ||
+        val === "http://127.0.0.1:25005" ||
+        val === "http://localhost:25005"
       ) {
         val = "";
         localStorage.removeItem(GATEWAY_BASE_STORAGE_KEY);
       }
     } else {
-      // WSL 原生真环境模式下：若未设置基址，严格指向 WSL 网关专属端口 13006，绝不穿透回 Windows 宿主机
+      // WSL 原生真环境模式下：若未设置基址，严格指向 WSL 网关专属端口 25006，
+      // 绝不穿透回 Windows 宿主机。老版本存的 13006 顺手搬过来。
       if (!val) {
-        val = "http://127.0.0.1:13006";
+        val = "http://127.0.0.1:25006";
+      } else if (val === "http://127.0.0.1:13006" || val === "http://localhost:13006") {
+        val = "http://127.0.0.1:25006";
+        localStorage.setItem(GATEWAY_BASE_STORAGE_KEY, val);
       }
     }
     return val;
@@ -219,8 +227,8 @@ export async function verifyGatewayToken(): Promise<GatewayAuthState> {
   try {
     res = await apiFetch("/api/universal/agents");
   } catch (err) {
-    // 自动自愈保护：如果用户之前设置了自定义/WSL远端基址（例如 13005），但此时远端挂了，
-    // 而同源本地网关（3004 / Vite 代理）正常存活，自动回落至本地网关，
+    // 自动自愈保护：如果用户之前设置了自定义/WSL远端基址（例如 25006），但此时远端挂了，
+    // 而同源本地网关（25005 / Vite 代理）正常存活，自动回落至本地网关，
     // 避免“上次切了 WSL，下次 Windows 启动直接卡死在不可达”
     if (currentBase) {
       try {

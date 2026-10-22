@@ -37,7 +37,7 @@ export function GatewayTokenGate({ reason, detail, onAuthorized }: Props) {
       return;
     }
     if (state === "unreachable") {
-      setError("连不上网关（127.0.0.1:3004）。请先启动网关：bun run dev:server");
+      setError("连不上网关（127.0.0.1:25015）。请先启动网关：bun run dev:server");
       return;
     }
     onAuthorized();

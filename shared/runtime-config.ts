@@ -24,9 +24,12 @@ export function resolveRuntimeConfig(
   };
   return {
     mode: development ? "development" as const : "production" as const,
-    gatewayPort: port(env.PORT ?? argument("--port"), development ? 13015 : 13005, "PORT"),
-    mcpPort: port(env.MCP_PORT, development ? 13930 : 13920, "MCP_PORT"),
-    vitePort: port(env.ACP_DEV_VITE_PORT, 5188, "ACP_DEV_VITE_PORT"),
+    // 端口一律挑 25000–30000：Windows 的动态（临时）端口范围是 1024–15000，
+    // 任何程序的出站连接都会随机占用里面的端口，监听端口落在那里会被系统
+    // 拒绝（EACCES，表现为"permission denied"）。这一段在动态范围之外。
+    gatewayPort: port(env.PORT ?? argument("--port"), development ? 25015 : 25005, "PORT"),
+    mcpPort: port(env.MCP_PORT, development ? 25930 : 25920, "MCP_PORT"),
+    vitePort: port(env.ACP_DEV_VITE_PORT, 25188, "ACP_DEV_VITE_PORT"),
     host: env.HOST || argument("--host") || "127.0.0.1",
   };
 }

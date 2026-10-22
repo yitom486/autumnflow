@@ -116,12 +116,12 @@ git clone --recurse-submodules https://github.com/yitom486/autumnflow.git
 cd autumnflow
 bun install
 
-bun run dev            # 网关 http://127.0.0.1:3004 + 前端 http://localhost:5188
+bun run dev            # 网关 http://127.0.0.1:3004 + 前端 http://localhost:25188
 bun run dev:desktop    # Electron 桌面开发模式（默认 Bun 网关，终端为单次执行）
 ACP_GATEWAY=node bun run dev:desktop   # 改用 Node 网关，启用真 PTY 终端
 ```
 
-网关启动时会在终端打印一条 `open the UI with: http://localhost:5188/?token=...` 链接，用它打开 → 选择智能体 → 连接 → 新建会话 → 发送。
+网关启动时会在终端打印一条 `open the UI with: http://localhost:25188/?token=...` 链接，用它打开 → 选择智能体 → 连接 → 新建会话 → 发送。
 
 网关的所有 `/api/universal/*` 接口（包括终端执行）都要求访问令牌：Electron 桌面版自动带上；浏览器模式第一次用上面的链接打开，前端会记住令牌并从地址栏抹掉，也可以在令牌页粘贴 `~/.autumnflow/.gateway-token` 的内容。
 

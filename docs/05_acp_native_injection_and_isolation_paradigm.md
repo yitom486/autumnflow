@@ -32,7 +32,7 @@ graph TD
     end
 ```
 
-* **环境耦合与孤儿死链**：将宿主应用的 MCP 服务器（如 `http://localhost:13920/mcp`）强行写进用户全局配置。一旦宿主应用关闭，用户在终端启动原生 CLI 时，智能体会尝试连接死链，直接报错或卡死超时；
+* **环境耦合与孤儿死链**：将宿主应用的 MCP 服务器（如 `http://localhost:25920/mcp`）强行写进用户全局配置。一旦宿主应用关闭，用户在终端启动原生 CLI 时，智能体会尝试连接死链，直接报错或卡死超时；
 * **Git 仓库污染**：很多辅助工具会在项目目录下创建专属文件夹，不仅破坏版本控制的干净度，还常常因为文件权限问题导致代码审查（Code Review）失败。
 
 ### 2. 反模式 B：每轮提示词拼接（Every-Turn Prompt Stuffing）
@@ -93,7 +93,7 @@ ACP 的 `session/new` 与 `session/resume` 原生支持 `mcpServers` 参数：
     {
       "type": "http",
       "name": "studio-ui",
-      "url": "http://127.0.0.1:13920/mcp",
+      "url": "http://127.0.0.1:25920/mcp",
       "headers": []
     }
   ]

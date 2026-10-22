@@ -14,7 +14,7 @@ import {
   setupEnv,
   shutdownBridges,
 } from "../server/gateway";
-import { assertPortAvailable } from "../server/port-availability";
+import { resolveAvailablePort } from "../server/port-availability";
 import { attachPtyUpgrade } from "../server/universal/pty";
 import { setTrashImpl } from "../server/universal/http/files";
 import { warmWorkspaceRoots } from "../server/universal/http/workspace";
@@ -96,14 +96,16 @@ async function main(): Promise<void> {
   // 预热 WSL 发行版列表：wsl.exe 冷启动要十几秒，放在后台跑，目录选择器
   // 就不会再被它卡住（本地 Windows 工作区也一样——快捷项和列表在同一个响应里）。
   void warmWorkspaceRoots();
-  await assertPortAvailable(PORT, "127.0.0.1");
   await startMcpUiServer(MCP_PORT).catch((err) => {
     console.warn(`[Host] MCP UI server failed to start: ${(err as Error)?.message || err}`);
   });
 
   const app = buildApp();
+  // 端口被别的程序当成"临时端口"占着时（Windows 动态端口范围 1024–15000，
+  // 出站连接会随机占用里面的端口），往后找一个能用的，别让应用起不来。
+  const gatewayPort = await resolveAvailablePort(PORT, { host: "127.0.0.1", service: "Gateway" });
   netServer = serve(
-    { fetch: app.fetch, port: PORT, hostname: "127.0.0.1" },
+    { fetch: app.fetch, port: gatewayPort, hostname: "127.0.0.1" },
     (info) => {
       console.log(`[Host] gateway listening at http://127.0.0.1:${info.port}`);
     }
@@ -114,7 +116,7 @@ async function main(): Promise<void> {
   httpServer.headersTimeout = 0;
   // PTY WebSocket upgrade belongs to the host, never the Electron UI process.
   await attachPtyUpgrade(netServer as never);
-  send({ type: "ready", port: PORT });
+  send({ type: "ready", port: gatewayPort });
 }
 
 process.on("message", (message: any) => {

@@ -15,7 +15,7 @@ export function AcpAuthTerminal({ agentId, ptyId, cwd, onComplete, onError }: {
     const fit = new FitAddon(); term.loadAddon(fit); term.open(host.current!); fit.fit(); term.focus();
     let socket: WebSocket | undefined, disposed = false, completed = false;
     const endpoint = `/api/universal/agents/${encodeURIComponent(agentId)}/authenticate/terminal/${encodeURIComponent(ptyId)}`;
-    const candidates = ptyWsCandidateBases(window.location.host, window.location.protocol, 13005, getGatewayBase());
+    const candidates = ptyWsCandidateBases(window.location.host, window.location.protocol, 25005, getGatewayBase());
     const connect = (index: number) => {
       if (disposed) return;
       if (index >= candidates.length) { callbacks.current.onError("无法连接认证终端"); return; }

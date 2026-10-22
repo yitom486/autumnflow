@@ -2,7 +2,7 @@
  * Universal AutumnFlow Built-in MCP Server for Generative UI.
  *
  * Runs a Streamable HTTP MCP server on a shared local port.
- * (default starting at 13920, automatically cascading up if occupied).
+ * (default starting at 25920, automatically cascading up if occupied).
  *
  * Exposes core interactive tools:
  * - `show_interactive_card`: Structured cards (forms, decisions, metrics, checklists).
@@ -427,8 +427,10 @@ async function listenWithCascade(
       });
       return (server.address() as import("node:net").AddressInfo).port;
     } catch (err: any) {
-      if (err.code === "EADDRINUSE") {
-        console.warn(`[MCP Server] 端口 ${port} 已被占用，自动顺延到 ${port + 1}...`);
+      // EADDRINUSE: 有人在监听。EACCES: 端口被别的程序当成"临时端口"占着
+      // （Windows 动态端口范围 1024–15000）——两种都换一个号再试。
+      if (err.code === "EADDRINUSE" || err.code === "EACCES") {
+        console.warn(`[MCP Server] 端口 ${port} 不可用（${err.code}），自动顺延到 ${port + 1}...`);
         port++;
       } else {
         throw err;
@@ -556,7 +558,7 @@ async function closeRuntime(runtime: McpUiRuntime): Promise<void> {
 }
 
 /** One HTTP listener, with independent MCP protocol state per client connection. */
-export function startMcpUiServer(preferredPort = 13920, options: McpUiServerOptions = {}): Promise<McpServerInfo> {
+export function startMcpUiServer(preferredPort = 25920, options: McpUiServerOptions = {}): Promise<McpServerInfo> {
   return withLifecycle(async () => {
     if (activeRuntime?.info) return activeRuntime.info;
     const idleTimeout = options.sessionIdleTimeoutMs ?? 60 * 60 * 1000;

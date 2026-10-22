@@ -18,7 +18,7 @@ vi.mock("../../src/lib/universal-api", async original => ({
 
 const snapshot = {
   mcp: {
-    server: { name: "studio-ui", url: "http://127.0.0.1:13920/mcp", port: 13920, running: true },
+    server: { name: "studio-ui", url: "http://127.0.0.1:25920/mcp", port: 25920, running: true },
     agentSupports: { http: true, stdio: false },
     tools: [
       { name: "show_interactive_card", title: "富交互卡片", summary: "决策 / 清单 / 指标 / 表单四类结构化卡片", enabled: true },
@@ -79,7 +79,7 @@ describe("capability panel", () => {
       expect(fetchCapabilities).toHaveBeenCalledWith("codex");
       const text = panel()?.textContent ?? "";
       expect(text).toContain("studio-ui");
-      expect(text).toContain("13920");
+      expect(text).toContain("25920");
       expect(text).toContain("富交互卡片");
       expect(text).toContain("出版级矢量图表设计");
       // 1 of 2 tools and 1 of 2 skills are on.

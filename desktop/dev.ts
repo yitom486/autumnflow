@@ -4,14 +4,14 @@
  * 1. Check development ports without stopping other applications
  * 2. Compiles desktop/main.ts and desktop/preload.ts
  * 3. Starts dev server and Vite client with color-coded prefix logs
- * 4. Waits for Vite dev server (port 5188) to be ready before launching Electron
+ * 4. Waits for Vite dev server (port 25188) to be ready before launching Electron
  * 5. Watches desktop/ directory for changes and rebuilds main bundle
  * 6. Clean process-tree shutdown on Ctrl+C or when Electron exits
  */
 import { spawn, execFileSync, type ChildProcess } from "node:child_process";
 import { createRequire } from "node:module";
 import { resolveRuntimeConfig } from "../shared/runtime-config";
-import { assertPortAvailable } from "../server/port-availability";
+import { resolveAvailablePort } from "../server/port-availability";
 import { waitForServer } from "./server-readiness";
 import * as fs from "node:fs";
 import * as path from "node:path";
@@ -20,7 +20,8 @@ const isWin = process.platform === "win32";
 const runtime = resolveRuntimeConfig(process.env, process.argv, "development");
 const VITE_PORT = runtime.vitePort;
 const GATEWAY_PORT = runtime.gatewayPort;
-const devEnv = {
+// 端口被占用时会换成实际用的端口（见 main()），子进程都用这份环境。
+let devEnv: NodeJS.ProcessEnv = {
   ...process.env,
   ACP_RUNTIME_MODE: "development",
   PORT: String(GATEWAY_PORT),
@@ -176,9 +177,12 @@ async function main() {
   console.log(`${c.bold}${c.magenta}=== AutumnFlow 桌面端集成开发环境启动中 ===${c.reset}\n`);
 
   // Never reclaim a port by killing its owner: it may be the release app.
-  await assertPortAvailable(GATEWAY_PORT);
-  await assertPortAvailable(VITE_PORT, "0.0.0.0", "Vite");
-  console.log(`[launcher] 开发网关 ${GATEWAY_PORT}，开发页面 ${VITE_PORT}；正式版默认使用 13005。`);
+  // 但端口被别的程序当成"临时端口"占着（EACCES）时往后找一个能用的，
+  // 否则冷启动撞上系统动态端口就会起不来。
+  const gatewayPort = await resolveAvailablePort(GATEWAY_PORT, { host: "127.0.0.1", service: "开发网关" });
+  const vitePort = await resolveAvailablePort(VITE_PORT, { host: "0.0.0.0", service: "Vite" });
+  devEnv = { ...devEnv, PORT: String(gatewayPort), ACP_DEV_VITE_PORT: String(vitePort) };
+  console.log(`[launcher] 开发网关 ${gatewayPort}，开发页面 ${vitePort}；正式版默认使用 25005。`);
 
   // 2. Build electron bundle
   console.log(`${c.cyan}[build] 正在编译 Electron 主进程与 Preload 脚本...${c.reset}`);
@@ -211,24 +215,24 @@ async function main() {
   startSubProcess("client", c.green, process.execPath, [viteCli]);
 
   // 4. Wait for Vite client ready
-  console.log(`${c.yellow}[launcher] 正在等待 Vite 开发服务器就绪 (http://localhost:${VITE_PORT})...${c.reset}`);
-  const viteReady = await waitForVite(VITE_PORT);
+  console.log(`${c.yellow}[launcher] 正在等待 Vite 开发服务器就绪 (http://localhost:${vitePort})...${c.reset}`);
+  const viteReady = await waitForVite(vitePort);
   if (!viteReady) {
     throw new Error(
-      `Vite 启动超时 (http://localhost:${VITE_PORT})，请检查上方日志后重试。` +
+      `Vite 启动超时 (http://localhost:${vitePort})，请检查上方日志后重试。` +
         `若刚安装或升级过依赖，首次启动需要重新预打包依赖，请直接重试一次（缓存生成后即可秒开）。`
     );
   } else {
     console.log(`${c.green}[launcher] Vite 开发服务器已就绪！秒开桌面窗口...${c.reset}\n`);
   }
 
-  if (!await waitForVite(GATEWAY_PORT, 30_000, "开发网关")) {
-    throw new Error(`开发网关启动超时 (http://127.0.0.1:${GATEWAY_PORT})，请检查上方日志后重试。`);
+  if (!await waitForVite(gatewayPort, 30_000, "开发网关")) {
+    throw new Error(`开发网关启动超时 (http://127.0.0.1:${gatewayPort})，请检查上方日志后重试。`);
   }
 
   // Resolve the installed Electron executable and spawn it directly, without a shell.
   const electronExecutable = createRequire(import.meta.url)("electron") as string;
-  const electronEnv: NodeJS.ProcessEnv = { ...devEnv, ELECTRON_DEV: "1", ELECTRON_START_URL: `http://localhost:${VITE_PORT}` };
+  const electronEnv: NodeJS.ProcessEnv = { ...devEnv, ELECTRON_DEV: "1", ELECTRON_START_URL: `http://localhost:${vitePort}` };
   delete electronEnv.ELECTRON_RUN_AS_NODE;
   const electronProc = spawn(electronExecutable, ["electron-dist/main.cjs"], {
     shell: false,

@@ -125,7 +125,7 @@
     "package:mac": "bun desktop/stage.ts darwin && bunx electron-builder --mac dmg zip --publish never",
     "package:linux": "bun desktop/stage.ts linux && bunx electron-builder --linux AppImage deb --publish never",
     "start:electron": "electron electron-dist/main.cjs",
-    "dev:electron": "ELECTRON_DEV=1 ELECTRON_START_URL=http://localhost:5188 electron electron-dist/main.cjs",
+    "dev:electron": "ELECTRON_DEV=1 ELECTRON_START_URL=http://localhost:25188 electron electron-dist/main.cjs",
     "preview": "vite preview",
     "test": "vitest run",
     "test:watch": "vitest",

@@ -384,7 +384,7 @@ const isAuth = Boolean(status?.auth?.authenticated);
 | :--- | :--- |
 | **Zed 编辑器** | 打开设置直接选用 Antigravity。Zed 会自动调用本地 `agy_acp_server.exe` 并静默读取 `~/.gemini/antigravity-acp/` 配置。建议配置好系统代理 `HTTP_PROXY=http://127.0.0.1:7897`。 |
 | **Electron 桌面端** | 使用 `server/acp/processManager.ts` + `installer.ts`（按 ACP Registry 规范发现/下载官方二进制），启动前调用 `cleanOrphanedAgyProcesses()` 与凭据桥接，并通过 stdio 管道建立 JSON-RPC 交互。 |
-| **AutumnFlow Web 端** | 运行 `bun run dev`，前端直连 `localhost:5188`，已实现全流程免登静默对话与代码辅助。 |
+| **AutumnFlow Web 端** | 运行 `bun run dev`，前端直连 `localhost:25188`，已实现全流程免登静默对话与代码辅助。 |
 
 ---
 

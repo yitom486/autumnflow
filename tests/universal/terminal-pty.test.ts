@@ -114,15 +114,15 @@ describe("pty helpers (真终端服务端)", () => {
   });
 
   it("builds WS url and candidate bases", () => {
-    expect(buildPtyWsUrl("ws://127.0.0.1:13005", "p1", "D:/r", 80, 24)).toBe(
-      "ws://127.0.0.1:13005/api/universal/terminal/pty?ptyId=p1&cwd=D%3A%2Fr&cols=80&rows=24"
+    expect(buildPtyWsUrl("ws://127.0.0.1:25005", "p1", "D:/r", 80, 24)).toBe(
+      "ws://127.0.0.1:25005/api/universal/terminal/pty?ptyId=p1&cwd=D%3A%2Fr&cols=80&rows=24"
     );
     // 同源即回环时去重
-    expect(ptyWsCandidateBases("127.0.0.1:13005", "http:")).toEqual(["ws://127.0.0.1:13005"]);
+    expect(ptyWsCandidateBases("127.0.0.1:25005", "http:")).toEqual(["ws://127.0.0.1:25005"]);
     // vite dev：同源 + 回环直连兜底
-    expect(ptyWsCandidateBases("localhost:5188", "http:")).toEqual([
-      "ws://localhost:5188",
-      "ws://127.0.0.1:13005",
+    expect(ptyWsCandidateBases("localhost:25188", "http:")).toEqual([
+      "ws://localhost:25188",
+      "ws://127.0.0.1:25005",
     ]);
   });
 });

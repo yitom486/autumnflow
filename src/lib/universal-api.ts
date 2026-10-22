@@ -561,7 +561,7 @@ export async function ptyResize(ptyId: string, cols: number, rows: number): Prom
 }
 
 /** WS 基址候选（纯函数，可测）：自定义远端基址优先，同源次之（prod 与 ws 代理环境），直连回环兜底（vite dev 代理不转 WS）。 */
-export function ptyWsCandidateBases(host: string, protocol: string, gatewayPort = 13005, customBase = ""): string[] {
+export function ptyWsCandidateBases(host: string, protocol: string, gatewayPort = 25005, customBase = ""): string[] {
   const wsProto = protocol === "https:" ? "wss:" : "ws:";
   const out: string[] = [];
   const push = (u: string) => {
@@ -675,7 +675,7 @@ export interface LaunchWslResult {
   error?: string;
 }
 
-export const DEFAULT_WSL_GATEWAY_PORT = 13006;
+export const DEFAULT_WSL_GATEWAY_PORT = 25006;
 
 export async function launchWslGateway(distro: string, port = DEFAULT_WSL_GATEWAY_PORT): Promise<LaunchWslResult> {
   const res = await apiFetch("/api/universal/workspace/wsl-launch", {
