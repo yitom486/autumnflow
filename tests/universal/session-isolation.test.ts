@@ -28,6 +28,25 @@ describe("session isolation", () => {
     expect(useStudioStore.getState().threads[first]?.queuedPrompts?.map((q) => q.text)).toEqual(["A 会话排队的"]);
   });
 
+  it("keeps the session thread as the full live state, not a snapshot", () => {
+    useStudioStore.getState().newThread("codex");
+    const tid = useStudioStore.getState().activeThreadId!;
+    useStudioStore.getState().bindThreadSession("s-1", null, []);
+    useStudioStore.getState().appendMessage({ id: "u1", role: "user", content: "问题", timestamp: "t" } as any);
+    useStudioStore.getState().appendMessage({ id: "a1", role: "assistant", content: "回答", timestamp: "t", isStreaming: true } as any);
+    // 流式追加：视图和线程一起更新
+    useStudioStore.getState().patchMessage("a1", (m) => ({ ...m, content: "回答（续）" }));
+
+    const thread = useStudioStore.getState().threads[tid];
+    expect(thread.messages.map((m) => m.content)).toEqual(["问题", "回答（续）"]);
+    expect(thread.messages[1].isStreaming).toBe(true);
+
+    // 切走再切回来：看到的是同一份全量状态
+    useStudioStore.getState().newThread("codex");
+    useStudioStore.getState().optimisticOpenSession("codex", "s-1", null, null);
+    expect(useStudioStore.getState().messages.map((m) => m.content)).toEqual(["问题", "回答（续）"]);
+  });
+
   it("keeps each session's running state, and lets two run at once", () => {
     // 会话一在跑
     useStudioStore.getState().newThread("codex");

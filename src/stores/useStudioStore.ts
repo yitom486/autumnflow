@@ -715,13 +715,30 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
   setUsage: (u) => set({ usage: u }),
   setQuota: (q) => set({ quota: q }),
   setSessionInfo: (info) => set({ sessionInfo: info }),
-  setMessages: (m) => set({ messages: mergeAssistantTurns(m) }),
-  appendMessage: (m) => set((s) => ({
-    messages: mergeAssistantTurns([...s.messages, m]),
-    // 记住这条消息属于哪个会话：后台那一轮的输出要写回它自己的会话，
-    // 不能掉进用户正在看的那个会话里。
-    messageOwner: s.activeThreadId ? { ...s.messageOwner, [m.id]: s.activeThreadId } : s.messageOwner,
-  })),
+  setMessages: (m) => set((s) => {
+    const messages = mergeAssistantTurns(m);
+    const tid = s.activeThreadId;
+    return {
+      messages,
+      threads: tid && s.threads[tid]
+        ? { ...s.threads, [tid]: { ...s.threads[tid], messages, updatedAt: Date.now() } }
+        : s.threads,
+    };
+  }),
+  appendMessage: (m) => set((s) => {
+    const messages = mergeAssistantTurns([...s.messages, m]);
+    const tid = s.activeThreadId;
+    return {
+      messages,
+      // 记住这条消息属于哪个会话：后台那一轮的输出要写回它自己的会话，
+      // 不能掉进用户正在看的那个会话里。
+      messageOwner: tid ? { ...s.messageOwner, [m.id]: tid } : s.messageOwner,
+      // 同时落进这个会话的线程：切走/切回来看到的是同一份全量状态。
+      threads: tid && s.threads[tid]
+        ? { ...s.threads, [tid]: { ...s.threads[tid], messages, updatedAt: Date.now() } }
+        : s.threads,
+    };
+  }),
   enqueuePrompt: (text) => {
     const item: QueuedPrompt = { id: `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, text, createdAt: Date.now() };
     // 排队是会话内的事：挂在所属会话上，别让 A 会话的队列跑到 B 会话去。
@@ -759,21 +776,46 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
     set((s) => {
       const apply = (m: any) =>
         m.id === id ? (typeof patch === "function" ? patch(m) : { ...m, ...patch }) : m;
-      // 这条消息可能属于后台正在跑的那个会话：改在它自己的会话里，
-      // 当前视图只有正好是同一个会话时才跟着更新。
+      // 这条消息可能属于后台正在跑的那个会话：改在它自己的会话里。
       const owner = s.messageOwner[id];
       if (owner && owner !== s.activeThreadId) {
         const thread = s.threads[owner];
         if (!thread) return { messages: s.messages.map(apply) };
         return {
-          threads: { ...s.threads, [owner]: { ...thread, messages: thread.messages.map(apply) } },
+          threads: { ...s.threads, [owner]: { ...thread, messages: thread.messages.map(apply), updatedAt: Date.now() } },
         };
       }
-      return { messages: s.messages.map(apply) };
+      // 当前会话：视图和它的线程一起改。只改视图的话，切走/切回来时线程里
+      // 还是旧的（流式输出、工具调用、卡片全没有）。
+      const messages = s.messages.map(apply);
+      const tid = s.activeThreadId;
+      return {
+        messages,
+        threads: tid && s.threads[tid]
+          ? { ...s.threads, [tid]: { ...s.threads[tid], messages, updatedAt: Date.now() } }
+          : s.threads,
+      };
     }),
-  setActiveTurn: (turn) => set({ activeTurn: turn }),
+  setActiveTurn: (turn) => set((s) => {
+    const tid = s.activeThreadId;
+    return {
+      activeTurn: turn,
+      threads: tid && s.threads[tid]
+        ? { ...s.threads, [tid]: { ...s.threads[tid], activeTurn: turn ?? undefined } }
+        : s.threads,
+    };
+  }),
   patchActiveTurn: (patch) =>
-    set((s) => ({ activeTurn: s.activeTurn ? { ...s.activeTurn, ...patch } : null })),
+    set((s) => {
+      const activeTurn = s.activeTurn ? { ...s.activeTurn, ...patch } : null;
+      const tid = s.activeThreadId;
+      return {
+        activeTurn,
+        threads: tid && s.threads[tid]
+          ? { ...s.threads, [tid]: { ...s.threads[tid], activeTurn: activeTurn ?? undefined } }
+          : s.threads,
+      };
+    }),
   setDraft: (sessionId, text) => set((s) => {
     const key = sessionId || "";
     if (!text) {

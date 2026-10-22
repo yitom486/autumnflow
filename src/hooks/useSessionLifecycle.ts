@@ -224,6 +224,9 @@ export function useSessionLifecycle({
         const cur = useStudioStore.getState();
         if (cur.activeAgentId !== agentId || cur.sessionId !== sessionId) return;
         if (transcript.messages.length === 0) return;
+        // 本地已经有这个会话的消息：那是它自己的全量状态（含工具调用、卡片、
+        // 流式输出）。回放是重建出来的静态记录，覆盖会把实时视图换成死快照。
+        if (cur.messages.length > 0) return;
         cur.setMessages(
           transcript.messages.map((m, index) => ({
             id: `hist-${Date.now()}-${index}`,
