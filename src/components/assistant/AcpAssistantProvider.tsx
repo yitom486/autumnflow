@@ -45,7 +45,8 @@ export const AcpAssistantProvider: React.FC<AcpAssistantProviderProps> = ({
   onDeleteSession,
 }) => {
   const rawMessages = useStudioStore((s) => s.messages);
-  const isStreaming = useStudioStore((s) => s.isStreaming);
+  // 视图自己的运行状态：别的会话在跑不该让这里的队列/发送按钮"忙"。
+  const isStreaming = useStudioStore((s) => !!s.runningSessions[s.sessionId ?? ""]);
   const activeSessionId = useStudioStore((s) => s.sessionId);
   const activeThreadId = useStudioStore((s) => s.activeThreadId);
   const studioThreads = useStudioStore((s) => s.threads);

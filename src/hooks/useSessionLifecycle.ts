@@ -603,19 +603,24 @@ export function useSessionLifecycle({
               });
             }
             if (t.messages.length > 0) {
-              cur.setMessages(
-                t.messages.map((m, i) => ({
-                  id: `hist-${Date.now()}-${i}`,
-                  role: m.role,
-                  content: m.content,
-                  thought: m.thought,
-                  toolCalls: m.toolCalls,
-                  images: m.images,
-                  contentBlocks: m.contentBlocks,
-                  artifacts: m.artifacts,
-                  timestamp: now(),
-                }))
-              );
+              // 本地已经有这个会话的消息：保留它们（对象/ id 都是原来的，卡片、
+              // 展开状态、交互都不会重挂）。回放是重建出来的静态记录——用户消息
+              // 带的是注入后的完整提示词、id 也全不一样，覆盖会把实时视图换掉。
+              if (cur.messages.length === 0) {
+                cur.setMessages(
+                  t.messages.map((m, i) => ({
+                    id: `hist-${Date.now()}-${i}`,
+                    role: m.role,
+                    content: m.content,
+                    thought: m.thought,
+                    toolCalls: m.toolCalls,
+                    images: m.images,
+                    contentBlocks: m.contentBlocks,
+                    artifacts: m.artifacts,
+                    timestamp: now(),
+                  }))
+                );
+              }
             } else if (cur.messages.length === 0) {
               cur.appendMessage({
                 id: `sys-${Date.now()}-empty`,

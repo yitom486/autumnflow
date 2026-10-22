@@ -227,8 +227,7 @@ export function useChatSend({
       // not started streaming yet, and the prompt must not vanish there.
       //
       // 只有"本会话"在忙才算忙：别的会话在跑时，这里照发不误（会话之间要隔离）。
-      const thisSessionBusy =
-        st.isStreaming && (!st.streamingSessionId || st.streamingSessionId === st.sessionId);
+      const thisSessionBusy = !!st.runningSessions[st.sessionId ?? ""];
       if (thisSessionBusy || (sendingRef.current && sendingSessionRef.current === st.sessionId)) {
         if (prompt) useStudioStore.getState().enqueuePrompt(prompt);
         // A pending approval blocks the turn. Typing a new message is the
@@ -458,9 +457,10 @@ export function useChatSend({
         };
         // Retryable when: budget left, not user-aborted, transport-level failure.
         // Auth/semantic errors and aborts are never retried.
+        // 用这一轮自己的 controller：并行的会话各自有自己的一轮，别读到别的。
         const shouldRetry = (err: any) =>
           attempt < retryMax &&
-          !abortRef.current?.signal.aborted &&
+          !controller.signal.aborted &&
           isTransientSendError(err);
         for (;;) {
           let failedErr: any = null;
@@ -711,7 +711,7 @@ export function useChatSend({
               reportError(err);
             },
           },
-          abortRef.current.signal,
+          controller.signal,
           { follow: accepted && attempt > 0 }
           );
           lastSeq = result.lastEventId ?? lastSeq;
@@ -736,7 +736,7 @@ export function useChatSend({
           content: m.content + `\n\n> 🔁 连接中断，正在重试 (${attempt}/${retryMax})…\n`,
         }));
         // Abort during backoff surfaces as AbortError -> outer catch swallows.
-        await sleepAbortable(retryDelayMs(attempt), abortRef.current?.signal);
+        await sleepAbortable(retryDelayMs(attempt), controller.signal);
       }
         const done = useStudioStore.getState();
         done.setAuthOk(agentId, true);

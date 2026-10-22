@@ -45,15 +45,16 @@ describe("app session list", () => {
     expect(list.find((s) => s.sessionId === "s-remote")?.agentId).toBe("codex");
   });
 
-  it("marks the session whose turn is still running", () => {
+  it("marks every session whose turn is still running", () => {
     const list = appSessionList({
       threads,
       agentSessions: [],
       activeAgentId: "codex",
       agentTitle,
-      streamingSessionId: "s-opencode",
+      // 两个会话可以同时在跑：后台状态互不影响。
+      runningSessions: { "s-opencode": true, "s-codex": true },
     });
     expect(list.find((s) => s.sessionId === "s-opencode")?.running).toBe(true);
-    expect(list.find((s) => s.sessionId === "s-codex")?.running).toBe(false);
+    expect(list.find((s) => s.sessionId === "s-codex")?.running).toBe(true);
   });
 });

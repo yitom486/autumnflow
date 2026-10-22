@@ -13,10 +13,10 @@ export function appSessionList(args: {
   agentSessions: SessionItem[];
   activeAgentId: string;
   agentTitle: (agentId: string) => string;
-  /** 正在跑的那一轮属于哪个会话。 */
-  streamingSessionId?: string | null;
+  /** 正在跑的会话集合：会话之间互不影响，可能同时有好几个。 */
+  runningSessions?: Record<string, boolean>;
 }): SessionItem[] {
-  const { threads, agentSessions, activeAgentId, agentTitle, streamingSessionId } = args;
+  const { threads, agentSessions, activeAgentId, agentTitle, runningSessions } = args;
   const byKey = new Map<string, SessionItem>();
   const put = (item: SessionItem) => byKey.set(`${item.agentId || ""}:${item.sessionId}`, item);
 
@@ -41,7 +41,7 @@ export function appSessionList(args: {
   return [...byKey.values()]
     .map((item) => ({
       ...item,
-      running: !!streamingSessionId && streamingSessionId === item.sessionId,
+      running: !!runningSessions?.[item.sessionId],
     }))
     .sort((a, b) => (b.updatedAt || "").localeCompare(a.updatedAt || ""));
 }

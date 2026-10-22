@@ -154,13 +154,13 @@ export default function App() {
         agentSessions: visibleSessions(sessionsRaw, s.threads, s.activeAgentId),
         activeAgentId: s.activeAgentId,
         agentTitle: (id) => agents.find((a) => a.id === id)?.title || id,
-        streamingSessionId: s.streamingSessionId,
+        runningSessions: s.runningSessions,
       }),
-    [agents, s.threads, sessionsRaw, s.activeAgentId, s.streamingSessionId]
+    [agents, s.threads, sessionsRaw, s.activeAgentId, s.runningSessions]
   );
   const activeThread = s.activeThreadId ? s.threads[s.activeThreadId] : undefined;
   /** 本会话是否在生成：别的会话在跑不该让这个会话排队。 */
-  const sessionBusy = s.isStreaming && (!s.streamingSessionId || s.streamingSessionId === s.sessionId);
+  const sessionBusy = !!s.runningSessions[s.sessionId ?? ""];
   const activeThreadTitle = titleForThread(activeThread);
   const agentSessionTitle = isDefaultSessionTitle(s.sessionInfo?.title) ? undefined : s.sessionInfo?.title;
   const headerSessionTitle = agentSessionTitle || activeThreadTitle || undefined;

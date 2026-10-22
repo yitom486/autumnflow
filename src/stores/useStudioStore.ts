@@ -93,13 +93,15 @@ interface StudioState {
   activeTurn: ActiveTurn | null;
   // composer
   attachments: Attachment[];
-  /** 正在生成的那一轮属于哪个会话：会话之间互不影响。 */
+  /** 正在生成的那一轮属于哪个会话（最近一次开始的那轮）。 */
   streamingSessionId: string | null;
+  /** 正在跑的会话：按会话记，多个会话可以同时跑，互不影响。 */
+  runningSessions: Record<string, boolean>;
   /** 消息 id → 它属于哪个会话（后台那轮的输出要写回自己的会话）。 */
   messageOwner: Record<string, string>;
   /** 每个会话的输入框草稿：切来切去不丢自己打的字。 */
   drafts: Record<string, string>;
-  /** 正在生成（全局：应用手里有一轮在跑）；是否"本会话在忙"看 streamingSessionId。 */
+  /** 当前视图是否在跑（= runningSessions[当前会话]）。 */
   isStreaming: boolean;
   busy: boolean;
   discovering: boolean;
@@ -177,6 +179,8 @@ interface StudioState {
   setDraft: (sessionId: string | null | undefined, text: string) => void;
   setAttachments: (a: Attachment[]) => void;
   setStreaming: (v: boolean) => void;
+  /** 标记某个会话在跑/跑完：会话之间互不影响。 */
+  setSessionRunning: (sessionId: string | null | undefined, running: boolean) => void;
   setBusy: (v: boolean) => void;
   setDiscovering: (v: boolean) => void;
   setAuthOpen: (v: boolean) => void;
@@ -495,6 +499,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
   configOptions: initialCatalog?.configOptions ?? null,
   isStreaming: false,
   streamingSessionId: null,
+  runningSessions: {} as Record<string, boolean>,
   messageOwner: {} as Record<string, string>,
   drafts: {} as Record<string, string>,
   busy: false,
@@ -639,6 +644,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
             // A switch also stops treating the old turn/draft as live input.
             isStreaming: false,
             streamingSessionId: null,
+            runningSessions: {} as Record<string, boolean>,
             messageOwner: {} as Record<string, string>,
             drafts: {} as Record<string, string>,
             busy: false,
@@ -778,7 +784,21 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
     return { drafts: { ...s.drafts, [key]: text } };
   }),
   setAttachments: (a) => set({ attachments: a }),
-  setStreaming: (v) => set({ isStreaming: v, streamingSessionId: v ? get().sessionId : null }),
+  setStreaming: (v) => get().setSessionRunning(get().sessionId, v),
+  setSessionRunning: (sessionId, running) => set((s) => {
+    const key = sessionId || "";
+    const next = { ...s.runningSessions };
+    if (running) next[key] = true;
+    else delete next[key];
+    return {
+      runningSessions: next,
+      // 视图这一格跟着"当前会话"走：切到在跑的会话就是 busy，切到跑完的就不是。
+      isStreaming: !!next[s.sessionId ?? ""],
+      streamingSessionId: running
+        ? (sessionId ?? null)
+        : (s.streamingSessionId === sessionId ? null : s.streamingSessionId),
+    };
+  }),
   setBusy: (v) => set({ busy: v }),
   setDiscovering: (v) => set({ discovering: v }),
   setAuthOpen: (v) => set({ authOpen: v }),
@@ -879,6 +899,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       availableCommands: cmdsFor(s, agentId, t.stale ? null : t.sessionId),
       sessionInfo: title ? { title } : null,
       activeThreadId: t.id,
+      isStreaming: !!s.runningSessions[(t.stale ? null : t.sessionId) ?? ""],
     });
     return t;
   },
@@ -914,6 +935,8 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       sessionId: null,
       threads: next,
       activeThreadId: t.id,
+      // 新会话还没跑，视图不该以为自己忙（别的会话在跑是它们自己的事）。
+      isStreaming: false,
     });
     return t;
   },
@@ -989,6 +1012,8 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
         },
         sessionError: null,
         sessionLoading: true, // indicates background sync
+        // 视图状态跟着这个会话走：它在后台跑着，切过来就是"运行中"。
+        isStreaming: !!st.runningSessions[sessionId],
       });
       return existing;
     }
@@ -1017,6 +1042,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       sessionInfo: { ...(st.sessionInfo || {}), title: title || st.sessionInfo?.title },
       sessionError: null,
       sessionLoading: true,
+      isStreaming: !!st.runningSessions[sessionId],
     });
     return optimisticThread;
   },
@@ -1034,6 +1060,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       threads: s.threads,
       isStreaming: false,
       streamingSessionId: null,
+      runningSessions: {} as Record<string, boolean>,
       messageOwner: {} as Record<string, string>,
       drafts: {} as Record<string, string>,
       busy: false,
@@ -1090,6 +1117,8 @@ const STUDIO_SHALLOW_SELECTOR = (s: StudioState) => ({
   attachments: s.attachments,
   isStreaming: s.isStreaming,
   streamingSessionId: s.streamingSessionId,
+  runningSessions: s.runningSessions,
+  setSessionRunning: s.setSessionRunning,
   busy: s.busy,
   discovering: s.discovering,
   // overlays
