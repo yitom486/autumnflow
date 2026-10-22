@@ -12,9 +12,10 @@
 ### Added
 <!-- 日常开发把条目写在这里（- 开头一行一条），发版时自动归档；注释行不计入归档 -->
 
+## [0.1.19] - 2026-10-22
+
 ### Changed
 - 网关与 MCP 的默认端口挪到 25000–30000 段：生产网关 `25005`、WSL 原生网关 `25006`、MCP `25920`（开发版网关 `25015`、MCP `25930`、Vite 页面 `25188`）。原来那批端口（13005 / 13006 / 13920）落在 Windows 的动态端口范围 1024–15000 里，任何程序的出站连接都会随机占用它们，撞上时系统拒绝监听并报 EACCES。升级后本机默认基址自动切到新端口，WSL 模式里存的旧基址也会一并搬过去。
-
 ### Fixed
 - 修复应用偶发"启动失败：Gateway 无法监听 127.0.0.1:13005: permission denied"：端口被别的程序当成"临时端口"占着时（Windows 动态端口范围 1024–15000，出站连接会随机占用里面的端口），绑定监听报的是 EACCES（"permission denied"）而不是通常的"已被占用"——看着像权限/防火墙问题，其实只是撞了临时端口。现在这种撞车会自动往后找一个能用的端口，应用照常启动，页面基址跟着实际端口走；真有人监听（另一个实例）仍然会明确提示，不会静默开出第二个实例。
 
@@ -431,7 +432,7 @@
   本轮横切另含安全加固、agent 异步按需安装、SSE 发送互斥、前端懒加载拆分，
   细节见各专项条目（此处仅汇总，不编造版本号）。
 
-[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.18...HEAD
+[Unreleased]: https://github.com/yitom486/autumnflow/compare/v0.1.19...HEAD
 [0.1.0]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.0
 [0.1.1]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.1
 [0.1.2]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.2
@@ -451,3 +452,4 @@
 [0.1.16]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.16
 [0.1.17]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.17
 [0.1.18]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.18
+[0.1.19]: https://github.com/yitom486/autumnflow/releases/tag/v0.1.19
