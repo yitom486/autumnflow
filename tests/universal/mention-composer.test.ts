@@ -6,6 +6,7 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useAui } from "@assistant-ui/react";
 import { AcpAssistantProvider } from "@/components/assistant/AcpAssistantProvider";
 import { AcpComposer } from "@/components/assistant/AcpComposer";
+import { useStudioStore } from "@/stores/useStudioStore";
 import type { Attachment } from "@/lib/universal-api";
 
 const realFetch = globalThis.fetch;
@@ -40,7 +41,8 @@ function Harness({ onAttachments }: { onAttachments: (a: Attachment[]) => void }
   const aui = useAui();
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   useEffect(() => {
-    aui.composer.setText("看看 @a.t");
+    // 输入框的文本以 store 草稿为准：预置内容写这一份。
+    useStudioStore.getState().setDraft(useStudioStore.getState().sessionId, "看看 @a.t");
   }, []);
   return h(AcpComposer, {
     onSendAttachmentOnly: () => {},

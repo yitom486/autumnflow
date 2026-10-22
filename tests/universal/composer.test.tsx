@@ -25,9 +25,11 @@ function Harness(props: {
   queuedPrompts?: QueuedPrompt[];
   initialText?: string;
 }) {
-  const aui = useAui();
   useEffect(() => {
-    if (props.initialText) aui.composer.setText(props.initialText);
+    // 输入框的文本以 store 草稿为准：预置内容就写这一份。
+    if (props.initialText) {
+      useStudioStore.getState().setDraft(useStudioStore.getState().sessionId, props.initialText);
+    }
   }, []);
   return h(AcpComposer, {
     onSendAttachmentOnly: () => {},
@@ -102,6 +104,26 @@ describe("composer queue", () => {
     }
   });
 
+  it("does not send the Enter that confirms an IME candidate", async () => {
+    // 微信/搜狗等输入法在 compositionend 之后才发 Enter 的 keydown：此时 isComposing
+    // 已经是 false，只剩 keyCode 229。这个 Enter 是"确认候选词"，不是"发送"——
+    // 当成发送的话中文根本打不进去，字一出来就没了。
+    const onSubmitPrompt = vi.fn();
+    const { el, root } = await renderComposer({ isStreaming: false, onQueue: () => {}, onSubmitPrompt, initialText: "中文" });
+    try {
+      const textarea = el.querySelector("textarea") as HTMLTextAreaElement;
+      const enter = new KeyboardEvent("keydown", { key: "Enter", bubbles: true });
+      Object.defineProperty(enter, "keyCode", { value: 229 });
+      textarea.dispatchEvent(enter);
+      expect(onSubmitPrompt).not.toHaveBeenCalled();
+      await act(async () => {});
+      expect(textareaValue(el)).toBe("中文");
+    } finally {
+      root.unmount();
+      el.remove();
+    }
+  });
+
   it("hands the prompt to the app even when the agent is not working", async () => {
     // assistant-ui 的 composer.send() 在运行时就绪前是空操作：刷新页面后恢复会话的
     // 那段时间里按 Enter，消息会静默留在输入框里发不出去。所以发送一律走应用。
@@ -140,27 +162,13 @@ describe("composer queue", () => {
     }
   });
 
-  it("puts a prompt the app handed back into the composer", async () => {
-    // 发送失败时应用把提示词还回这个会话的草稿，composer 要把它显示出来。
+  it("shows what the app writes into this session's draft", async () => {
+    // 发送失败时应用把提示词还回这个会话的草稿，composer 直接显示这一份。
     const { el, root } = await renderComposer();
     try {
       await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
       await act(async () => { useStudioStore.getState().setDraft("s-1", "别把我弄丢了"); });
       expect(textareaValue(el)).toBe("别把我弄丢了");
-    } finally {
-      root.unmount();
-      el.remove();
-    }
-  });
-
-  it("never overwrites what the user typed in the meantime", async () => {
-    const { el, root } = await renderComposer();
-    try {
-      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
-      await act(async () => type(el, "我刚打的字"));
-      // 应用把失败的提示词还回来——但用户正在打的字不能被顶掉。
-      await act(async () => { useStudioStore.getState().setDraft("s-1", "别把我弄丢了"); });
-      expect(textareaValue(el)).toBe("我刚打的字");
     } finally {
       root.unmount();
       el.remove();

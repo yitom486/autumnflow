@@ -38,6 +38,17 @@ import { ACP_INSERT_SNIPPET_EVENT, ACP_COMPOSER_DROP_EVENT, formatSnippetPrompt,
 import { useWorkbenchStore } from "@/stores/useWorkbenchStore";
 import { getWorkspaceEnv, useStudioStore, type QueuedPrompt } from "@/stores/useStudioStore";
 
+/**
+ * 输入法组词中的按键。
+ *
+ * 有些输入法（Windows 上的微信 / 搜狗等）在 compositionend 之后才发 Enter 的
+ * keydown：此时 isComposing 已经是 false，只剩 keyCode 229 这个痕迹。只判
+ * isComposing 的话，回车确认候选词会被当成"发送"，中文根本打不进去。
+ */
+function isCompositionKey(e: KeyboardEvent): boolean {
+  return e.isComposing || e.keyCode === 229;
+}
+
 export interface AcpComposerProps {
   onSendAttachmentOnly: () => void;
   onClear: () => void;
@@ -141,7 +152,11 @@ async function downscaleImage(dataUrl: string, mimeType: string): Promise<string
 
 export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
   const aui = useAui();
-  const composerText = useAuiState((s) => s.composer.text);
+  // 输入框的文本以 store 里的草稿为准（按会话存）：显示、发送、命令/引用插入都读它。
+  // 这样没有"把文本写回输入框"的时序问题，也不会打断输入法组词。
+  const sessionId = useStudioStore((s) => s.sessionId);
+  const composerText = useStudioStore((s) => s.drafts[s.sessionId ?? ""] ?? "");
+  const setComposerText = (text: string) => useStudioStore.getState().setDraft(sessionId, text);
   const canCancel = useAuiState((s) => s.composer.canCancel);
   const fileRef = useRef<HTMLInputElement>(null);
   const [slashOpen, setSlashOpen] = useState(false);
@@ -213,7 +228,7 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
   }, [token, allCommands.length]);
 
   const applyCommand = (name: string) => {
-    aui.composer.setText(replaceSlashToken(composerText, name));
+    setComposerText(replaceSlashToken(composerText, name));
     setSlashOpen(false);
   };
 
@@ -263,44 +278,16 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
     try {
       const f = await readWorkspaceFile(cwd, filePath);
       p.setAttachments([...p.attachments, { ...buildMentionAttachment(f), mention: { path: filePath, kind: "file" } }]);
-      aui.composer.setText(applyMentionInsert(composerText, filePath));
+      setComposerText(applyMentionInsert(composerText, filePath));
     } catch (err: any) {
       alert(`引用 ${filePath} 失败: ${err.message}`);
     }
   };
 
-  // 输入框的内容归 store 按会话管：切会话不会丢自己打的字，切回来还在。
-  // 运行时的 composer 只是显示层，事实源是 store 里的草稿。
-  const sessionId = useStudioStore((s) => s.sessionId);
-  const sessionDraft = useStudioStore((s) => s.drafts[s.sessionId ?? ""] ?? "");
   const handleInputChange = (e: React.ChangeEvent<HTMLTextAreaElement>) => {
-    useStudioStore.getState().setDraft(sessionId, e.target.value);
+    setComposerText(e.target.value);
   };
-  const clearDraft = () => {
-    useStudioStore.getState().setDraft(sessionId, "");
-  };
-
-  // 会话 id 是连上 agent 之后才有的。在那之前用户打的字先记在"未绑定"那一份里，
-  // 会话 id 一到就搬过去——否则运行时会话作用域重建时那字就白打了。
-  const prevSessionRef = useRef(sessionId);
-  useEffect(() => {
-    const prev = prevSessionRef.current;
-    prevSessionRef.current = sessionId;
-    if (prev !== null || !sessionId) return;
-    const st = useStudioStore.getState();
-    const unbound = st.drafts[""];
-    if (!unbound) return;
-    if (!st.drafts[sessionId]) st.setDraft(sessionId, unbound);
-    st.setDraft("", "");
-  }, [sessionId]);
-
-  // 每次渲染都校一次，而不是等某个"会话切换"的信号：运行时会异步重建线程作用域
-  // （重建完输入框就空了），没有"重建完成"的钩子可等。输入框空着而这个会话的草稿
-  // 还在，就把它放回去；用户正在打的字不碰。
-  useEffect(() => {
-    if (composerText || !sessionDraft) return;
-    aui.composer.setText(sessionDraft);
-  });
+  const clearDraft = () => setComposerText("");
 
   const handleInputKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
     // 发送一律交给应用（应用自己决定排队还是发送）。
@@ -308,14 +295,13 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
     // 不能用 assistant-ui 的 composer.send()：它在运行时就绪前是个空操作——刷新
     // 页面后恢复会话的那段时间里按 Enter，消息会静默留在输入框里发不出去；生成
     // 中同理（canSend 为 false）。用户看到的就是"按了回车没反应"。
-    if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+    if (e.key === "Enter" && !e.shiftKey && !isCompositionKey(e.nativeEvent)) {
       const text = composerText.trim();
       if (!text) return;
       e.preventDefault();
       clearDraft();
       if (p.onSubmitPrompt) p.onSubmitPrompt(text);
       else if (p.isStreaming) p.onQueue?.(text);
-      aui.composer.setText("");
       return;
     }
     if (slashOpen && filtered.length > 0) {
@@ -334,7 +320,7 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
         applyCommand(filtered[slashIdx].name);
         return;
       }
-      if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+      if (e.key === "Enter" && !e.shiftKey && !isCompositionKey(e.nativeEvent)) {
         const sel = filtered[slashIdx];
         if (token !== `/${sel.name}` || p.isStreaming) {
           // Fill in the command instead of sending (always while streaming).
@@ -436,7 +422,7 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
     const cwd = p.currentWorkspace;
     if (!cwd || refs.length === 0) return;
     const added: Attachment[] = [];
-    let text = aui.composer.getState().text;
+    let text = composerText;
     const notes: string[] = [];
     const have = new Set(p.attachments.map((a) => a.mention?.path).filter(Boolean));
 
@@ -482,7 +468,7 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
     }
 
     if (added.length) p.setAttachments([...p.attachments, ...added]);
-    aui.composer.setText(text);
+    setComposerText(text);
     if (notes.length) setNotice(notes.join("；"));
 
     // 自动聚焦输入框
@@ -522,8 +508,8 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
         await addRefs([{ path: rawPath, kind: isDir ? "dir" : "file" }]);
         return;
       }
-      const cur = aui.composer.getState().text;
-      aui.composer.setText(cur ? `${cur} ${payload.text}` : payload.text);
+      const cur = composerText;
+      setComposerText(cur ? `${cur} ${payload.text}` : payload.text);
     }
   };
 
@@ -571,8 +557,8 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
           await addRefs([{ path: rawPath, kind: isDir ? "dir" : "file" }]);
           return;
         }
-        const cur = aui.composer.getState().text;
-        aui.composer.setText(cur ? `${cur} ${plain}` : plain);
+        const cur = composerText;
+        setComposerText(cur ? `${cur} ${plain}` : plain);
       }
     }
   };
@@ -582,9 +568,9 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
       const detail = (e as CustomEvent<CodeSnippetPayload>).detail;
       if (!detail) return;
       const formatted = formatSnippetPrompt(detail);
-      const curText = aui.composer.getState().text;
+      const curText = composerText;
       const newText = curText ? `${curText}\n\n${formatted}\n` : `${formatted}\n`;
-      aui.composer.setText(newText);
+      setComposerText(newText);
 
       // 如果有当前工作区并且尚未关联附件，补充附件引用
       const cwd = detail.cwd || p.currentWorkspace;
@@ -634,7 +620,7 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
     const target = p.attachments.find((a) => a.id === id);
     if (target?.preview) URL.revokeObjectURL(target.preview);
     p.setAttachments(p.attachments.filter((x) => x.id !== id));
-    if (target?.mention) aui.composer.setText(stripMentionText(aui.composer.getState().text, target.mention.path));
+    if (target?.mention) setComposerText(stripMentionText(composerText, target.mention.path));
   };
 
   const modelOpt = pickRole(p.configOptions, "model");
@@ -720,7 +706,6 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
     const text = composerText.trim();
     clearDraft();
     await p.onSteer?.(text);
-    aui.composer.setText("");
   };
 
   return (
@@ -886,6 +871,9 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
             <ComposerPrimitive.Input
               minRows={2}
               maxRows={8}
+              // 文本以 store 里的按会话草稿为准：切会话、发送失败还回提示词、
+              // 命令/引用插入都只是改这一份，不需要再把内容写回运行时。
+              value={composerText}
               onChange={handleInputChange}
               onKeyDown={handleInputKeyDown}
               onPaste={handlePaste}
@@ -936,7 +924,7 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
                         <button type="button" onClick={() => { setMoreOpen(false); fileRef.current?.click(); }} title={p.supportImage ? "附加文件或图片（可拖拽 / 粘贴）" : "附加文本文件"} className="flex-1 h-7 rounded-md flex items-center justify-center gap-1.5 text-muted-foreground hover:text-foreground hover:bg-accent">
                           <Paperclip className="w-3.5 h-3.5" /> 附件
                         </button>
-                        <button type="button" onClick={() => { setMoreOpen(false); aui.composer.setText("/" + composerText.trimStart()); }} title="打开命令菜单" className="flex-1 h-7 rounded-md flex items-center justify-center gap-1.5 text-muted-foreground hover:text-foreground hover:bg-accent">
+                        <button type="button" onClick={() => { setMoreOpen(false); setComposerText("/" + composerText.trimStart()); }} title="打开命令菜单" className="flex-1 h-7 rounded-md flex items-center justify-center gap-1.5 text-muted-foreground hover:text-foreground hover:bg-accent">
                           <span className="font-mono">/</span> 命令
                         </button>
                         {p.onBrowseModels && (
