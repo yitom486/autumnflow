@@ -81,7 +81,9 @@ test.describe("MCP graphics and reasoning packet boundaries", () => {
       (window as any).__reasoningObserver = observer;
     });
     await send("E2E_REASONING_CHUNKS");
-    await expect(page.locator("[data-reasoning-trace]")).toHaveCount(1);
+    // 首包多久到取决于整机负载（同一实例前面刚跑完三个图表用例），给足时间；
+    // "只出现一条 trace"的约束由下面的 __reasoningMax 观察器保证，不靠这个等待。
+    await expect(page.locator("[data-reasoning-trace]")).toHaveCount(1, { timeout: 15_000 });
     await expect(page.getByText("推理分包验证完成。", { exact: true })).toBeVisible({ timeout: 15000 });
     await page.getByRole("button", { name: /思考过程.*用时/ }).click();
     const trace = page.locator("[data-reasoning-trace]");
