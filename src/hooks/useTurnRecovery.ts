@@ -206,25 +206,33 @@ export async function recoverActiveTurn(turn: ActiveTurn, assistantId: string): 
   }
 }
 
+/**
+ * 重新挂上"还在跑但本页没在看"的那一轮。
+ *
+ * 两个入口：启动时（刷新/重开窗口之后），以及切回一个后台还在跑的会话时。
+ * 已经由本页的发送链路盯着的那一轮不重复挂（那条流还在写）。
+ */
+export function resumeTurnIfNeeded(): void {
+  const st = useStudioStore.getState();
+  const current = st.activeTurn;
+  if (!current || current.status !== "running") return;
+  if (isTurnLive(current.turnId) || started.has(current.turnId)) return;
+  const assistantId =
+    current.assistantId ||
+    [...st.messages].reverse().find((message) => message.role === "assistant")?.id;
+  if (!assistantId) {
+    st.patchActiveTurn({ status: "interrupted" });
+    st.snapshotThread();
+    return;
+  }
+  started.add(current.turnId);
+  void recoverActiveTurn(current, assistantId);
+}
+
 export function useTurnRecovery(): void {
   useEffect(() => {
     // Boot-only: a live send marks its turn in live-turns and owns the stream.
-    const timer = setTimeout(() => {
-      const st = useStudioStore.getState();
-      const current = st.activeTurn;
-      if (!current || current.status !== "running") return;
-      if (isTurnLive(current.turnId) || started.has(current.turnId)) return;
-      const assistantId =
-        current.assistantId ||
-        [...st.messages].reverse().find((message) => message.role === "assistant")?.id;
-      if (!assistantId) {
-        st.patchActiveTurn({ status: "interrupted" });
-        st.snapshotThread();
-        return;
-      }
-      started.add(current.turnId);
-      void recoverActiveTurn(current, assistantId);
-    }, 300);
+    const timer = setTimeout(resumeTurnIfNeeded, 300);
     return () => clearTimeout(timer);
   }, []);
 }

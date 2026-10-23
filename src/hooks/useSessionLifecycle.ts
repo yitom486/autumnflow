@@ -16,6 +16,7 @@ import {
   type AgentSummary,
 } from "@/lib/universal-api";
 import { isSameCwd } from "@/lib/threads";
+import { resumeTurnIfNeeded } from "./useTurnRecovery";
 import type { SessionItem } from "@/components/universal/Sidebar";
 import type { SessionSettings } from "@/components/universal/SessionSettingsModal";
 
@@ -401,8 +402,9 @@ export function useSessionLifecycle({
     (id: string) => {
       const st = useStudioStore.getState();
       if (id === st.activeAgentId) return;
-      // 只断开前端的流，不取消智能体那一轮：换运行时不该把活停了。
-      abortRef?.current?.abort();
+      // 不断开事件流：那只是"本页不再看"，切断它会让前端误判空闲（再发消息
+      // 就会被 agent 回 409 session busy），切回来也接不上。流的生命周期只跟
+      // 这一轮本身走，跟切换无关。
       snapshotThread();
       setActiveAgentId(id);
       // 新运行时自己的会话：能接上它的旧会话就接上，否则开一个新的。
@@ -559,7 +561,7 @@ export function useSessionLifecycle({
       const prevAgentId = st.activeAgentId;
       // 会话绑定运行时：点别的运行时的会话，先切到那个运行时再打开。
       if (item.agentId && item.agentId !== prevAgentId) {
-        abortRef?.current?.abort();
+        // 不 abort 前台这条流：它还在往原会话里写，切断就会变成"假空闲"。
         snapshotThread();
         setActiveAgentId(item.agentId);
         if (!restoreThread(item.agentId)) newThread(item.agentId);
@@ -577,6 +579,11 @@ export function useSessionLifecycle({
 
       // 1. 乐观渲染：0ms 瞬间把会话切换到主视口（本地缓存历史立即可见，无全屏菊花阻塞）
       st.optimisticOpenSession(agentId, item.sessionId, item.title, item.cwd);
+
+      // 1b. 这个会话在后台还在跑？把那一轮重新挂上（按 lastSeq 续读）。
+      // 切 agent 时前端会断开事件流，但 agent 那边继续跑——没有这一步，
+      // 切回来看到的就停在断开那一刻。
+      resumeTurnIfNeeded();
 
       // 2. 后台静默向 Agent 加载最新历史记录与模型配置
       try {
