@@ -231,6 +231,8 @@ export function useSessionLifecycle({
           transcript.messages.map((m, index) => ({
             id: `hist-${Date.now()}-${index}`,
             role: m.role,
+            // 回放出来的是历史：标记成已播过入场动效，别让整段历史重放一遍。
+            seenAt: Date.now(),
             content: m.content,
             thought: m.thought,
             toolCalls: m.toolCalls,
@@ -614,6 +616,8 @@ export function useSessionLifecycle({
                   t.messages.map((m, i) => ({
                     id: `hist-${Date.now()}-${i}`,
                     role: m.role,
+                    // 回放出来的是历史：标记成已播过入场动效，别让整段历史重放一遍。
+                    seenAt: Date.now(),
                     content: m.content,
                     thought: m.thought,
                     toolCalls: m.toolCalls,

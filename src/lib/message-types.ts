@@ -47,6 +47,13 @@ export interface Message {
     rawError?: unknown;
   }>;
   isStreaming?: boolean;
+  /**
+   * 入场动效是否已经播过（epoch ms）。
+   *
+   * 动效由状态决定而不是由组件挂载决定：没有这个标记的新消息播一次，播完
+   * 写回；切换会话/重启后读到的都是"已播过"，不会把整段历史重放一遍。
+   */
+  seenAt?: number;
   /** Agent-sent images (live-view only, stripped on persist like toolCalls). */
   images?: Array<{ src: string; mimeType: string }>;
   /** Client-observed turn timing (epoch ms): placeholder append -> turn end. */

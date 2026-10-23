@@ -439,6 +439,19 @@ const AssistantMessageBody: React.FC = React.memo(() => (
   </div>
 ));
 
+/** 入场动效播完就记下来：由状态决定播不播，不靠组件挂载。 */
+function markMessageSeen(id: string | undefined) {
+  if (!id) return;
+  const message = useStudioStore.getState().messages.find((m) => m.id === id);
+  if (!message || message.seenAt) return;
+  useStudioStore.getState().patchMessage(id, { seenAt: Date.now() });
+}
+
+const enterAnimation = (seenAt: number | undefined) => (seenAt ? "" : "animate-fade-slide-in");
+const handleEnterAnimationEnd = (id: string | undefined) => (event: React.AnimationEvent) => {
+  if (event.target === event.currentTarget) markMessageSeen(id);
+};
+
 const UserMessageView: React.FC = () => {
   const messageId = useAuiState((s) => s.message.id);
   const isEditing = useAuiState((s) => s.message.composer.isEditing);
@@ -459,7 +472,8 @@ const UserMessageView: React.FC = () => {
       data-message-id={messageId}
       data-preview-text={acp?.content || ""}
       data-from="user"
-      className="flex gap-3 justify-end items-start group animate-fade-slide-in"
+      className={cn("flex gap-3 justify-end items-start group", enterAnimation(acp?.seenAt))}
+      onAnimationEnd={handleEnterAnimationEnd(messageId)}
     >
       <MessageContent className="items-end max-w-[80%]">
         <MessageBubble variant="soft" align="end" className="w-full" layout={false}>
@@ -867,7 +881,8 @@ const AssistantMessageView: React.FC<{
         data-message-id={messageId}
         data-preview-text=""
         data-from="assistant"
-        className="flex gap-3 justify-start items-start group animate-fade-slide-in"
+        className={cn("flex gap-3 justify-start items-start group", enterAnimation(acp?.seenAt))}
+        onAnimationEnd={handleEnterAnimationEnd(messageId)}
       >
         <MessageAvatar>
           <Bot className="w-4 h-4 text-primary" />
@@ -904,7 +919,8 @@ const AssistantMessageView: React.FC<{
       data-message-id={messageId}
       data-preview-text=""
       data-from="assistant"
-      className="flex gap-3 justify-start items-start group animate-fade-slide-in"
+      className={cn("flex gap-3 justify-start items-start group", enterAnimation(acp?.seenAt))}
+      onAnimationEnd={handleEnterAnimationEnd(messageId)}
     >
       <MessageAvatar className={cn(
         "transition-colors",
