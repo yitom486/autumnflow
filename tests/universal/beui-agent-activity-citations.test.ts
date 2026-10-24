@@ -5,7 +5,7 @@ import { act } from "react";
 import {
   AgentActivity,
   type AgentActivityItem,
-} from "@/components/primitives/AgentActivity";
+} from "@/components/agents/agent-activity";
 import {
   Citation,
   Citations,
@@ -57,7 +57,7 @@ describe("Stage 2: beUI AgentActivity & Citations", () => {
       );
     });
 
-    const activity = el.querySelector('[data-slot="agent-activity"]');
+    const activity = el.querySelector('[data-content][data-state]');
     expect(activity).toBeTruthy();
     expect(activity?.getAttribute("data-state")).toBe("working");
     expect(activity?.getAttribute("aria-busy")).toBe("true");
@@ -102,7 +102,7 @@ describe("Stage 2: beUI AgentActivity & Citations", () => {
       );
     });
 
-    const activity = el.querySelector('[data-slot="agent-activity"]');
+    const activity = el.querySelector('[data-content][data-state]');
     expect(activity).toBeTruthy();
     expect(activity?.getAttribute("data-state")).toBe("open");
 

@@ -1,31 +1,24 @@
 import React, { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { ArrowLeft, ChevronDown, GitBranch, X } from "lucide-react";
+import { ArrowLeft, ChevronDown, GitBranch } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
 import ReactMarkdown from "react-markdown";
 import { sessionRpc, buildTranscriptFromReplay } from "@/lib/universal-api";
 import { normalizeSessions, invalidateSessions } from "@/lib/acp-queries";
 import type { SessionItem } from "./SessionRow";
 
+/** Shared shell of the history dialogs: the project's Dialog, open while mounted. */
 function HistoryDialog({ title, onClose, children }: { title: string; onClose: () => void; children: React.ReactNode }) {
-  const ref = useRef<HTMLDialogElement>(null);
-  const closeRef = useRef(onClose);
-  closeRef.current = onClose;
-  useEffect(() => {
-    const dialog = ref.current!;
-    dialog.showModal();
-    const cancel = (event: Event) => { event.preventDefault(); closeRef.current(); };
-    dialog.addEventListener("cancel", cancel);
-    return () => { dialog.removeEventListener("cancel", cancel); dialog.close(); };
-  }, []);
-  return createPortal(<dialog ref={ref} aria-label={title}
-    className="m-auto w-[min(720px,calc(100%_-_32px))] max-h-[80vh] rounded-xl border border-border bg-card text-foreground shadow-xl backdrop:bg-black/50">
-    <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-      <h2 className="min-w-0 truncate text-sm font-medium">{title}</h2>
-      <button type="button" onClick={onClose} aria-label="关闭" className="rounded p-1 hover:bg-muted"><X className="size-4" /></button>
-    </div>
-    {children}
-  </dialog>, document.body);
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose(); }}>
+    <DialogContent className="max-h-[80vh] gap-0 overflow-hidden border-border bg-card p-0 sm:max-w-[720px]">
+      <DialogHeader className="border-b border-border px-4 py-3 pr-12">
+        <DialogTitle className="truncate text-sm">{title}</DialogTitle>
+      </DialogHeader>
+      {children}
+    </DialogContent>
+  </Dialog>;
 }
 
 export function ExternalHistoryDialog({ agentId, onClose, onOpen }: {
@@ -43,8 +36,7 @@ export function ExternalHistoryDialog({ agentId, onClose, onOpen }: {
   return <HistoryDialog title="导入外部历史" onClose={onClose}>
     <div className="space-y-3 p-4 text-sm">
       <p className="text-xs text-muted-foreground">仅添加会话引用。原始对话仍由对应 Agent 保存。</p>
-      <input aria-label="筛选本页历史" placeholder="筛选本页标题或 ID" value={filter} onChange={e => setFilter(e.target.value)}
-        className="w-full rounded-md border border-input bg-background px-3 py-2 outline-none focus:border-ring" />
+      <Input aria-label="筛选本页历史" placeholder="筛选本页标题或 ID" value={filter} onChange={e => setFilter(e.target.value)} />
       {(error || query.error) && <p role="alert" className="text-destructive">{error || query.error?.message}</p>}
       <div className="max-h-[45vh] space-y-1 overflow-y-auto">
         {query.isPending ? <p className="text-muted-foreground">正在读取历史…</p> : sessions.length === 0 ? <p className="text-muted-foreground">本页没有匹配的主会话</p> : sessions.map(row =>
@@ -63,8 +55,8 @@ export function ExternalHistoryDialog({ agentId, onClose, onOpen }: {
           </button>)}
       </div>
       <div className="flex justify-between text-xs">
-        <button type="button" disabled={!cursor || query.isFetching} onClick={() => setCursor(undefined)} className="rounded px-2 py-1 hover:bg-muted disabled:opacity-40">返回首页</button>
-        <button type="button" disabled={!query.data?.nextCursor || query.isFetching} onClick={() => setCursor(query.data.nextCursor)} className="rounded px-2 py-1 hover:bg-muted disabled:opacity-40">下一页</button>
+        <Button variant="ghost" size="sm" disabled={!cursor || query.isFetching} onClick={() => setCursor(undefined)}>返回首页</Button>
+        <Button variant="ghost" size="sm" disabled={!query.data?.nextCursor || query.isFetching} onClick={() => setCursor(query.data.nextCursor)}>下一页</Button>
       </div>
     </div>
   </HistoryDialog>;
@@ -107,7 +99,7 @@ function SubagentViewer({ agentId, child, onClose }: { agentId: string; child: S
   const transcript = buildTranscriptFromReplay(query.data?.replayed || []);
   return <HistoryDialog title={child.title || "子智能体会话"} onClose={onClose}>
     <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-2 text-xs">
-      <button type="button" onClick={onClose} className="flex items-center gap-1 rounded px-2 py-1 hover:bg-muted"><ArrowLeft className="size-3.5" />返回主会话</button>
+      <Button variant="ghost" size="sm" onClick={onClose}><ArrowLeft />返回主会话</Button>
       <span className="text-muted-foreground">只读 · {query.data?.source === "live" ? "近期运行记录" : "Agent 历史回放"}</span>
     </div>
     <div className="max-h-[60vh] space-y-4 overflow-y-auto p-4 text-sm">
