@@ -6,6 +6,7 @@
 import { apiFetch } from "@/lib/gateway-auth";
 import { normalizeAppEvent } from "@/lib/app-events";
 import type * as acp from "@agentclientprotocol/sdk";
+import type { AcpAgentQuota } from "@yitom/acp-client";
 import { applyArtifactUpdate, isArtifactUpdate, artifactKey, updateKey, type ArtifactUpdate, type SessionArtifact } from "../../shared/acp-session-state";
 import {
   isGenerativeTool,
@@ -295,8 +296,8 @@ export interface FlattenedOption {
 export interface ConfigOptionLike {
   id: string;
   name: string;
-  description?: string;
-  category?: string;
+  description?: string | null;
+  category?: string | null;
   type: string;
   currentValue?: unknown;
   options?: Array<any>;
@@ -852,9 +853,9 @@ export interface UniversalHandlers {
   onConfigOptions?: (options: acp.SessionConfigOption[]) => void;
   onArtifactUpdate?: (update: ArtifactUpdate) => void;
   onContentBlock?: (content: acp.ContentBlock) => void;
-  onSessionInfo?: (info: any) => void;
+  onSessionInfo?: (info: acp.SessionInfoUpdate) => void;
   onUsage?: (usage: UsageUpdate) => void;
-  onQuota?: (quota: any) => void;
+  onQuota?: (quota: AcpAgentQuota) => void;
   /** fs/terminal/compaction and any unrecognized update kinds land here. */
   onActivity?: (a: ActivityEvent) => void;
   onPermissionClosed?: (id: string) => void;

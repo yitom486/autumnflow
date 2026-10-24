@@ -2,6 +2,7 @@ import React from "react";
 import { List, PlusCircle, Trash2, XCircle, Gauge, Command, Settings2, GitFork, Cpu, FileDiff } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import type { SessionInfo } from "@/stores/useStudioStore";
 
 export interface SessionControlsProps {
   sessionId: string | null;
@@ -9,7 +10,7 @@ export interface SessionControlsProps {
   configOptions: Array<{ id: string; name: string; description?: string; type: string; currentValue?: unknown; options?: Array<{ value: string; name?: string }> }> | null;
   availableCommands: Array<{ name: string; description?: string }>;
   usage: { used: number; size: number; cost?: { amount: number; currency: string } } | null;
-  sessionInfo: any;
+  sessionInfo: SessionInfo | null;
   capabilities: Record<string, any> | null | undefined;
   onNewSession: () => void;
   onCloseSession: () => void;
