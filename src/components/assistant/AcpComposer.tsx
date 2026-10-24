@@ -36,7 +36,7 @@ import { fsList } from "@/lib/fs-api";
 import { matchSlashToken, replaceSlashToken, mergeCommands, filterCommands, type SlashCommand } from "@/lib/slash-commands";
 import { ACP_INSERT_SNIPPET_EVENT, ACP_COMPOSER_DROP_EVENT, formatSnippetPrompt, type CodeSnippetPayload, type ComposerDropPayload } from "@/lib/composer-bridge";
 import { useWorkbenchStore } from "@/stores/useWorkbenchStore";
-import { getWorkspaceEnv, useStudioStore, type QueuedPrompt } from "@/stores/useStudioStore";
+import { getWorkspaceEnv, useActiveSession, useStudioStore, type QueuedPrompt } from "@/stores/useStudioStore";
 
 /**
  * 输入法组词中的按键。
@@ -154,9 +154,9 @@ export const AcpComposer: React.FC<AcpComposerProps> = (p) => {
   const aui = useAui();
   // 输入框的文本以 store 里的草稿为准（按会话存）：显示、发送、命令/引用插入都读它。
   // 这样没有"把文本写回输入框"的时序问题，也不会打断输入法组词。
-  const sessionId = useStudioStore((s) => s.sessionId);
-  const composerText = useStudioStore((s) => s.drafts[s.sessionId ?? ""] ?? "");
-  const setComposerText = (text: string) => useStudioStore.getState().setDraft(sessionId, text);
+  // 草稿是当前会话自己的：切走再切回来还在。
+  const composerText = useActiveSession((b) => b.draft);
+  const setComposerText = (text: string) => useStudioStore.getState().setDraft(text);
   const canCancel = useAuiState((s) => s.composer.canCancel);
   const fileRef = useRef<HTMLInputElement>(null);
   const [slashOpen, setSlashOpen] = useState(false);

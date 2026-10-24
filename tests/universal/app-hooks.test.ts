@@ -9,6 +9,7 @@ import { useSessionLifecycle } from "../../src/hooks/useSessionLifecycle";
 import { useAppBootAndShortcuts } from "../../src/hooks/useAppBootAndShortcuts";
 import { Sidebar, SessionRow, type SessionItem } from "../../src/components/universal/Sidebar";
 import { acpKeys } from "../../src/lib/acp-queries";
+import { setStudio, view } from "../helpers/studio";
 
 beforeEach(() => {
   useStudioStore.getState().resetStudio();
@@ -47,11 +48,11 @@ describe("Controller hooks & App invariants", () => {
       appendActivityMessage({ kind: "session_info_update", detail: {} }, "12:00");
       appendActivityMessage({ kind: "plan", detail: {} }, "12:00");
       appendActivityMessage({ kind: "config_option_update", detail: {} }, "12:00");
-      expect(useStudioStore.getState().messages).toHaveLength(0);
+      expect(view().messages).toHaveLength(0);
 
       // Real fs / terminal activities should be formatted cleanly
       appendActivityMessage({ kind: "fs_read", detail: { path: "src/App.tsx" } }, "12:00");
-      const msgs = useStudioStore.getState().messages;
+      const msgs = view().messages;
       expect(msgs).toHaveLength(1);
       expect(msgs[0].content).toContain("src/App.tsx");
       expect(msgs[0].content).toContain("fs_read");
@@ -65,7 +66,7 @@ describe("Controller hooks & App invariants", () => {
       const alert = vi.fn();
       window.alert = alert;
       globalThis.fetch = vi.fn(async () => new Response(JSON.stringify({ ok: false, error: "Model not found" }), { status: 400 })) as typeof fetch;
-      useStudioStore.setState({ sessionId: "s1", activeAgentId: "opencode", modelsOpen: true, models: { currentModelId: "old", availableModels: [] } });
+      setStudio({ sessionId: "s1", activeAgentId: "opencode", modelsOpen: true, models: { currentModelId: "old", availableModels: [] } });
       const before = useStudioStore.getState().agentPrefs;
       const { result, unmount } = renderTestHook(() => useAgentConfig({ agentsRef: { current: [] }, ensureSession: async () => "s1" }));
       try {
@@ -185,7 +186,7 @@ describe("Controller hooks & App invariants", () => {
       const sid = await hook.resolveSession("opencode");
       expect(sid).toBeNull();
       expect(useStudioStore.getState().threads[useStudioStore.getState().activeThreadId!]?.stale).toBe(true);
-      expect(useStudioStore.getState().messages).toHaveLength(1);
+      expect(view().messages).toHaveLength(1);
       unmount();
     });
 

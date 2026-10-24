@@ -21,7 +21,7 @@ import { useWorkbenchCommands } from "@/hooks/useWorkbenchCommands";
 import { useSlashCommands } from "@/hooks/useSlashCommands";
 const FileTreePanel = lazy(() => import("@/components/workbench/FileTreePanel"));
 const EditorPane = lazy(() => import("@/components/workbench/EditorPane"));
-import { useStudioStore, useStudioShallow } from "@/stores/useStudioStore";
+import { sessionOf, useRunningSessionIds, useStudioStore, useStudioShallow } from "@/stores/useStudioStore";
 import { useAgentsQuery, useSessionsQuery, invalidateAgents, invalidateSessions } from "@/lib/acp-queries";
 import {
   logoutAgent,
@@ -136,6 +136,7 @@ export default function App() {
   const [customOpen, setCustomOpen] = useState(false);
   const [importHistoryOpen, setImportHistoryOpen] = useState(false);
   const s = useStudioShallow();
+  const runningSessions = useRunningSessionIds();
 
   // Server state (TanStack Query)
   const agentsQuery = useAgentsQuery();
@@ -154,13 +155,13 @@ export default function App() {
         agentSessions: visibleSessions(sessionsRaw, s.threads, s.activeAgentId),
         activeAgentId: s.activeAgentId,
         agentTitle: (id) => agents.find((a) => a.id === id)?.title || id,
-        runningSessions: s.runningSessions,
+        runningSessions,
       }),
-    [agents, s.threads, sessionsRaw, s.activeAgentId, s.runningSessions]
+    [agents, s.threads, sessionsRaw, s.activeAgentId, runningSessions]
   );
   const activeThread = s.activeThreadId ? s.threads[s.activeThreadId] : undefined;
   /** 本会话是否在生成：别的会话在跑不该让这个会话排队。 */
-  const sessionBusy = !!s.runningSessions[s.sessionId ?? ""];
+  const sessionBusy = s.isStreaming;
   const activeThreadTitle = titleForThread(activeThread);
   const agentSessionTitle = isDefaultSessionTitle(s.sessionInfo?.title) ? undefined : s.sessionInfo?.title;
   const headerSessionTitle = agentSessionTitle || activeThreadTitle || undefined;
@@ -221,9 +222,6 @@ export default function App() {
     ensureSession: (agentId, force) => ensureSessionRef.current(agentId, force),
   });
 
-  // Forward ref for abortRef in session lifecycle (e.g. aborting on agent switch)
-  const abortRefProxy = useRef<AbortController | null>(null);
-
   // 3. Session lifecycle & resume-first resolution
   const {
     ensureSession,
@@ -242,14 +240,12 @@ export default function App() {
     agents,
     agentsRef,
     applyDefaultConfigOptions,
-    abortRef: abortRefProxy,
   });
   ensureSessionRef.current = ensureSession;
 
   // 4. Chat turn execution & streaming
   const { runLocal } = useSlashCommands();
   const {
-    abortRef,
     handleSend,
     handleStop,
     handleSteer,
@@ -261,7 +257,6 @@ export default function App() {
     agentsRef,
     resolveSession,
   });
-  abortRefProxy.current = abortRef.current;
 
   // 5. Generative UI Interactive feedback loop
   const handleGenerativeAction = useCallback(
@@ -269,7 +264,7 @@ export default function App() {
       const prompt = formatGenerativeActionPrompt(action);
       if (!prompt) return;
       const cur = useStudioStore.getState();
-      if (cur.isStreaming) {
+      if (sessionOf(cur).running) {
         throw new Error("智能体正在生成回答中，请稍候再提交。");
       }
       if (!runLocal(prompt)) {
@@ -501,7 +496,7 @@ export default function App() {
             <AcpComposer
               onSendAttachmentOnly={() => handleSend("")}
               onStop={handleStop}
-              queuedPrompts={s.activeThreadId ? s.threads[s.activeThreadId]?.queuedPrompts ?? [] : []}
+              queuedPrompts={s.queuedPrompts}
               onWithdraw={handleWithdraw}
               onQueue={(text) => void handleSend(text)}
               onSubmitPrompt={(text) => void handleSend(text)}

@@ -3,7 +3,8 @@ import { useCallback, useRef } from "react";
 import { CreateElicitationRequest, CreateElicitationResponse } from "@agentclientprotocol/sdk";
 import { applyArtifactUpdate, artifactKey, updateKey } from "../../shared/acp-session-state";
 import type { QueryClient } from "@tanstack/react-query";
-import { useStudioStore } from "@/stores/useStudioStore";
+import { activeKey, sessionOf, useStudioStore, type SessionKey } from "@/stores/useStudioStore";
+import { elicitationInScope, permissionInScope } from "@/lib/interaction-scope";
 import { invalidateSessions, acpKeys } from "@/lib/acp-queries";
 import type { SessionItem } from "@/components/universal/Sidebar";
 import {
@@ -107,7 +108,7 @@ const defaultNow = () =>
   new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 
 /** Appends a formatted system message for non-chat activity notifications (fs, terminal, compaction), or attaches to active assistant turn. */
-export function appendActivityMessage(a: ActivityEvent, timestamp: string, assistantId?: string) {
+export function appendActivityMessage(a: ActivityEvent, timestamp: string, assistantId?: string, key?: SessionKey | null) {
   if (!a?.kind || a.kind === "session_info_update" || a.kind.endsWith("_update") || a.kind === "plan") {
     return;
   }
@@ -145,7 +146,7 @@ export function appendActivityMessage(a: ActivityEvent, timestamp: string, assis
     role: "system",
     content: line,
     timestamp,
-  });
+  }, key);
 }
 
 /**
@@ -156,6 +157,10 @@ export function appendActivityMessage(a: ActivityEvent, timestamp: string, assis
  *    and async snapshotThread microtask.
  * 2. handleStop: abort controller + sessionRpc("cancel") + completedAt mark.
  * 3. handlePermRespond & handleElicRespond: inline & dialog approval responses.
+ *
+ * Every turn belongs to the session it was sent from: it captures that
+ * session's key once and writes only there, so switching the view never
+ * redirects (or cuts) a turn that is still running.
  */
 export function useChatSend({
   qc,
@@ -164,10 +169,10 @@ export function useChatSend({
   now = defaultNow,
   retry,
 }: UseChatSendOptions) {
-  const abortRef = useRef<AbortController | null>(null);
-  const sendingRef = useRef(false);
-  /** 这次发送属于哪个会话：别的会话不该被它挡住。 */
-  const sendingSessionRef = useRef<string | null>(null);
+  /** 每个会话自己那一轮的 controller：停止只停当前会话的那一轮。 */
+  const controllers = useRef(new Map<SessionKey, AbortController>());
+  /** 正在发送（还没开始流式）的会话：别的会话不该被它挡住。 */
+  const sending = useRef(new Set<SessionKey>());
   const handleSendRef = useRef<((text?: string) => Promise<void>) | null>(null);
   const retryMax = retry?.max ?? DEFAULT_RETRY.max;
   const retryDelayMs = retry?.delayMs ?? DEFAULT_RETRY.delayMs;
@@ -177,36 +182,35 @@ export function useChatSend({
    *
    * The queue is the user's explicit intent to keep working, so it drains in
    * order. A prompt that cannot be sent stays queued for the next round.
+   * Sending goes through the view, so a session that finished in the
+   * background keeps its queue until the user is back on it.
    */
-  const drainQueue = useCallback(async () => {
+  const drainQueue = useCallback(async (key: SessionKey) => {
     const store = useStudioStore.getState();
-    // 只排空"本会话"的队列：别的会话排着的东西不能塞到这边来。
-    const threadId = store.activeThreadId;
-    const queued = [
-      ...(threadId ? store.threads[threadId]?.queuedPrompts || [] : []),
-      ...store.queuedPrompts,
-    ];
-    const next = queued[0];
+    if (activeKey(store) !== key) return;
+    const session = sessionOf(store, key);
+    const next = session.queuedPrompts[0];
     if (!next) return;
-    if (store.isStreaming || store.busy) return;
-    store.removeQueuedPrompt(next.id);
+    if (session.running || sending.current.has(key) || store.busy) return;
+    store.removeQueuedPrompt(next.id, key);
     await handleSendRef.current?.(next.text);
   }, []);
 
   /**
-   * Refuse every pending approval of this agent.
+   * Refuse every pending approval of one session.
    *
    * The card goes away immediately — the user must not be left staring at a
    * request the agent has already given up on — and the agent is told
-   * "cancelled" so the turn it blocked can carry on.
+   * "cancelled" so the turn it blocked can carry on. Other sessions' requests
+   * are theirs and stay.
    */
-  const cancelPendingInteractions = useCallback((agentId: string) => {
+  const cancelPendingInteractions = useCallback((agentId: string, sessionId: string | null) => {
     const live = useStudioStore.getState();
-    for (const perm of live.pendingPerms.filter((p) => p.agentId === agentId)) {
+    for (const perm of live.pendingPerms.filter((p) => permissionInScope(p, agentId, sessionId))) {
       void respondPermission(perm.agentId, perm.permissionId, { outcome: "cancelled" }).catch(() => {});
       live.removePermission(perm.permissionId);
     }
-    for (const elic of live.pendingElic.filter((e) => e.agentId === agentId)) {
+    for (const elic of live.pendingElic.filter((e) => e.sessionId && elicitationInScope(e, agentId, sessionId))) {
       void respondElicitation(elic.agentId, elic.elicitationId, { action: "cancel" }).catch(() => {});
       live.removeElicitation(elic.elicitationId);
     }
@@ -216,52 +220,63 @@ export function useChatSend({
     async (textToSend?: string) => {
       const st = useStudioStore.getState();
       const agentId = st.activeAgentId;
-      // 草稿按会话存：这里读的是"当前会话"那份。
-      const sendSessionId = st.sessionId;
-      const draft = st.drafts[sendSessionId ?? ""] ?? "";
-      const prompt = (textToSend ?? draft).trim();
-      if (!prompt && st.attachments.length === 0) return;
+      // 草稿和附件都是"当前会话"那份。
+      const view = sessionOf(st);
+      const attachments = view.attachments;
+      const prompt = (textToSend ?? view.draft).trim();
+      if (!prompt && attachments.length === 0) return;
+      // 这一轮属于哪个会话：从这里起所有写入都落在它自己的格子里，用户切到哪
+      // 个会话都一样。还没有线程的草稿视图先落一个线程，让它有自己的键（草稿
+      // 跟着搬过去）。
+      if (!st.activeThreadId) st.snapshotThread();
+      const sendKey = activeKey(useStudioStore.getState());
       // The agent is still working: queue the prompt instead of dropping it.
       // The user sees it in the composer and can withdraw it. A send that is
       // still in flight counts as busy too — right after Enter the turn has
       // not started streaming yet, and the prompt must not vanish there.
       //
       // 只有"本会话"在忙才算忙：别的会话在跑时，这里照发不误（会话之间要隔离）。
-      const thisSessionBusy = !!st.runningSessions[st.sessionId ?? ""];
-      if (thisSessionBusy || (sendingRef.current && sendingSessionRef.current === st.sessionId)) {
-        if (prompt) useStudioStore.getState().enqueuePrompt(prompt);
+      if (view.running || sending.current.has(sendKey)) {
+        if (prompt) useStudioStore.getState().enqueuePrompt(prompt, sendKey);
         // A pending approval blocks the turn. Typing a new message is the
         // third way out: refuse the request so the agent can continue, and
         // let the queued prompt run afterwards.
-        cancelPendingInteractions(agentId);
+        cancelPendingInteractions(agentId, st.sessionId);
         return;
       }
-      sendingRef.current = true;
-      sendingSessionRef.current = st.sessionId;
       const blocks: Record<string, unknown>[] = [
-        ...st.attachments.map((a) => a.block),
+        ...attachments.map((a) => a.block),
         ...(prompt ? [{ type: "text", text: prompt }] : []),
       ];
       const display =
         prompt +
-        (st.attachments.length > 0
-          ? `\n\n[附件: ${st.attachments.map((a) => a.name).join(", ")}]`
+        (attachments.length > 0
+          ? `\n\n[附件: ${attachments.map((a) => a.name).join(", ")}]`
           : "");
       // 草稿清掉（按会话）——发出去的内容不该留在输入框里。
-      st.setDraft(sendSessionId, "");
-      st.setAttachments([]);
+      st.setDraft("", sendKey);
+      st.setAttachments([], sendKey);
       // If currently active thread was marked stale (historical view), start fresh thread for this prompt
       const curThread0 = st.activeThreadId ? st.threads[st.activeThreadId] : undefined;
       if (curThread0?.stale) {
         st.newThread(agentId);
       }
+      let key: SessionKey = activeKey(useStudioStore.getState());
+      sending.current.add(sendKey);
+      sending.current.add(key);
 
       const assistantId = "asst-" + Date.now();
+      const store = () => useStudioStore.getState();
+      const patchAsst = (patch: Parameters<ReturnType<typeof store>["patchMessage"]>[1]) =>
+        store().patchMessage(assistantId, patch, key);
+      const patchTurn = (patch: Parameters<ReturnType<typeof store>["patchActiveTurn"]>[0]) =>
+        store().patchActiveTurn(patch, key);
+      const findAsst = () => sessionOf(store(), key).messages.find((m) => m.id === assistantId);
       // Server-side idempotency key: retries attach to this turn instead of
       // prompting the agent again.
       const turnId = `turn-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`;
       // 发出的图片也显示在用户消息里（与历史回放一致）
-      const sentImages = st.attachments
+      const sentImages = attachments
         .filter((a) => (a.block as any).type === "image" && typeof (a.block as any).data === "string")
         .map((a) => ({ src: `data:${(a.block as any).mimeType || a.mimeType};base64,${(a.block as any).data}`, mimeType: String((a.block as any).mimeType || a.mimeType) }))
         .slice(-8);
@@ -272,19 +287,20 @@ export function useChatSend({
       let disposeBatching = () => {};
       let stopPersisting = () => {};
       const beginTurn = (initialHint?: string) => {
-        const current = useStudioStore.getState();
-        if (turnStarted && current.messages.some((m) => m.id === assistantId)) {
+        const current = store();
+        const messages = sessionOf(current, key).messages;
+        if (turnStarted && messages.some((m) => m.id === assistantId)) {
           if (initialHint) {
-            current.patchMessage(assistantId, (m) => ({ ...m, statusHint: initialHint }));
+            patchAsst((m) => ({ ...m, statusHint: initialHint }));
           }
           return;
         }
         turnStarted = true;
-        const wasEmpty = !current.messages.some((m) => m.role === "user" && m.content.trim());
-        current.appendMessage({ id: "user-" + Date.now(), role: "user", content: display, timestamp: now(), ...(sentImages.length ? { images: sentImages } : {}) });
+        const wasEmpty = !messages.some((m) => m.role === "user" && m.content.trim());
+        current.appendMessage({ id: "user-" + Date.now(), role: "user", content: display, timestamp: now(), ...(sentImages.length ? { images: sentImages } : {}) }, key);
         if (wasEmpty) {
           const title = titleForThread({ messages: [{ role: "user", content: display } as any] });
-          if (title) current.setSessionInfo({ ...(current.sessionInfo || {}), title });
+          if (title) current.setSessionInfo({ ...(sessionOf(current, key).sessionInfo || {}), title }, key);
         }
         current.appendMessage({
           id: assistantId,
@@ -298,30 +314,30 @@ export function useChatSend({
           isStreaming: true,
           startedAt: Date.now(),
           statusHint: initialHint,
-        });
+        }, key);
         current.setActiveTurn({
           turnId,
           lastSeq: 0,
           status: "running",
           assistantId,
           startedAt: Date.now(),
-        });
+        }, key);
         markTurnLive(turnId);
         // Persist the user prompt immediately so a refresh during the first
         // second can still reattach instead of showing an empty conversation.
-        useStudioStore.getState().snapshotThread();
+        store().snapshotThread(key);
       };
-      // Keep this turn's controller: a later turn replaces abortRef.current,
-      // and the finally block must judge THIS turn's abort, not the next one's.
+      // This turn's own controller, filed under its session: stopping another
+      // session never reaches it, and the finally block judges THIS abort.
       const controller = new AbortController();
-      abortRef.current = controller;
+      controllers.current.set(key, controller);
 
       // Real wall-clock timing (client-observed): tool start = first sighting,
       // tool end = first terminal status; turn end = done/error/abort.
       const TERMINAL_TOOL = new Set(["completed", "failed", "cancelled"]);
       const stampTurnEnd = (id: string) => {
         const t = Date.now();
-        useStudioStore.getState().patchMessage(id, (m) => ({
+        store().patchMessage(id, (m) => ({
           ...m,
           isStreaming: false,
           statusHint: undefined,
@@ -330,7 +346,7 @@ export function useChatSend({
             m.thoughtTiming?.startedAt && !m.thoughtTiming.completedAt
               ? { ...m.thoughtTiming, completedAt: t }
               : m.thoughtTiming,
-        }));
+        }), key);
       };
 
       try {
@@ -345,16 +361,25 @@ export function useChatSend({
           // setting that flag first makes an early first send fail with no ID.
           sid = await resolveSession(agentId);
           if (!sid) throw new Error("无法创建会话");
+          // A fresh session may have opened a new thread for this prompt: the
+          // turn belongs to the session it is actually sent on.
+          const resolved = store();
+          if (resolved.activeAgentId === agentId && activeKey(resolved) !== key && resolved.activeThreadId) {
+            controllers.current.delete(key);
+            sending.current.delete(key);
+            key = activeKey(resolved);
+            controllers.current.set(key, controller);
+            sending.current.add(key);
+          }
         }
         // A cold agent (`bunx @deepseek-ai/dsh@latest`) spends its first seconds
         // in spawn + session/new; label that instead of a bare "等待响应…".
         beginTurn(known ? "等待响应…" : "正在启动 Agent…（首次或升级后可能较慢）");
-        st.setStreaming(true);
-        useStudioStore.getState().patchMessage(assistantId, (m) => ({
+        store().setSessionRunning(key, true);
+        patchAsst((m) => ({
           ...m,
           statusHint: m.statusHint || "等待响应…",
         }));
-        const cur = useStudioStore.getState();
         // Transient transport failures (dropped SSE, gateway hiccup) resend
         // automatically with backoff; the retry note is stripped on success.
         // Anything else (abort/auth/semantic) falls through to the handlers below.
@@ -367,7 +392,7 @@ export function useChatSend({
         let lastSeq = 0;
         // Coalesce token-rate writes to one UI commit per animation frame.
         const textBatcher = new FrameBatcher((text) => {
-          useStudioStore.getState().patchMessage(assistantId, (m) => ({
+          patchAsst((m) => ({
             ...m,
             content: m.content + text,
             statusHint: undefined,
@@ -375,7 +400,7 @@ export function useChatSend({
         });
         let thoughtStartedAt = 0;
         const thoughtBatcher = new FrameBatcher((text) => {
-          useStudioStore.getState().patchMessage(assistantId, (m) => ({
+          patchAsst((m) => ({
             ...m,
             thought: (m.thought || "") + text,
             statusHint: "正在思考…",
@@ -393,8 +418,8 @@ export function useChatSend({
         };
         const persistActiveTurn = () => {
           const st = useStudioStore.getState();
-          if (st.activeTurn?.turnId !== turnId) return;
-          st.snapshotThread();
+          if (sessionOf(st, key).activeTurn?.turnId !== turnId) return;
+          st.snapshotThread(key);
         };
         const persistTimer = setInterval(persistActiveTurn, 1500);
         const onPageHide = () => {
@@ -448,11 +473,11 @@ export function useChatSend({
                   : isStaleSession
                     ? "\n\n> 💡 **会话已失效**：Agent 侧已经没有这个会话（更换运行时或历史被清理时会出现）。已自动尝试接回并退化为新建会话；如果反复出现，请点标题栏的**新会话**再发送。"
                     : "";
-          c2.patchMessage(assistantId, (m) => ({
+          patchAsst((m) => ({
             ...m,
             content: stripRetryNotes(m.content) + `\n\n> ❌ [${agentId}] ${err.message}${diagnosticHint}`,
           }));
-          c2.patchActiveTurn({ status: "error", lastSeq });
+          patchTurn({ status: "error", lastSeq });
           stampTurnEnd(assistantId);
         };
         // Retryable when: budget left, not user-aborted, transport-level failure.
@@ -470,7 +495,7 @@ export function useChatSend({
               {
             onSequence: (seq) => {
               lastSeq = seq;
-              useStudioStore.getState().patchActiveTurn({ lastSeq: seq });
+              patchTurn({ lastSeq: seq });
             },
             onReset: (reset) => {
               if (reset.reason !== "gap" && reset.reason !== "ahead") return;
@@ -478,8 +503,8 @@ export function useChatSend({
               // Rebuild the assistant bubble from the retained replay instead
               // of duplicating a prefix we can no longer reconcile.
               lastSeq = Math.max(0, reset.firstSeq - 1);
-              useStudioStore.getState().patchActiveTurn({ lastSeq });
-              useStudioStore.getState().patchMessage(assistantId, (m) => ({
+              patchTurn({ lastSeq });
+              patchAsst((m) => ({
                 ...m,
                 content: "",
                 thought: "",
@@ -491,16 +516,16 @@ export function useChatSend({
               // 传输通道连接就绪，不写入虚假「深入思考」文案，等待后端下发首个真实事件
             },
             onSessionId: (id) => {
-              useStudioStore.getState().setSessionId(id);
+              store().setThreadSessionId(key, id);
             },
             onStateUpdate: (state) => {
               if (state === "idle") {
-                useStudioStore.getState().patchMessage(assistantId, (m) => ({ ...m, statusHint: undefined }));
+                patchAsst((m) => ({ ...m, statusHint: undefined }));
                 return;
               }
               const text = statusTextForUpdate("state_update", { state });
               if (!text) return;
-              useStudioStore.getState().patchMessage(assistantId, (m) => {
+              patchAsst((m) => {
                 // running 是兜底态：已经有更具体的事件文案（工具 / 子智能体 / 压缩）时不要顶掉
                 if (state === "running" && m.statusHint && !isBootstrapHint(m.statusHint)) return m;
                 return { ...m, statusHint: text };
@@ -509,7 +534,7 @@ export function useChatSend({
             onNotice: (n) => {
               const text = statusTextForUpdate("notice", { message: n.message });
               if (text) {
-                useStudioStore.getState().patchMessage(assistantId, (m) => ({ ...m, statusHint: text }));
+                patchAsst((m) => ({ ...m, statusHint: text }));
               }
             },
             onTextChunk: (chunk) => textBatcher.push(chunk),
@@ -519,7 +544,7 @@ export function useChatSend({
             },
             onImageChunk: (img) => {
               flushPending();
-              useStudioStore.getState().patchMessage(assistantId, (m) => {
+              patchAsst((m) => {
                 const images = [...(m.images || []), img];
                 if (images.length > 8) {
                   console.debug("[App] 图片附件超限，已丢弃旧图 (保留最新 8 张)");
@@ -529,7 +554,7 @@ export function useChatSend({
             },
             onToolCall: (c) => {
               flushPending();
-              useStudioStore.getState().patchMessage(assistantId, (m) => {
+              patchAsst((m) => {
                 const isGen = isGenerativeTool(c);
                 const displayTitle = resolveToolDisplayTitle(c);
                 let newContent = m.content;
@@ -555,7 +580,7 @@ export function useChatSend({
             },
             onToolCallUpdate: (c) => {
               flushPending();
-              useStudioStore.getState().patchMessage(assistantId, (m) => {
+              patchAsst((m) => {
                 const calls = [...(m.toolCalls || [])];
                 const i = calls.findIndex((x) => x.id === c.id);
                 const terminal = c.status != null && TERMINAL_TOOL.has(c.status);
@@ -611,15 +636,19 @@ export function useChatSend({
               });
             },
             onPlan: (entries) =>
-              useStudioStore.getState().patchMessage(assistantId, (m) => {
+              patchAsst((m) => {
                 const hint = statusTextForUpdate("plan", { entries });
                 return hint ? { ...m, plan: entries, statusHint: hint } : { ...m, plan: entries };
               }),
             onAvailableCommands: (cmds) => useStudioStore.getState().setAvailableCommands(cmds, sid),
-            onConfigOptions: (options) => useStudioStore.getState().setConfigOptions(options),
+            // Config is shown for the session being looked at; a background
+            // session's options are refreshed when the user opens it again.
+            onConfigOptions: (options) => {
+              if (activeKey(store()) === key) store().setConfigOptions(options);
+            },
             onContentBlock: (content) => {
               flushPending();
-              useStudioStore.getState().patchMessage(assistantId, (m) => ({
+              patchAsst((m) => ({
                 ...m,
                 contentBlocks: [...(m.contentBlocks ?? []), content],
                 statusHint: undefined,
@@ -627,17 +656,18 @@ export function useChatSend({
             },
             onArtifactUpdate: (update) => {
               const state = useStudioStore.getState();
-              const owner = state.messages.find(m => m.artifacts?.some(entry => artifactKey(entry) === updateKey(update)));
-              state.patchMessage(owner?.id ?? assistantId, m => ({ ...m, artifacts: applyArtifactUpdate(m.artifacts ?? [], update) }));
+              const owner = sessionOf(state, key).messages.find(m => m.artifacts?.some(entry => artifactKey(entry) === updateKey(update)));
+              state.patchMessage(owner?.id ?? assistantId, m => ({ ...m, artifacts: applyArtifactUpdate(m.artifacts ?? [], update) }), key);
             },
             onModeUpdate: (modeId) => {
               const stNow = useStudioStore.getState();
-              if (stNow.modes) stNow.setModes({ ...stNow.modes, currentModeId: modeId });
+              const modes = sessionOf(stNow, key).modes;
+              if (modes) stNow.setModes({ ...modes, currentModeId: modeId }, key);
               useStudioStore.getState().saveAgentPref(agentId, { modeId });
             },
             onConfigUpdate: (opt) => {
               const stNow = useStudioStore.getState();
-              stNow.patchConfigOption(opt);
+              if (activeKey(stNow) === key) stNow.patchConfigOption(opt);
               if (opt?.id) {
                 stNow.rememberAgentConfig(
                   agentId,
@@ -646,11 +676,11 @@ export function useChatSend({
                 );
               }
             },
-            onSessionInfo: (info) => useStudioStore.getState().setSessionInfo(info),
+            onSessionInfo: (info) => store().setSessionInfo(info, key),
             onUsage: (u) => {
               const c2 = useStudioStore.getState();
-              c2.setUsage(u);
-              c2.patchMessage(assistantId, { usage: u });
+              c2.setUsage(u, key);
+              patchAsst({ usage: u });
             },
             onQuota: (q) => {
               if (q) useStudioStore.getState().setQuota(q);
@@ -660,18 +690,18 @@ export function useChatSend({
                 const d = (a.detail || {}) as { childId?: string; title?: string; updateType?: string };
                 const hint = statusTextForUpdate("subagent_active", { subagentTitle: d.title });
                 if (hint) {
-                  useStudioStore.getState().patchMessage(assistantId, (m) => ({ ...m, statusHint: hint }));
+                  patchAsst((m) => ({ ...m, statusHint: hint }));
                 }
                 return;
               }
               if (a.kind === "compaction_update" || a.kind === "compaction_summary_chunk") {
                 const hint = statusTextForUpdate(a.kind);
                 if (hint) {
-                  useStudioStore.getState().patchMessage(assistantId, (m) => ({ ...m, statusHint: hint }));
+                  patchAsst((m) => ({ ...m, statusHint: hint }));
                 }
                 return;
               }
-              appendActivityMessage(a, now(), assistantId);
+              appendActivityMessage(a, now(), assistantId, key);
             },
             onPermissionClosed: (id) => useStudioStore.getState().removePermission(id),
             onPermissionRequest: (p) => useStudioStore.getState().addPermission(p),
@@ -679,16 +709,16 @@ export function useChatSend({
             onElicitationClosed: (id) => useStudioStore.getState().removeElicitation(id),
             onDone: (_stopReason, resp) => {
               flushPending();
-              useStudioStore.getState().patchActiveTurn({ status: "done", lastSeq });
+              patchTurn({ status: "done", lastSeq });
               const c2 = useStudioStore.getState();
-              const current = c2.messages.find(message => message.id === assistantId)?.usage;
+              const current = findAsst()?.usage;
               const merged = mergePromptUsage(current, resp);
               if (merged) {
-                c2.setUsage(merged);
-                c2.patchMessage(assistantId, { usage: merged });
+                c2.setUsage(merged, key);
+                patchAsst({ usage: merged });
               }
               // 若该轮次结束且没有最终正文输出（仅工具前有阶段说明），将阶段说明回退为正文保证不丢失任何内容
-              useStudioStore.getState().patchMessage(assistantId, (m) => {
+              patchAsst((m) => {
                 if (!m.content?.trim() && m.progressContent) {
                   return {
                     ...m,
@@ -724,12 +754,12 @@ export function useChatSend({
         }
         if (!failedErr) {
           if (attempt > 0) {
-            useStudioStore.getState().patchMessage(assistantId, (m) => ({ ...m, content: stripRetryNotes(m.content) }));
+            patchAsst((m) => ({ ...m, content: stripRetryNotes(m.content) }));
           }
           break;
         }
         attempt += 1;
-        useStudioStore.getState().patchMessage(assistantId, (m) => ({
+        patchAsst((m) => ({
           // Trailing newline keeps the note self-delimiting: streamed text
           // lands on the next line so stripRetryNotes can never eat content.
           ...m,
@@ -743,7 +773,7 @@ export function useChatSend({
 
         // 自动解析状态响应中的实时额度与速率限制（例如 /status 输出）
         try {
-          const finalMsg = done.messages.find((m) => m.id === assistantId);
+          const finalMsg = findAsst();
           if (finalMsg?.content && /5-hour limit|rate limit|weekly limit|resets in|resets at|limit:/i.test(finalMsg.content)) {
             const parsed = parseRateLimitsFromStatusText(finalMsg.content);
             if (parsed && (parsed.primaryWindow || parsed.secondaryWindow)) {
@@ -797,13 +827,13 @@ export function useChatSend({
             c2.setAuthOk(agentId, false);
             c2.setAuthOpen(true);
           }
-          const prev = stripRetryNotes(c2.messages.find((m) => m.id === assistantId)?.content || "");
+          const prev = stripRetryNotes(findAsst()?.content || "");
           const rawMsg = e?.message && e.message !== "null" ? e.message : "连接异常或请求超时";
           let errorText = rawMsg;
           if (/referenced reasoning item .* expired|not found or has expired/i.test(rawMsg)) {
             errorText = `上游模型推理上下文已过期 (Reasoning Cache Expired)。\n\n> 💡 **原理说明**：上游推理模型（o1/o3/Thinking）在服务端的推理上下文缓存已超时（通常 > 15-30 分钟）被自动回收，当前旧会话无法在原推理节点继续追加。\n> 🚀 **解决方案**：请点击侧边栏或主界面的 **「+ 新会话」** 开启干净上下文即可恢复正常。`;
           }
-          c2.patchMessage(assistantId, (m) => ({ ...m, content: prev ? `${prev}\n\n> ❌ [连接异常] ${errorText}` : `> ❌ [连接异常] ${errorText}` }));
+          patchAsst((m) => ({ ...m, content: prev ? `${prev}\n\n> ❌ [连接异常] ${errorText}` : `> ❌ [连接异常] ${errorText}` }));
           stampTurnEnd(assistantId);
         }
       } finally {
@@ -811,30 +841,30 @@ export function useChatSend({
         clearTurnLive(turnId);
         flushPending();
         disposeBatching();
-        sendingRef.current = false;
-        sendingSessionRef.current = null;
+        sending.current.delete(sendKey);
+        sending.current.delete(key);
+        if (controllers.current.get(key) === controller) controllers.current.delete(key);
         const c2 = useStudioStore.getState();
         // The prompt leaves the composer as soon as the send starts. If the
         // turn never began (the session could not be resolved, the request was
         // aborted), give it back instead of dropping what the user typed.
         // 还给"发起这一轮的那个会话"，别还到用户现在看的那个会话去。
-        const draftKey = sendSessionId ?? "";
-        if (!turnStarted && !(c2.drafts[draftKey] ?? "")) c2.setDraft(draftKey, prompt);
-        if (c2.activeTurn?.turnId === turnId && c2.activeTurn.status === "running") {
-          c2.patchActiveTurn({
+        if (!turnStarted && !sessionOf(c2, sendKey).draft) c2.setDraft(prompt, sendKey);
+        const turn = sessionOf(c2, key).activeTurn;
+        if (turn?.turnId === turnId && turn.status === "running") {
+          patchTurn({
             status: controller.signal.aborted ? "interrupted" : "error",
-            lastSeq: c2.activeTurn.lastSeq,
+            lastSeq: turn.lastSeq,
           });
         }
-        c2.setStreaming(false);
-        c2.setBusy(false);
+        c2.setSessionRunning(key, false);
         stampTurnEnd(assistantId);
         // Turn-end marker (done / error / abort): splice this turn's final
         // text and persist ASYNC — fire-and-forget microtask so storage I/O
         // never blocks the UI thread.
         void Promise.resolve().then(() => {
           try {
-            useStudioStore.getState().snapshotThread();
+            store().snapshotThread(key);
           } catch (err) {
             console.error("[App] turn persist failed:", err);
           }
@@ -842,7 +872,7 @@ export function useChatSend({
         // A turn that ended on its own hands the run over to the queue. An
         // aborted turn (the user stopped it) keeps the queue waiting: the
         // user decides when the next prompt runs.
-        if (!controller.signal.aborted) void drainQueue();
+        if (!controller.signal.aborted) void drainQueue(key);
       }
     },
     [qc, agentsRef, resolveSession, now, drainQueue, cancelPendingInteractions]
@@ -856,8 +886,9 @@ export function useChatSend({
    * queue survives — the user decides when the next prompt runs.
    */
   const handleStop = useCallback(async () => {
-    abortRef.current?.abort();
     const st = useStudioStore.getState();
+    const key = activeKey(st);
+    controllers.current.get(key)?.abort();
     if (st.sessionId) {
       try {
         await sessionRpc(st.activeAgentId, "cancel", { sessionId: st.sessionId });
@@ -865,13 +896,12 @@ export function useChatSend({
         // ignore
       }
     }
-    const live = useStudioStore.getState();
-    cancelPendingInteractions(st.activeAgentId);
+    cancelPendingInteractions(st.activeAgentId, st.sessionId);
     const cur = useStudioStore.getState();
-    cur.setStreaming(false);
+    cur.setSessionRunning(key, false);
     const t = Date.now();
     cur.setMessages(
-      cur.messages.map((m) =>
+      sessionOf(cur, key).messages.map((m) =>
         m.isStreaming
           ? {
               ...m,
@@ -883,7 +913,8 @@ export function useChatSend({
                   : m.thoughtTiming,
             }
           : m
-      )
+      ),
+      key
     );
   }, []);
 
@@ -960,7 +991,6 @@ export function useChatSend({
   handleSendRef.current = handleSend;
 
   return {
-    abortRef,
     handleSend,
     handleStop,
     handleSteer,

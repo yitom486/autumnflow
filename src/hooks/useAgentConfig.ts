@@ -1,6 +1,6 @@
 import { reportError } from "@/lib/error-bus";
 import { useCallback } from "react";
-import { useStudioStore } from "@/stores/useStudioStore";
+import { sessionOf, useStudioStore } from "@/stores/useStudioStore";
 import {
   sessionRpc,
   sessionNew,
@@ -62,7 +62,8 @@ export function useAgentConfig({
             }
             if (Object.keys(snap).length > 0) cur0.saveAgentPref(agentId, { configValues: snap });
             if (cur0.models?.currentModelId) cur0.saveAgentPref(agentId, { fallbackModelId: cur0.models.currentModelId });
-            if (cur0.modes?.currentModeId) cur0.saveAgentPref(agentId, { modeId: cur0.modes.currentModeId });
+            const modeId = sessionOf(cur0).modes?.currentModeId;
+            if (modeId) cur0.saveAgentPref(agentId, { modeId });
           } catch (err) {
             // 最小 loud 化: 默认值快照失败不阻断，留痕即可。
             console.debug("[App] 配置默认值快照失败 (已忽略):", err);
@@ -122,8 +123,9 @@ export function useAgentConfig({
             const listed = (stAfter.models.availableModels || []).some((m) => m.modelId === pref.fallbackModelId);
             if (listed) stAfter.setModels({ ...stAfter.models, currentModelId: pref.fallbackModelId });
           }
-          if (pref?.modeId && stAfter.modes && stAfter.modes.currentModeId !== pref.modeId) {
-            const avail = stAfter.modes.availableModes || [];
+          const modesAfter = sessionOf(stAfter).modes;
+          if (pref?.modeId && modesAfter && modesAfter.currentModeId !== pref.modeId) {
+            const avail = modesAfter.availableModes || [];
             if (avail.some((m) => m.id === pref.modeId)) {
               // best-effort mode 恢复: 失败留痕后继续 (原逻辑不变)。
               await sessionRpc(agentId, "set_mode", { sessionId, modeId: pref.modeId }).catch((err) => {
@@ -131,7 +133,8 @@ export function useAgentConfig({
                 return null;
               });
               const sNow = useStudioStore.getState();
-              if (sNow.modes) sNow.setModes({ ...sNow.modes, currentModeId: pref.modeId });
+              const modesNow = sessionOf(sNow).modes;
+              if (modesNow) sNow.setModes({ ...modesNow, currentModeId: pref.modeId });
             }
           }
         } catch (err) {
@@ -225,7 +228,7 @@ export function useAgentConfig({
   /** Re-discover the model catalog via a throwaway session (closed afterwards). */
   const handleDiscoverModels = useCallback(async () => {
     const st = useStudioStore.getState();
-    if (st.discovering || st.isStreaming) return;
+    if (st.discovering || sessionOf(st).running) return;
     const agentId = st.activeAgentId;
     st.setDiscovering(true);
     try {

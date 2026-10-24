@@ -66,7 +66,7 @@ async function maybeSeedDevFixture() {
   st.setSessionId(fx.sessionId);
   st.setMessages(fx.messages);
   st.setUsage(fx.usage);
-  st.setStreaming(true);
+  st.setSessionRunning(st.activeThreadId ?? "", true);
   for (const p of fx.pendingPerms) st.addPermission(p);
   if (mode === "stream") simulateStream(useStudioStore);
   console.info("[dev] conversation fixture loaded");
@@ -96,7 +96,7 @@ async function seedMathFixture() {
       content: "下面是实现（流式输出中，代码块尚未结束）：\n\n```ts\nexport function contrast(l1: number, l2: number): number {\n  const [hi, lo] = l1 > l2 ? [l1, l2] : [l2, l1];\n  return (hi + 0.05) / (lo + 0.05);",
     },
   ] as any);
-  st.setStreaming(true);
+  st.setSessionRunning(st.activeThreadId ?? "", true);
   console.info("[dev] math fixture loaded");
 }
 
@@ -127,7 +127,7 @@ async function seedSlashFixture(mode: string) {
   } else {
     st.setAvailableCommands([]);
   }
-  st.setStreaming(mode === "slash-streaming");
+  st.setSessionRunning(st.activeThreadId ?? "", mode === "slash-streaming");
   console.info("[dev] slash fixture loaded");
 }
 
@@ -148,13 +148,13 @@ function simulateStream(store: { getState: () => any }) {
   const setText = (content: string, done: boolean) => {
     const st = store.getState();
     st.setMessages(
-      st.messages.map((m: any) =>
+      st.sessions[st.activeThreadId ?? ""].messages.map((m: any) =>
         m.id === "fx-a2"
           ? { ...m, content, isStreaming: !done, completedAt: done ? Date.now() : undefined, toolCalls: (m.toolCalls || []).map((t: any) => ({ ...t, status: "completed" })) }
           : m,
       ),
     );
-    if (done) st.setStreaming(false);
+    if (done) st.setSessionRunning(st.activeThreadId ?? "", false);
   };
   let i = 0;
   setText("", false);

@@ -5,7 +5,7 @@ import {
   useExternalStoreRuntime,
   type AppendMessage,
 } from "@assistant-ui/react";
-import { useStudioStore } from "@/stores/useStudioStore";
+import { activeKey, sessionOf, useActiveSession, useStudioMessages, useStudioStore } from "@/stores/useStudioStore";
 import { convertAcpMessages, extractAppendText } from "@/lib/acp-assistant";
 import { mergeAssistantTurns } from "@/lib/threads";
 
@@ -44,9 +44,10 @@ export const AcpAssistantProvider: React.FC<AcpAssistantProviderProps> = ({
   onOpenSession,
   onDeleteSession,
 }) => {
-  const rawMessages = useStudioStore((s) => s.messages);
+  const rawMessages = useStudioMessages();
   // 视图自己的运行状态：别的会话在跑不该让这里的队列/发送按钮"忙"。
-  const isStreaming = useStudioStore((s) => !!s.runningSessions[s.sessionId ?? ""]);
+  const isStreaming = useActiveSession((b) => b.running);
+  const viewKey = useStudioStore(activeKey);
   const activeSessionId = useStudioStore((s) => s.sessionId);
   const activeThreadId = useStudioStore((s) => s.activeThreadId);
   const studioThreads = useStudioStore((s) => s.threads);
@@ -120,14 +121,25 @@ export const AcpAssistantProvider: React.FC<AcpAssistantProviderProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   });
 
+  // Busy/idle edges are edges of ONE session. Switching the view is not a run
+  // settling: re-sync to the new session without draining anything into it.
+  const queueKey = useRef(viewKey);
   useEffect(() => {
+    if (queueKey.current !== viewKey) {
+      queueKey.current = viewKey;
+      queue.clear();
+      if (isStreaming) queue.notifyBusy();
+      else queue.notifyIdle();
+      wasRunning.current = isStreaming;
+      return;
+    }
     if (!wasRunning.current && isStreaming) {
       busyEdges.current++;
       queue.notifyBusy();
     }
     if (wasRunning.current && !isStreaming) queue.notifyIdle();
     wasRunning.current = isStreaming;
-  }, [isStreaming, queue]);
+  }, [isStreaming, queue, viewKey]);
 
   const runtime = useExternalStoreRuntime({
     messages: converted,
@@ -148,7 +160,7 @@ export const AcpAssistantProvider: React.FC<AcpAssistantProviderProps> = ({
     onReload: async () => {
       queue.clear();
       const st = useStudioStore.getState();
-      const lastUser = [...st.messages].reverse().find((m) => m.role === "user");
+      const lastUser = [...sessionOf(st).messages].reverse().find((m) => m.role === "user");
       if (lastUser) onSend(lastUser.content);
     },
     onEdit: async (message: AppendMessage) => {
@@ -157,9 +169,9 @@ export const AcpAssistantProvider: React.FC<AcpAssistantProviderProps> = ({
       const st = useStudioStore.getState();
       // Docs pattern: parentId points at the message before the edited one,
       // so slice(0, index) drops the edited turn and everything after it.
-      const parentIdx = st.messages.findIndex((m) => m.id === message.parentId);
+      const parentIdx = sessionOf(st).messages.findIndex((m) => m.id === message.parentId);
       const truncated =
-        parentIdx >= 0 ? st.messages.slice(0, parentIdx + 1) : st.messages;
+        parentIdx >= 0 ? sessionOf(st).messages.slice(0, parentIdx + 1) : sessionOf(st).messages;
       // Drop a trailing streaming assistant placeholder if present.
       const clean =
         truncated.length > 0 && truncated[truncated.length - 1].isStreaming

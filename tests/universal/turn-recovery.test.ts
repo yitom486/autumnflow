@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { recoverActiveTurn } from "../../src/hooks/useTurnRecovery";
 import { useStudioStore } from "../../src/stores/useStudioStore";
 import { contextUsage, promptUsage, displayedPromptUsage } from "../fixtures/usage-sample";
+import { view } from "../helpers/studio";
 
 const realFetch = globalThis.fetch;
 
@@ -48,8 +49,8 @@ describe("turn recovery", () => {
       { id: 3, data: { type: "update", update: { sessionUpdate: "usage_update", ...contextUsage } } },
       { id: 4, data: { type: "done", stopReason: "end_turn", response: { usage: promptUsage } } },
     ])) as unknown as typeof fetch;
-    await recoverActiveTurn(useStudioStore.getState().activeTurn!, "a1");
-    expect(useStudioStore.getState().messages.find(message => message.id === "a1")?.usage).toMatchObject({
+    await recoverActiveTurn(view().activeTurn!, "a1");
+    expect(view().messages.find(message => message.id === "a1")?.usage).toMatchObject({
       ...contextUsage, costScope: "session", ...displayedPromptUsage,
     });
   });
@@ -69,8 +70,8 @@ describe("turn recovery", () => {
       ]);
     }) as unknown as typeof fetch;
 
-    await recoverActiveTurn(useStudioStore.getState().activeTurn!, "a1");
-    const st = useStudioStore.getState();
+    await recoverActiveTurn(view().activeTurn!, "a1");
+    const st = view();
     expect(calls[0]).toContain("/api/universal/chat/turn-r/follow?after=2");
     expect(st.messages.find((m) => m.id === "a1")?.content).toBe("hello world");
     expect(st.activeTurn).toMatchObject({ turnId: "turn-r", status: "done", lastSeq: 4 });
@@ -90,8 +91,8 @@ describe("turn recovery", () => {
         { id: 11, data: { type: "done", stopReason: "end_turn" } },
       ])
     ) as unknown as typeof fetch;
-    await recoverActiveTurn(useStudioStore.getState().activeTurn!, "a1");
-    const st = useStudioStore.getState();
+    await recoverActiveTurn(view().activeTurn!, "a1");
+    const st = view();
     expect(st.messages.find((m) => m.id === "a1")?.content).toContain("rebuilt");
     expect(st.messages.find((m) => m.id === "a1")?.content).toContain("早期事件已被清理");
     expect(st.activeTurn?.status).toBe("done");
@@ -99,8 +100,8 @@ describe("turn recovery", () => {
 
   it("marks expired turns as interrupted instead of silently succeeding", async () => {
     globalThis.fetch = vi.fn(async () => Response.json({ ok: false, error: "unknown or expired turn" }, { status: 404 })) as unknown as typeof fetch;
-    await recoverActiveTurn(useStudioStore.getState().activeTurn!, "a1");
-    const st = useStudioStore.getState();
+    await recoverActiveTurn(view().activeTurn!, "a1");
+    const st = view();
     expect(st.activeTurn?.status).toBe("interrupted");
     expect(st.messages.find((m) => m.id === "a1")?.content).toContain("已过期");
   });

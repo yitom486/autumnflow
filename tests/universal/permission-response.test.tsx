@@ -6,22 +6,23 @@ import { useChatSend } from "../../src/hooks/useChatSend";
 import { useStudioStore } from "../../src/stores/useStudioStore";
 import { clearErrors, subscribeErrors } from "../../src/lib/error-bus";
 import type { PendingPermission } from "../../src/lib/universal-api";
+import { setStudio } from "../helpers/studio";
 
 const realFetch = globalThis.fetch;
 afterEach(() => { globalThis.fetch = realFetch; clearErrors(); useStudioStore.getState().resetStudio(); });
 
 it("releases the matching response lock on close without clearing another interaction's lock", () => {
-  useStudioStore.setState({ respondingId: "closed" });
+  setStudio({ respondingId: "closed" });
   useStudioStore.getState().removePermission("closed");
   expect(useStudioStore.getState().respondingId).toBeNull();
-  useStudioStore.setState({ respondingId: "new-request" });
+  setStudio({ respondingId: "new-request" });
   useStudioStore.getState().removePermission("closed");
   expect(useStudioStore.getState().respondingId).toBe("new-request");
 });
 
 it.each([404, 503])("recovers from HTTP %s without a blocking dialog or stuck busy flag", async status => {
   const permission: PendingPermission = { agentId: "opencode", sessionId: "s1", permissionId: "p1", toolCall: {}, options: [{ optionId: "once", name: "Allow", kind: "allow_once" }] };
-  useStudioStore.setState({ pendingPerms: [permission] });
+  setStudio({ pendingPerms: [permission] });
   let respond!: ReturnType<typeof useChatSend>["handlePermRespond"];
   function Harness() {
     respond = useChatSend({ qc: new QueryClient(), agentsRef: { current: [] }, resolveSession: async () => "s1" }).handlePermRespond;

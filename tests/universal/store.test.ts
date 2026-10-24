@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useStudioStore } from "../../src/stores/useStudioStore";
+import { setStudio, view } from "../helpers/studio";
 
 beforeEach(() => {
   useStudioStore.getState().resetStudio();
@@ -23,7 +24,7 @@ describe("useStudioStore", () => {
     s.appendMessage({ id: "b", role: "user", content: "hi", timestamp: "t" });
     s.patchMessage("a", (m) => ({ ...m, content: m.content + "hello" }));
     s.patchMessage("b", { content: "hi!" });
-    const msgs = useStudioStore.getState().messages;
+    const msgs = view().messages;
     expect(msgs.map((m) => m.id)).toEqual(["a", "b"]);
     expect(msgs[0].content).toBe("hello");
     expect(msgs[1].content).toBe("hi!");
@@ -43,7 +44,7 @@ describe("useStudioStore", () => {
     expect(useStudioStore.getState().configOptions?.[0]).toMatchObject({ id: "model", currentValue: "x" });
     s.resetThread();
     const cur = useStudioStore.getState();
-    expect(cur.messages).toEqual([]);
+    expect(view().messages).toEqual([]);
     expect(cur.sessionId).toBe("s1"); // thread reset keeps the session
     expect(cur.configOptions).toBeNull();
   });
@@ -68,7 +69,7 @@ describe("useStudioStore", () => {
     const cur = useStudioStore.getState();
     expect(cur.activeAgentId).toBe("opencode");
     expect(cur.sessionId).toBeNull();
-    expect(cur.messages).toEqual([]);
+    expect(view().messages).toEqual([]);
     expect(cur.activeThreadId).toBeNull();
     // The old thread record is preserved for later restore.
     expect(cur.threads[deepThreadId]?.agentId).toBe("deepseek");
@@ -118,7 +119,7 @@ describe("useStudioStore", () => {
     expect(thread.title).toBe("这个项目算是一个pyqt的一个demo项目是吗请问");
     // Restoring the thread restores the header title as well.
     s.restoreThread("opencode", "D:/title-only-test");
-    expect(useStudioStore.getState().sessionInfo?.title).toBe(
+    expect(view().sessionInfo?.title).toBe(
       "这个项目算是一个pyqt的一个demo项目是吗请问"
     );
   });
@@ -140,7 +141,7 @@ describe("useStudioStore", () => {
     });
     s.snapshotThread();
     s.restoreThread("opencode", "D:/active-turn-test");
-    expect(useStudioStore.getState().activeTurn).toMatchObject({
+    expect(view().activeTurn).toMatchObject({
       turnId: "turn-1",
       lastSeq: 17,
       status: "running",

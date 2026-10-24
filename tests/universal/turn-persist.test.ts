@@ -1,10 +1,11 @@
 import { describe, expect, test, beforeEach, vi, afterEach } from "vitest";
-import { useStudioStore } from "../../src/stores/useStudioStore";
+import { activeKey, useStudioStore } from "../../src/stores/useStudioStore";
 import {
   consumeUniversalChat,
   buildTranscriptFromReplay,
 } from "../../src/lib/universal-api";
 import { THREADS_KEY, pruneThreads, mergeAssistantTurns } from "../../src/lib/threads";
+import { view } from "../helpers/studio";
 
 function sseFrame(payload: unknown): string {
   return `data: ${JSON.stringify(payload)}\n\n`;
@@ -119,7 +120,7 @@ describe("turn persist (mock model events -> disk)", () => {
     );
 
     // Live view still shows the tool call...
-    const live = useStudioStore.getState().messages.find((m) => m.id === assistantId)!;
+    const live = view().messages.find((m) => m.id === assistantId)!;
     expect(live.content).toBe("最终答案。");
     expect(live.toolCalls).toHaveLength(1);
 
@@ -180,7 +181,7 @@ describe("turn persist (mock model events -> disk)", () => {
     // App.handleSend finally block, verbatim semantics.
     {
       const c2 = useStudioStore.getState();
-      c2.setStreaming(false);
+      c2.setSessionRunning(activeKey(c2), false);
       c2.patchMessage(assistantId, { isStreaming: false });
       void Promise.resolve().then(() => {
         try {
@@ -242,12 +243,12 @@ describe("turn persist (mock model events -> disk)", () => {
     st.appendMessage({ id: "a", role: "assistant", content: "最终答案。", timestamp: "t" });
     useStudioStore.getState().snapshotThread();
 
-    // Simulate a reload: wipe live view, restore from disk.
-    useStudioStore.getState().resetThread();
-    expect(useStudioStore.getState().messages).toEqual([]);
+    // Simulate a reload: no live session state survives, only the disk.
+    useStudioStore.setState({ sessions: {}, activeThreadId: null });
+    expect(view().messages).toEqual([]);
     const t = useStudioStore.getState().restoreThread("codex");
     expect(t).not.toBeNull();
-    const msgs = useStudioStore.getState().messages;
+    const msgs = view().messages;
     expect(msgs.map((m) => [m.role, m.content])).toEqual([
       ["user", "q"],
       ["assistant", "最终答案。"],

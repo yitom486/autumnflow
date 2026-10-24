@@ -21,6 +21,8 @@ export function useStickToBottom<T extends HTMLElement = HTMLDivElement>() {
   const contentRef = useRef<HTMLDivElement | null>(null);
   const pinned = useRef(true);
   const lastTop = useRef(0);
+  /** 要放回的位置：内容还没长到那么高时先记着，长高了再放（用户一动就作废）。 */
+  const pendingTop = useRef<number | null>(null);
 
   const follow = useCallback(() => {
     const el = viewportRef.current;
@@ -29,6 +31,32 @@ export function useStickToBottom<T extends HTMLElement = HTMLDivElement>() {
     el.scrollTop = el.scrollHeight;
     lastTop.current = el.scrollTop;
   }, []);
+
+  const applyPending = useCallback(() => {
+    const el = viewportRef.current;
+    const top = pendingTop.current;
+    if (!el || top === null) return;
+    el.scrollTop = top;
+    lastTop.current = el.scrollTop;
+    if (Math.abs(el.scrollTop - top) < 1) pendingTop.current = null;
+  }, []);
+
+  /** 放回某个位置；null = 贴底。 */
+  const restoreTo = useCallback(
+    (top: number | null) => {
+      pinned.current = top === null;
+      pendingTop.current = top;
+      if (top === null) follow();
+      else applyPending();
+    },
+    [follow, applyPending]
+  );
+
+  /** 现在的位置（还没放到位的，按要放的位置算）。 */
+  const position = useCallback(
+    () => ({ top: pendingTop.current ?? lastTop.current, pinned: pinned.current }),
+    []
+  );
 
   useEffect(() => {
     const el = viewportRef.current;
@@ -46,6 +74,7 @@ export function useStickToBottom<T extends HTMLElement = HTMLDivElement>() {
     };
     const release = () => {
       pinned.current = false;
+      pendingTop.current = null;
     };
     const onWheel = (e: WheelEvent) => {
       if (e.deltaY < 0) release();
@@ -70,7 +99,10 @@ export function useStickToBottom<T extends HTMLElement = HTMLDivElement>() {
           changed = true;
         }
       }
-      if (changed) follow();
+      if (changed) {
+        applyPending();
+        follow();
+      }
     });
     ro.observe(content);
     ro.observe(el);
@@ -81,7 +113,7 @@ export function useStickToBottom<T extends HTMLElement = HTMLDivElement>() {
       el.removeEventListener("keydown", onKey);
       ro.disconnect();
     };
-  }, [follow]);
+  }, [follow, applyPending]);
 
-  return { viewportRef, contentRef, pinned };
+  return { viewportRef, contentRef, pinned, restoreTo, position };
 }

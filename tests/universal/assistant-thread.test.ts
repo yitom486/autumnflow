@@ -7,6 +7,7 @@ import { AcpComposer } from "@/components/assistant/AcpComposer";
 import { AssistantChatView } from "@/components/assistant/AssistantChatView";
 import { useStudioStore } from "@/stores/useStudioStore";
 import { convertAcpMessage } from "@/lib/acp-assistant";
+import { setStudio } from "../helpers/studio";
 
 const composerProps = {
   onSendAttachmentOnly: () => {},
@@ -25,7 +26,7 @@ const composerProps = {
 
 describe("assistant-ui ACP thread (client smoke)", () => {
   it("renders user text, thought, tool call, plan and Diff", async () => {
-    useStudioStore.setState({
+    setStudio({
       messages: [
         { id: "u1", role: "user", content: "你好", timestamp: "03:14" } as any,
         {
@@ -101,7 +102,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
   });
 
   it("renders ACP composer with placeholder, send and model fallback", async () => {
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
     const el = document.createElement("div");
     document.body.appendChild(el);
     const root = createRoot(el);
@@ -120,7 +121,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
   });
 
   it("renders model/thinking/permission selectors when session config exists", async () => {
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
     const el = document.createElement("div");
     document.body.appendChild(el);
     const root = createRoot(el);
@@ -154,7 +155,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
   });
 
   it("shows a compact capsule before the first token", async () => {
-    useStudioStore.setState({
+    setStudio({
       messages: [
         { id: "a0", role: "assistant", content: "", timestamp: "15:49", isStreaming: true } as any,
       ],
@@ -175,11 +176,11 @@ describe("assistant-ui ACP thread (client smoke)", () => {
     expect(el.innerHTML).not.toContain("15:49");
     root.unmount();
     el.remove();
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
   });
 
   it("shows cache hit rate only when the agent provides it", async () => {
-    useStudioStore.setState({
+    setStudio({
       messages: [
         {
           id: "a2",
@@ -211,11 +212,11 @@ describe("assistant-ui ACP thread (client smoke)", () => {
     expect(el.innerHTML).toContain("6,000/10,000");
     root.unmount();
     el.remove();
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
   });
 
   it("shows a loading shimmer while the session builds", async () => {
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
     const el = document.createElement("div");
     document.body.appendChild(el);
     const root = createRoot(el);
@@ -232,7 +233,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
   });
 
   it("shows a session banner with retry when creation fails", async () => {
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
     const el = document.createElement("div");
     document.body.appendChild(el);
     const root = createRoot(el);
@@ -257,7 +258,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
   });
 
   it("renders tables via remark-gfm with ACP styling", async () => {
-    useStudioStore.setState({
+    setStudio({
       messages: [
         {
           id: "a4",
@@ -282,11 +283,11 @@ describe("assistant-ui ACP thread (client smoke)", () => {
     expect(el.innerHTML).toContain("低");
     root.unmount();
     el.remove();
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
   });
 
   it("renders a mermaid fence through the lazy diagram renderer", async () => {
-    useStudioStore.setState({
+    setStudio({
       messages: [
         {
           id: "a3",
@@ -316,11 +317,11 @@ describe("assistant-ui ACP thread (client smoke)", () => {
     expect(html).toContain("mermaid");
     root.unmount();
     el.remove();
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
   }, 60_000);
 
   it("floats the scroll-to-bottom button with zero layout footprint", async () => {
-    useStudioStore.setState({
+    setStudio({
       messages: [{ id: "u1", role: "user", content: "hi", timestamp: "03:14" } as any],
       isStreaming: false,
     } as any);
@@ -345,11 +346,11 @@ describe("assistant-ui ACP thread (client smoke)", () => {
     expect(footer!.className).toContain("h-0");
     root.unmount();
     el.remove();
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
   });
 
   it("shows a turn-changes entry only for edit-kind tool calls", async () => {
-    useStudioStore.setState({
+    setStudio({
       messages: [
         {
           id: "a7", role: "assistant", content: "改完了", timestamp: "03:21",
@@ -371,7 +372,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
     root.unmount();
     el.remove();
 
-    useStudioStore.setState({
+    setStudio({
       messages: [
         {
           id: "a8", role: "assistant", content: "读完了", timestamp: "03:22",
@@ -392,7 +393,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
     expect(el2.innerHTML).not.toContain("改动");
     root2.unmount();
     el2.remove();
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
   });
 
   it("paginates long histories with a load-earlier button", async () => {
@@ -402,7 +403,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
       content: `消息 ${i}`,
       timestamp: "03:14",
     }));
-    useStudioStore.setState({ messages: many, isStreaming: false } as any);
+    setStudio({ messages: many, isStreaming: false } as any);
     const el = document.createElement("div");
     document.body.appendChild(el);
     const root = createRoot(el);
@@ -421,7 +422,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
   });
 
   it("updates waiting status by active session and agent without consuming another chat's requests", async () => {
-    useStudioStore.setState({
+    setStudio({
       activeAgentId: "opencode", sessionId: "session-a", isStreaming: true,
       messages: [{ id: "waiting", role: "assistant", content: "", isStreaming: true, startedAt: Date.now(), timestamp: "00:00" }],
       pendingPerms: [{ permissionId: "perm-a", agentId: "opencode", sessionId: "session-a", toolCall: {}, options: [] }], pendingElic: [],
@@ -432,21 +433,21 @@ describe("assistant-ui ACP thread (client smoke)", () => {
         h(AssistantChatView, { onSelectSuggestion: () => {} } as any))));
       expect(el.textContent).toContain("等待用户确认授权");
       for (const scope of [{ sessionId: "session-b" }, { sessionId: null }, { sessionId: "session-a", activeAgentId: "codex" }]) {
-        await act(async () => useStudioStore.setState(scope));
+        await act(async () => setStudio(scope));
         expect(el.textContent).not.toContain("等待用户确认授权");
       }
-      await act(async () => useStudioStore.setState({ activeAgentId: "opencode", sessionId: "session-a" }));
+      await act(async () => setStudio({ activeAgentId: "opencode", sessionId: "session-a" }));
       expect(el.textContent).toContain("等待用户确认授权");
       expect(useStudioStore.getState().pendingPerms).toHaveLength(1);
-      await act(async () => useStudioStore.setState({ pendingPerms: [], pendingElic: [{ elicitationId: "q", agentId: "opencode", sessionId: "session-a", message: "Question", schema: {} }] } as any));
+      await act(async () => setStudio({ pendingPerms: [], pendingElic: [{ elicitationId: "q", agentId: "opencode", sessionId: "session-a", message: "Question", schema: {} }] } as any));
       expect(el.textContent).toContain("等待用户回应提问");
-      await act(async () => useStudioStore.setState({ sessionId: "session-b" }));
+      await act(async () => setStudio({ sessionId: "session-b" }));
       expect(el.textContent).not.toContain("等待用户回应提问");
     } finally { await act(async () => root.unmount()); el.remove(); useStudioStore.getState().resetStudio(); }
   });
 
   it("keeps permission actions out of the collapsible tool card", async () => {
-    useStudioStore.setState({
+    setStudio({
       sessionId: "sess1",
       messages: [
         {
@@ -482,7 +483,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
     expect(useStudioStore.getState().pendingPerms).toHaveLength(1);
     root.unmount();
     el.remove();
-    useStudioStore.setState({ pendingPerms: [], sessionId: null } as any);
+    setStudio({ pendingPerms: [], sessionId: null } as any);
   });
 
   it("displays success ratio and scroll container for tool calls", async () => {
@@ -491,7 +492,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
       { id: "t2", title: "grep pattern", status: "completed" },
       { id: "t3", title: "read missing file", status: "failed" },
     ];
-    useStudioStore.setState({
+    setStudio({
       sessionId: "sess1",
       messages: [
         {
@@ -530,7 +531,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
       { id: "t5", title: "read file 5", kind: "file", status: "completed" },
       { id: "t6", title: "read file 6", kind: "file", status: "running" },
     ];
-    useStudioStore.setState({
+    setStudio({
       sessionId: "sess1",
       messages: [
         {
@@ -562,7 +563,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
   });
 
   it("renders intermediate progress accordion and separates final conclusion", async () => {
-    useStudioStore.setState({
+    setStudio({
       sessionId: "sess-progress-1",
       messages: [
         {
@@ -601,7 +602,7 @@ describe("assistant-ui ACP thread (client smoke)", () => {
   });
 
   it("clusters consecutive system messages into single row capsule to avoid flooding", async () => {
-    useStudioStore.setState({
+    setStudio({
       sessionId: "sess-cluster-1",
       messages: [
         { id: "s1", role: "system", content: "📝 [fs_write] packages/contracts/component-ui.ts", timestamp: "03:31" },
@@ -630,8 +631,48 @@ describe("assistant-ui ACP thread (client smoke)", () => {
     el.remove();
   });
 
+  it("keeps a card the user opened open after switching sessions away and back", async () => {
+    const cluster = [
+      { id: "c1", role: "system", content: "📝 [fs_write] packages/contracts/component-ui.ts", timestamp: "03:31" },
+      { id: "c2", role: "system", content: "📝 [fs_write] packages/contracts/tool-display.ts", timestamp: "03:32" },
+    ];
+    setStudio({ activeThreadId: "t-a", sessionId: "sess-a", messages: cluster, isStreaming: false });
+    const el = document.createElement("div");
+    document.body.appendChild(el);
+    const root = createRoot(el);
+    await act(async () => {
+      root.render(
+        h(AcpAssistantProvider, { onSend: () => {}, onStop: () => {} } as any,
+          h(AssistantChatView, { agentName: "Codex", onSelectSuggestion: () => {} } as any))
+      );
+    });
+    try {
+      // Collapsed: only the latest entry is summarised.
+      expect(el.innerHTML).not.toContain("component-ui.ts");
+      await act(async () => {
+        (Array.from(el.querySelectorAll("button")).find((b) => b.textContent?.includes("系统记录")) as HTMLButtonElement).click();
+      });
+      expect(el.innerHTML).toContain("component-ui.ts");
+
+      // Another session replaces the whole transcript (the card unmounts)…
+      await act(async () => {
+        setStudio({ activeThreadId: "t-b", sessionId: "sess-b" });
+        setStudio({ messages: [{ id: "other", role: "user", content: "另一个会话", timestamp: "t" }] });
+      });
+      expect(el.innerHTML).not.toContain("系统记录");
+
+      // …and coming back shows it the way the user left it.
+      await act(async () => { setStudio({ activeThreadId: "t-a", sessionId: "sess-a" }); });
+      expect(el.innerHTML).toContain("component-ui.ts");
+    } finally {
+      root.unmount();
+      el.remove();
+      useStudioStore.getState().resetStudio();
+    }
+  });
+
   it("embeds generative diagrams and interactive cards inline within prose via placeholders and transitions from skeleton to rendered card", async () => {
-    useStudioStore.setState({
+    setStudio({
       sessionId: "sess-inline-gen-1",
       messages: [
         {

@@ -67,42 +67,66 @@ export interface AgentPrefs {
   updatedAt: number;
 }
 
+/** 会话里那些"看的人"的状态：展开了哪张卡、打字机打到哪、滚到哪。 */
+export interface SessionUi {
+  /** 卡片 / 折叠区的展开状态，按 `${messageId}:${区块}` 记。 */
+  open: Record<string, boolean>;
+  /** 打字机已经揭示到的长度，按文本片段记：组件卸载时写入，重挂时从这里接着打。 */
+  revealed: Record<string, number>;
+  /** 切走时的滚动位置；null = 还没离开过，贴底。 */
+  scroll: { top: number; pinned: boolean } | null;
+}
+
+/**
+ * 一个会话的全部状态。
+ *
+ * 切会话只是把 `activeThreadId` 指过去，这里的东西一样不动：后台那一轮照样往
+ * 自己的格子里写，组件卸载/重挂也不影响它。`threads` 只是它的持久化快照。
+ */
+export interface SessionState {
+  messages: Message[];
+  /** Durable pointer used by refresh/window recovery to follow a live turn. */
+  activeTurn: ActiveTurn | null;
+  /**
+   * Prompts typed while the agent is still working. They are shown to the
+   * user (and can be withdrawn) and are sent one by one once the current turn
+   * ends. A prompt is never dropped silently.
+   */
+  queuedPrompts: QueuedPrompt[];
+  /** 输入框草稿。 */
+  draft: string;
+  attachments: Attachment[];
+  /** 这个会话有一轮正在跑。 */
+  running: boolean;
+  usage: UsageState | null;
+  sessionInfo: any;
+  modes: ModeState | null;
+  /** Last ensureSession failure (non-auth), surfaced in the welcome banner. */
+  sessionError: string | null;
+  /** session/new in flight (drives the composer's loading shimmer). */
+  sessionLoading: boolean;
+  ui: SessionUi;
+}
+
+/** 会话的键：线程 id（从建线程起就稳定；ACP sessionId 要等 session/new 之后才有）。 */
+export type SessionKey = string;
+
 interface StudioState {
   // connection (client)
   activeAgentId: string;
   connectingId: string | null;
   authOk: Record<string, boolean | null>;
   // session (client view of server state)
+  /** 当前在看的会话的 ACP sessionId。 */
   sessionId: string | null;
-  /** Last ensureSession failure (non-auth), surfaced in the welcome banner. */
-  sessionError: string | null;
-  /** session/new in flight (drives the composer's loading shimmer). */
-  sessionLoading: boolean;
-  modes: ModeState | null;
   models: ModelCatalog | null;
   configOptions: any[] | null;
   availableCommands: SlashCommand[];
   /** Commands per ACP session (agentId:sessionId) — survives thread/session switches. */
   commandsBySession: Record<string, SlashCommand[]>;
-  usage: UsageState | null;
   quota: any | null;
-  sessionInfo: any;
-  // thread
-  messages: Message[];
-  /** Durable pointer used by refresh/window recovery to follow a live turn. */
-  activeTurn: ActiveTurn | null;
-  // composer
-  attachments: Attachment[];
-  /** 正在生成的那一轮属于哪个会话（最近一次开始的那轮）。 */
-  streamingSessionId: string | null;
-  /** 正在跑的会话：按会话记，多个会话可以同时跑，互不影响。 */
-  runningSessions: Record<string, boolean>;
-  /** 消息 id → 它属于哪个会话（后台那轮的输出要写回自己的会话）。 */
-  messageOwner: Record<string, string>;
-  /** 每个会话的输入框草稿：切来切去不丢自己打的字。 */
-  drafts: Record<string, string>;
-  /** 当前视图是否在跑（= runningSessions[当前会话]）。 */
-  isStreaming: boolean;
+  /** 每个会话一格，键是线程 id；没有线程的草稿视图用 ""。 */
+  sessions: Record<SessionKey, SessionState>;
   busy: boolean;
   discovering: boolean;
   // overlays
@@ -110,16 +134,10 @@ interface StudioState {
   settingsOpen: boolean;
   providersOpen: boolean;
   modelsOpen: boolean;
-  // pending agent requests
+  // pending agent requests (each one carries its own agentId/sessionId)
   pendingPerms: PendingPermission[];
   pendingElic: PendingElicitation[];
   respondingId: string | null;
-  /**
-   * Prompts typed while the agent is still working. They are shown to the
-   * user (and can be withdrawn) and are sent one by one once the current turn
-   * ends. A prompt is never dropped silently.
-   */
-  queuedPrompts: QueuedPrompt[];
 
   // workspace & desktop tools
   currentWorkspace: string | null;
@@ -152,35 +170,45 @@ interface StudioState {
   setConnectingId: (id: string | null) => void;
   setAuthOk: (agentId: string, ok: boolean | null) => void;
   setSessionId: (id: string | null) => void;
-  setSessionError: (e: string | null) => void;
-  setSessionLoading: (v: boolean) => void;
+  /**
+   * 一个会话换了 ACP sessionId（服务端把失效的会话接到新会话上）：记到它自己的
+   * 线程里；是当前会话才同步到视图。
+   */
+  setThreadSessionId: (key: SessionKey, sessionId: string) => void;
   applySessionResult: (res: any, expectedAgentId?: string) => void;
-  setModes: (m: ModeState | null) => void;
   setModels: (m: ModelCatalog | null) => void;
   setConfigOptions: (c: any[] | null) => void;
   patchConfigOption: (opt: any) => void;
   /** Store commands for a session (defaults to the current one); updates the view when it is current. */
   setAvailableCommands: (c: unknown, sessionId?: string | null) => void;
-  setUsage: (u: UsageState | null) => void;
   setQuota: (q: any | null) => void;
-  setSessionInfo: (info: any) => void;
-  setMessages: (m: Message[]) => void;
-  appendMessage: (m: Message) => void;
-  patchMessage: (id: string, patch: Partial<Message> | ((m: Message) => Message)) => void;
+  // ---- 会话内的写入：不传 key 就是当前在看的会话；后台那一轮必须传自己的 key ----
+  setSessionError: (e: string | null, key?: SessionKey | null) => void;
+  setSessionLoading: (v: boolean, key?: SessionKey | null) => void;
+  setModes: (m: ModeState | null, key?: SessionKey | null) => void;
+  setUsage: (u: UsageState | null, key?: SessionKey | null) => void;
+  setSessionInfo: (info: any, key?: SessionKey | null) => void;
+  setMessages: (m: Message[], key?: SessionKey | null) => void;
+  appendMessage: (m: Message, key?: SessionKey | null) => void;
+  patchMessage: (id: string, patch: Partial<Message> | ((m: Message) => Message), key?: SessionKey | null) => void;
   /** Queue a prompt typed while the agent is still working. */
-  enqueuePrompt: (text: string) => string;
+  enqueuePrompt: (text: string, key?: SessionKey | null) => string;
   /** Withdraw a queued prompt before it is sent. */
-  removeQueuedPrompt: (id: string) => void;
+  removeQueuedPrompt: (id: string, key?: SessionKey | null) => void;
   /** Drop every queued prompt (the user stopped the run). */
-  clearQueuedPrompts: () => void;
-  setActiveTurn: (turn: ActiveTurn | null) => void;
-  patchActiveTurn: (patch: Partial<ActiveTurn>) => void;
-  /** 记下这个会话的输入框内容（按会话存，切会话不丢）。 */
-  setDraft: (sessionId: string | null | undefined, text: string) => void;
-  setAttachments: (a: Attachment[]) => void;
-  setStreaming: (v: boolean) => void;
+  clearQueuedPrompts: (key?: SessionKey | null) => void;
+  setActiveTurn: (turn: ActiveTurn | null, key?: SessionKey | null) => void;
+  patchActiveTurn: (patch: Partial<ActiveTurn>, key?: SessionKey | null) => void;
+  setDraft: (text: string, key?: SessionKey | null) => void;
+  setAttachments: (a: Attachment[], key?: SessionKey | null) => void;
   /** 标记某个会话在跑/跑完：会话之间互不影响。 */
-  setSessionRunning: (sessionId: string | null | undefined, running: boolean) => void;
+  setSessionRunning: (key: SessionKey, running: boolean) => void;
+  /** 记下一张卡片/折叠区的展开状态。 */
+  setUiOpen: (key: SessionKey, id: string, open: boolean) => void;
+  /** 记下一段文本已经揭示到的长度（打字机重挂时从这里接着打）。 */
+  setRevealed: (key: SessionKey, id: string, length: number) => void;
+  /** 记下切走时的滚动位置。 */
+  setScroll: (key: SessionKey, scroll: SessionUi["scroll"]) => void;
   setBusy: (v: boolean) => void;
   setDiscovering: (v: boolean) => void;
   setAuthOpen: (v: boolean) => void;
@@ -199,10 +227,13 @@ interface StudioState {
   clearAgentPref: (agentId: string) => void;
   /** Opt-in/out of auto-update-to-latest on connect (persisted, default off). */
   setAutoUpdate: (agentId: string, on: boolean) => void;
-  /** Clear thread + session-scoped view state (used on agent switch / new thread). */
+  /** Clear the current session's state (its thread record is untouched). */
   resetThread: () => void;
-  /** Snapshot the live view into the persisted per-agent thread record. */
-  snapshotThread: () => void;
+  /**
+   * Persist a session into its thread record (defaults to the current one).
+   * The current view without a thread gets one allocated here.
+   */
+  snapshotThread: (key?: SessionKey | null) => void;
   /** Restore an agent's latest thread into the live view (instant, no network), optionally scoped to a workspace cwd. */
   restoreThread: (agentId: string, targetCwd?: string | null) => ChatThread | null;
   /** Start a fresh empty thread for an agent, optionally scoped to a workspace cwd. */
@@ -231,23 +262,108 @@ function cmdsFor(s: { commandsBySession: Record<string, SlashCommand[]> }, agent
   return sid ? s.commandsBySession[cmdKey(agentId, sid)] ?? [] : [];
 }
 
-const initialThread = {
-  messages: [] as Message[],
-  activeTurn: null as ActiveTurn | null,
-  sessionError: null as string | null,
-  sessionLoading: false as boolean,
-  modes: null as ModeState | null,
-  models: null as ModelCatalog | null,
-  configOptions: null as any[] | null,
-  availableCommands: [] as SlashCommand[],
-  usage: null as UsageState | null,
-  quota: null as any | null,
-  sessionInfo: null as any,
-  pendingPerms: [] as PendingPermission[],
-  pendingElic: [] as PendingElicitation[],
-  queuedPrompts: [] as QueuedPrompt[],
-  attachments: [] as Attachment[],
-};
+/** 没有线程的草稿视图（刚切到一个还没开会话的运行时/工作区）。 */
+const DRAFT_KEY: SessionKey = "";
+
+function emptySession(): SessionState {
+  return {
+    messages: [],
+    activeTurn: null,
+    queuedPrompts: [],
+    draft: "",
+    attachments: [],
+    running: false,
+    usage: null,
+    sessionInfo: null,
+    modes: null,
+    sessionError: null,
+    sessionLoading: false,
+    ui: { open: {}, revealed: {}, scroll: null },
+  };
+}
+
+/** 读不到的会话一律读这一份（固定引用，selector 不会因此每次都变）。 */
+export const EMPTY_SESSION: SessionState = emptySession();
+
+/** 当前在看的会话的键。 */
+export const activeKey = (s: { activeThreadId: string | null }): SessionKey => s.activeThreadId ?? DRAFT_KEY;
+
+/** 某个会话的状态（默认当前在看的那个）。 */
+export function sessionOf(
+  s: { sessions: Record<SessionKey, SessionState>; activeThreadId: string | null },
+  key?: SessionKey | null
+): SessionState {
+  return s.sessions[key ?? activeKey(s)] ?? EMPTY_SESSION;
+}
+
+/** 从持久化的线程记录铺出一个会话（第一次打开它时）。 */
+function sessionFromThread(t: ChatThread | undefined): SessionState {
+  const b = emptySession();
+  if (!t) return b;
+  const title = titleForThread(t);
+  return {
+    ...b,
+    messages: mergeAssistantTurns(t.messages),
+    activeTurn: t.activeTurn ?? null,
+    queuedPrompts: t.queuedPrompts ?? [],
+    sessionInfo: title ? { title } : null,
+  };
+}
+
+type SessionsSlice = Pick<StudioState, "sessions" | "threads" | "activeThreadId">;
+
+/** 改一个会话的格子（不管它是不是当前在看的）。 */
+function patchSessionIn(
+  s: SessionsSlice,
+  key: SessionKey | null | undefined,
+  patch: Partial<SessionState> | ((b: SessionState) => Partial<SessionState>)
+): { sessions: Record<SessionKey, SessionState> } {
+  const k = key ?? activeKey(s);
+  const cur = s.sessions[k] ?? sessionFromThread(s.threads[k]);
+  const next = typeof patch === "function" ? patch(cur) : patch;
+  return { sessions: { ...s.sessions, [k]: { ...cur, ...next } } };
+}
+
+/** 切到一个会话时保证它有格子：已经有就原样用（后台跑着的那一轮就在里面）。 */
+function ensureSessionIn(s: SessionsSlice, key: SessionKey): Record<SessionKey, SessionState> {
+  const live = s.sessions[key];
+  if (!live) return { ...s.sessions, [key]: sessionFromThread(s.threads[key]) };
+  // The header title lives on the record once the thread has one.
+  const title = live.sessionInfo?.title ? null : titleForThread(s.threads[key]);
+  if (!title) return s.sessions;
+  return { ...s.sessions, [key]: { ...live, sessionInfo: { ...(live.sessionInfo || {}), title } } };
+}
+
+/**
+ * Prune + persist with every session's live state folded into its record: a
+ * session that has not been snapshotted yet (opened from a replay, running in
+ * the background) must never be dropped as an empty thread.
+ */
+function pruneLive(
+  s: Pick<StudioState, "sessions">,
+  threads: Record<string, ChatThread>,
+  preserveIds: string[]
+): Record<string, ChatThread> {
+  const merged = { ...threads };
+  const keep = [...preserveIds];
+  for (const [key, b] of Object.entries(s.sessions)) {
+    const t = merged[key];
+    if (!t) continue;
+    if (b.messages.length) merged[key] = { ...t, messages: b.messages, queuedPrompts: b.queuedPrompts };
+    if (b.running) keep.push(key);
+  }
+  return pruneThreads(merged, keep);
+}
+
+/** 有一轮在跑的会话，按 ACP sessionId 列出（侧栏的"运行中"标记用）。 */
+export function runningSessionIds(s: Pick<StudioState, "sessions" | "threads">): Record<string, true> {
+  const out: Record<string, true> = {};
+  for (const [key, b] of Object.entries(s.sessions)) {
+    const sid = b.running ? s.threads[key]?.sessionId : null;
+    if (sid) out[sid] = true;
+  }
+  return out;
+}
 
 export const WINDOW_WORKSPACE_KEY = "acp_window_workspace";
 
@@ -492,16 +608,15 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
   commandsBySession: {} as Record<string, SlashCommand[]>,
   threads: initialThreads,
   activeThreadId: null,
+  sessions: {} as Record<SessionKey, SessionState>,
   autoUpdate: loadAutoUpdate(),
-  ...initialThread,
   // Show the last known catalog instantly; a fresh session/new will replace it.
   models: initialCatalog?.models ?? null,
   configOptions: initialCatalog?.configOptions ?? null,
-  isStreaming: false,
-  streamingSessionId: null,
-  runningSessions: {} as Record<string, boolean>,
-  messageOwner: {} as Record<string, string>,
-  drafts: {} as Record<string, string>,
+  availableCommands: [] as SlashCommand[],
+  quota: null,
+  pendingPerms: [] as PendingPermission[],
+  pendingElic: [] as PendingElicitation[],
   busy: false,
   discovering: false,
   authOpen: false,
@@ -570,49 +685,48 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       // 若工作区发生改变，自动切换到目标工作区专属的会话上下文，杜绝跨工作区串话
       if (s.currentWorkspace !== cleanPath) {
         // 1. 若当前会话有内容，先妥善保存到当前工作区
-        if (s.activeThreadId && s.messages.length > 0) {
+        const live = sessionOf(s);
+        if (s.activeThreadId && live.messages.length > 0) {
           const cur = s.threads[s.activeThreadId];
           if (cur) {
             const updated = {
               ...cur,
-              messages: s.messages,
+              messages: live.messages,
               sessionId: s.sessionId ?? (cur.stale ? cur.sessionId : null),
               cwd: s.currentWorkspace,
               updatedAt: Date.now(),
             };
-            const nextThreads = pruneThreads({ ...s.threads, [cur.id]: updated }, [cur.id]);
+            const nextThreads = pruneLive(s, { ...s.threads, [cur.id]: updated }, [cur.id]);
             saveThreads(nextThreads);
           }
         }
 
-        // 2. 检索目标工作区是否已有历史会话
+        // 2. 检索目标工作区是否已有历史会话：切过去只是换指针，它自己的格子原样在
         const existing = threadForAgent(s.threads, s.activeAgentId, targetPath);
         const cached = readCachedCatalog(s.activeAgentId);
         if (existing) {
-          const existingTitle = titleForThread(existing);
+          const sid = existing.stale ? null : existing.sessionId;
           return {
             currentWorkspace: targetPath,
             recentWorkspaces: nextRecents,
-            ...initialThread,
             models: cached?.models ?? null,
             configOptions: cached?.configOptions ?? null,
-            messages: existing.messages.map((m) => ({ ...m })),
-            sessionId: existing.stale ? null : existing.sessionId,
-            availableCommands: cmdsFor(s, s.activeAgentId, existing.stale ? null : existing.sessionId),
-            sessionInfo: existingTitle ? { title: existingTitle } : null,
+            sessionId: sid,
+            availableCommands: cmdsFor(s, s.activeAgentId, sid),
             activeThreadId: existing.id,
+            sessions: ensureSessionIn(s, existing.id),
           };
         } else {
-          // 3. 目标工作区尚无会话：就地清空为崭新的新会话准备状态
+          // 3. 目标工作区尚无会话：指向一份崭新的草稿
           return {
             currentWorkspace: targetPath,
             recentWorkspaces: nextRecents,
-            ...initialThread,
             models: cached?.models ?? null,
             configOptions: cached?.configOptions ?? null,
             sessionId: null,
+            availableCommands: [],
             activeThreadId: null,
-            messages: [],
+            sessions: { ...s.sessions, [DRAFT_KEY]: emptySession() },
           };
         }
       }
@@ -633,20 +747,17 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
         : {
             activeAgentId: id,
             // Agent switch is a hard isolation boundary: another agent's live
-            // session/messages/models must never remain visible under this id.
-            // The caller restores the target agent's own thread immediately
-            // afterwards (or starts a fresh one).
-            ...initialThread,
+            // session/models must never remain visible under this id. The
+            // caller restores the target agent's own thread immediately
+            // afterwards (or starts a fresh one). The other agent's sessions
+            // keep their own state — a turn running there keeps running.
             models: cached?.models ?? null,
             configOptions: cached?.configOptions ?? null,
+            availableCommands: [],
+            quota: null,
             sessionId: null,
             activeThreadId: null,
-            // A switch also stops treating the old turn/draft as live input.
-            isStreaming: false,
-            streamingSessionId: null,
-            runningSessions: {} as Record<string, boolean>,
-            messageOwner: {} as Record<string, string>,
-            drafts: {} as Record<string, string>,
+            sessions: { ...s.sessions, [DRAFT_KEY]: emptySession() },
             busy: false,
           }
     );
@@ -655,8 +766,17 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
   setAuthOk: (agentId, ok) => set((s) => ({ authOk: { ...s.authOk, [agentId]: ok } })),
   setSessionId: (id) =>
     set((s) => (id === s.sessionId ? { sessionId: id } : { sessionId: id, availableCommands: cmdsFor(s, s.activeAgentId, id) })),
-  setSessionError: (e) => set({ sessionError: e }),
-  setSessionLoading: (v) => set({ sessionLoading: v }),
+  setThreadSessionId: (key, sessionId) => {
+    if (key === activeKey(get())) {
+      get().setSessionId(sessionId);
+      return;
+    }
+    set((s) => {
+      const t = s.threads[key];
+      if (!t || t.sessionId === sessionId) return {};
+      return { threads: { ...s.threads, [key]: { ...t, sessionId, stale: false } } };
+    });
+  },
   applySessionResult: (res: any, expectedAgentId?: string) =>
     set((s) => {
       // Late async result from an agent the user already switched away from:
@@ -671,15 +791,14 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
         saveCachedCatalog(s.activeAgentId, nextModels, nextConfigOptions);
       }
       return {
-      sessionId: sid,
-      commandsBySession: map,
-      modes: res?.modes ?? s.modes,
-      models: nextModels,
-      configOptions: nextConfigOptions,
-      availableCommands: fromRes ?? (sid === s.sessionId && s.availableCommands.length ? s.availableCommands : map[cmdKey(s.activeAgentId, sid)] ?? []),
+        sessionId: sid,
+        commandsBySession: map,
+        models: nextModels,
+        configOptions: nextConfigOptions,
+        availableCommands: fromRes ?? (sid === s.sessionId && s.availableCommands.length ? s.availableCommands : map[cmdKey(s.activeAgentId, sid)] ?? []),
+        ...(res?.modes ? patchSessionIn(s, null, { modes: res.modes }) : {}),
       };
     }),
-  setModes: (m) => set({ modes: m }),
   setModels: (m) =>
     set((s) => {
       saveCachedCatalog(s.activeAgentId, m, s.configOptions);
@@ -712,135 +831,48 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       const map = { ...s.commandsBySession, [cmdKey(s.activeAgentId, sid)]: list };
       return sid === s.sessionId ? { commandsBySession: map, availableCommands: list } : { commandsBySession: map };
     }),
-  setUsage: (u) => set({ usage: u }),
   setQuota: (q) => set({ quota: q }),
-  setSessionInfo: (info) => set({ sessionInfo: info }),
-  setMessages: (m) => set((s) => {
-    const messages = mergeAssistantTurns(m);
-    const tid = s.activeThreadId;
-    return {
-      messages,
-      threads: tid && s.threads[tid]
-        ? { ...s.threads, [tid]: { ...s.threads[tid], messages, updatedAt: Date.now() } }
-        : s.threads,
-    };
-  }),
-  appendMessage: (m) => set((s) => {
-    const messages = mergeAssistantTurns([...s.messages, m]);
-    const tid = s.activeThreadId;
-    return {
-      messages,
-      // 记住这条消息属于哪个会话：后台那一轮的输出要写回它自己的会话，
-      // 不能掉进用户正在看的那个会话里。
-      messageOwner: tid ? { ...s.messageOwner, [m.id]: tid } : s.messageOwner,
-      // 同时落进这个会话的线程：切走/切回来看到的是同一份全量状态。
-      threads: tid && s.threads[tid]
-        ? { ...s.threads, [tid]: { ...s.threads[tid], messages, updatedAt: Date.now() } }
-        : s.threads,
-    };
-  }),
-  enqueuePrompt: (text) => {
+  setSessionError: (e, key) => set((s) => patchSessionIn(s, key, { sessionError: e })),
+  setSessionLoading: (v, key) => set((s) => patchSessionIn(s, key, { sessionLoading: v })),
+  setModes: (m, key) => set((s) => patchSessionIn(s, key, { modes: m })),
+  setUsage: (u, key) => set((s) => patchSessionIn(s, key, { usage: u })),
+  setSessionInfo: (info, key) => set((s) => patchSessionIn(s, key, { sessionInfo: info })),
+  setMessages: (m, key) => set((s) => patchSessionIn(s, key, { messages: mergeAssistantTurns(m) })),
+  appendMessage: (m, key) =>
+    set((s) => patchSessionIn(s, key, (b) => ({ messages: mergeAssistantTurns([...b.messages, m]) }))),
+  patchMessage: (id, patch, key) =>
+    set((s) =>
+      patchSessionIn(s, key, (b) => ({
+        messages: b.messages.map((m) =>
+          m.id === id ? (typeof patch === "function" ? patch(m) : { ...m, ...patch }) : m
+        ),
+      }))
+    ),
+  enqueuePrompt: (text, key) => {
     const item: QueuedPrompt = { id: `q-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`, text, createdAt: Date.now() };
     // 排队是会话内的事：挂在所属会话上，别让 A 会话的队列跑到 B 会话去。
-    set((s) => {
-      const id = s.activeThreadId;
-      if (!id) return { queuedPrompts: [...s.queuedPrompts, item] };
-      const thread = s.threads[id];
-      if (!thread) return { queuedPrompts: [...s.queuedPrompts, item] };
-      return {
-        queuedPrompts: s.queuedPrompts,
-        threads: { ...s.threads, [id]: { ...thread, queuedPrompts: [...(thread.queuedPrompts || []), item] } },
-      };
-    });
+    set((s) => patchSessionIn(s, key, (b) => ({ queuedPrompts: [...b.queuedPrompts, item] })));
     return item.id;
   },
-  removeQueuedPrompt: (id) => set((s) => {
-    const threadId = s.activeThreadId;
-    const thread = threadId ? s.threads[threadId] : undefined;
-    const rest = s.queuedPrompts.filter((item) => item.id !== id);
-    if (thread) {
-      return {
-        queuedPrompts: rest,
-        threads: { ...s.threads, [threadId!]: { ...thread, queuedPrompts: (thread.queuedPrompts || []).filter((item) => item.id !== id) } },
-      };
-    }
-    return { queuedPrompts: rest };
-  }),
-  clearQueuedPrompts: () => set((s) => {
-    const threadId = s.activeThreadId;
-    const thread = threadId ? s.threads[threadId] : undefined;
-    if (thread) return { threads: { ...s.threads, [threadId!]: { ...thread, queuedPrompts: [] } } };
-    return { queuedPrompts: [] };
-  }),
-  patchMessage: (id, patch) =>
-    set((s) => {
-      const apply = (m: any) =>
-        m.id === id ? (typeof patch === "function" ? patch(m) : { ...m, ...patch }) : m;
-      // 这条消息可能属于后台正在跑的那个会话：改在它自己的会话里。
-      const owner = s.messageOwner[id];
-      if (owner && owner !== s.activeThreadId) {
-        const thread = s.threads[owner];
-        if (!thread) return { messages: s.messages.map(apply) };
-        return {
-          threads: { ...s.threads, [owner]: { ...thread, messages: thread.messages.map(apply), updatedAt: Date.now() } },
-        };
-      }
-      // 当前会话：视图和它的线程一起改。只改视图的话，切走/切回来时线程里
-      // 还是旧的（流式输出、工具调用、卡片全没有）。
-      const messages = s.messages.map(apply);
-      const tid = s.activeThreadId;
-      return {
-        messages,
-        threads: tid && s.threads[tid]
-          ? { ...s.threads, [tid]: { ...s.threads[tid], messages, updatedAt: Date.now() } }
-          : s.threads,
-      };
-    }),
-  setActiveTurn: (turn) => set((s) => {
-    const tid = s.activeThreadId;
-    return {
-      activeTurn: turn,
-      threads: tid && s.threads[tid]
-        ? { ...s.threads, [tid]: { ...s.threads[tid], activeTurn: turn ?? undefined } }
-        : s.threads,
-    };
-  }),
-  patchActiveTurn: (patch) =>
-    set((s) => {
-      const activeTurn = s.activeTurn ? { ...s.activeTurn, ...patch } : null;
-      const tid = s.activeThreadId;
-      return {
-        activeTurn,
-        threads: tid && s.threads[tid]
-          ? { ...s.threads, [tid]: { ...s.threads[tid], activeTurn: activeTurn ?? undefined } }
-          : s.threads,
-      };
-    }),
-  setDraft: (sessionId, text) => set((s) => {
-    const key = sessionId || "";
-    if (!text) {
-      if (!(key in s.drafts)) return s;
-      const { [key]: _dropped, ...rest } = s.drafts;
-      return { drafts: rest };
-    }
-    return { drafts: { ...s.drafts, [key]: text } };
-  }),
-  setAttachments: (a) => set({ attachments: a }),
-  setStreaming: (v) => get().setSessionRunning(get().sessionId, v),
-  setSessionRunning: (sessionId, running) => set((s) => {
-    const key = sessionId || "";
-    const next = { ...s.runningSessions };
-    if (running) next[key] = true;
-    else delete next[key];
-    return {
-      runningSessions: next,
-      // 视图这一格跟着"当前会话"走：切到在跑的会话就是 busy，切到跑完的就不是。
-      isStreaming: !!next[s.sessionId ?? ""],
-      streamingSessionId: running
-        ? (sessionId ?? null)
-        : (s.streamingSessionId === sessionId ? null : s.streamingSessionId),
-    };
-  }),
+  removeQueuedPrompt: (id, key) =>
+    set((s) => patchSessionIn(s, key, (b) => ({ queuedPrompts: b.queuedPrompts.filter((item) => item.id !== id) }))),
+  clearQueuedPrompts: (key) => set((s) => patchSessionIn(s, key, { queuedPrompts: [] })),
+  setActiveTurn: (turn, key) => set((s) => patchSessionIn(s, key, { activeTurn: turn })),
+  patchActiveTurn: (patch, key) =>
+    set((s) => patchSessionIn(s, key, (b) => ({ activeTurn: b.activeTurn ? { ...b.activeTurn, ...patch } : null }))),
+  setDraft: (text, key) => set((s) => (sessionOf(s, key).draft === text ? s : patchSessionIn(s, key, { draft: text }))),
+  setAttachments: (a, key) => set((s) => patchSessionIn(s, key, { attachments: a })),
+  setSessionRunning: (key, running) =>
+    set((s) => (sessionOf(s, key).running === running ? s : patchSessionIn(s, key, { running }))),
+  setUiOpen: (key, id, open) =>
+    set((s) => patchSessionIn(s, key, (b) => ({ ui: { ...b.ui, open: { ...b.ui.open, [id]: open } } }))),
+  setRevealed: (key, id, length) =>
+    set((s) =>
+      sessionOf(s, key).ui.revealed[id] === length
+        ? s
+        : patchSessionIn(s, key, (b) => ({ ui: { ...b.ui, revealed: { ...b.ui.revealed, [id]: length } } }))
+    ),
+  setScroll: (key, scroll) => set((s) => patchSessionIn(s, key, (b) => ({ ui: { ...b.ui, scroll } }))),
   setBusy: (v) => set({ busy: v }),
   setDiscovering: (v) => set({ discovering: v }),
   setAuthOpen: (v) => set({ authOpen: v }),
@@ -896,57 +928,72 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       persistAutoUpdate(next);
       return { autoUpdate: next };
     }),
-  resetThread: () => set({ ...initialThread }),
-  snapshotThread: () =>
+  resetThread: () =>
+    set((s) => ({
+      models: null,
+      configOptions: null,
+      availableCommands: [],
+      quota: null,
+      sessions: { ...s.sessions, [activeKey(s)]: emptySession() },
+    })),
+  snapshotThread: (key) =>
     set((s) => {
-      const id = s.activeThreadId ?? newThreadId();
-      const prev = s.activeThreadId ? s.threads[s.activeThreadId] : undefined;
+      const isView = key == null || key === activeKey(s);
+      // 后台的会话：只有已经有线程记录的才落盘（它的元数据都在记录上）。
+      if (!isView && !s.threads[key!]) return {};
+      const id = isView ? s.activeThreadId ?? newThreadId() : key!;
+      const live = sessionOf(s, isView ? activeKey(s) : key);
+      const prev = s.threads[id];
       const thread: ChatThread = {
+        ...prev,
         id,
-        agentId: s.activeAgentId,
+        // The view's thread belongs to the active agent; a background one
+        // keeps the agent/session/cwd it was recorded with.
+        agentId: isView ? s.activeAgentId : prev!.agentId,
         // Keep the user-facing name on the persisted record so the sidebar can
         // show content instead of an opaque session id.
-        title: titleForThread({ title: prev?.title, messages: s.messages }),
+        title: titleForThread({ title: prev?.title, messages: live.messages }),
         // Keep the historical id, and keep the stale marker so the next boot
         // does not try to resume the same dead id all over again.
-        sessionId: s.sessionId ?? (prev?.stale ? prev.sessionId : null),
+        sessionId: isView ? s.sessionId ?? (prev?.stale ? prev.sessionId : null) : prev!.sessionId,
         stale: prev?.stale ? true : undefined,
-        cwd: s.currentWorkspace ?? prev?.cwd ?? null,
-        messages: s.messages,
-        activeTurn: s.activeTurn ? { ...s.activeTurn, persistedSeq: s.activeTurn.lastSeq } : undefined,
+        cwd: isView ? s.currentWorkspace ?? prev?.cwd ?? null : prev!.cwd,
+        messages: live.messages,
+        activeTurn: live.activeTurn ? { ...live.activeTurn, persistedSeq: live.activeTurn.lastSeq } : undefined,
+        queuedPrompts: live.queuedPrompts,
         // Preserve the thread's MCP servers across snapshots (auto new/resume).
         mcpServers: prev?.mcpServers,
         updatedAt: Date.now(),
       };
-      const next = pruneThreads({ ...s.threads, [id]: thread }, [id]);
+      const next = pruneLive(s, { ...s.threads, [id]: thread }, [id]);
       saveThreads(next);
-      return { threads: next, activeThreadId: id };
+      // 草稿视图第一次落盘：它的格子搬到新线程名下，指针跟过去。
+      if (isView && !s.activeThreadId) {
+        const { [DRAFT_KEY]: draft, ...rest } = s.sessions;
+        return { threads: next, activeThreadId: id, sessions: { ...rest, [id]: draft ?? emptySession() } };
+      }
+      return { threads: next };
     }),
   restoreThread: (agentId, targetCwd) => {
-    const s = useStudioStore.getState();
+    const s = get();
     const cwd = targetCwd !== undefined ? targetCwd : s.currentWorkspace;
     const t = threadForAgent(s.threads, agentId, cwd);
     if (!t) return null;
-    const title = titleForThread(t);
     const cached = readCachedCatalog(agentId);
+    // A stale thread is a read-only historical transcript: showing its dead
+    // id as the live session is what made resume/ensureSession loop forever.
+    const sid = t.stale ? null : t.sessionId;
     set({
-      ...initialThread,
       models: cached?.models ?? null,
       configOptions: cached?.configOptions ?? null,
-      messages: t.messages.map((m) => ({ ...m })),
-      activeTurn: t.activeTurn ?? null,
-      // A stale thread is a read-only historical transcript: showing its dead
-      // id as the live session is what made resume/ensureSession loop forever.
-      sessionId: t.stale ? null : t.sessionId,
-      availableCommands: cmdsFor(s, agentId, t.stale ? null : t.sessionId),
-      sessionInfo: title ? { title } : null,
+      sessionId: sid,
+      availableCommands: cmdsFor(s, agentId, sid),
       activeThreadId: t.id,
-      isStreaming: !!s.runningSessions[(t.stale ? null : t.sessionId) ?? ""],
+      sessions: ensureSessionIn(s, t.id),
     });
     return t;
   },
   newThread: (agentId, targetCwd) => {
-    // (same NOTE as threadMcpServers: use creator `get()`, not self-reference)
     const s0 = get();
     const cwd = targetCwd !== undefined ? targetCwd : s0.currentWorkspace;
     // Continuity: a fresh thread inherits the agent's latest MCP servers so
@@ -967,19 +1014,18 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       ...(inheritedCodeMode !== undefined ? { codeMode: inheritedCodeMode } : {}),
       updatedAt: Date.now(),
     };
-    const next = pruneThreads({ ...s0.threads, [t.id]: t }, [t.id]);
+    const next = pruneLive(s0, { ...s0.threads, [t.id]: t }, [t.id]);
     saveThreads(next);
     const cached = readCachedCatalog(agentId);
-    set({
-      ...initialThread,
+    set((s) => ({
       models: cached?.models ?? null,
       configOptions: cached?.configOptions ?? null,
+      availableCommands: [],
       sessionId: null,
       threads: next,
       activeThreadId: t.id,
-      // 新会话还没跑，视图不该以为自己忙（别的会话在跑是它们自己的事）。
-      isStreaming: false,
-    });
+      sessions: { ...s.sessions, [t.id]: emptySession() },
+    }));
     return t;
   },
   threadMcpServers: (agentId) => {
@@ -1000,13 +1046,13 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       const next = {
         ...cur,
         sessionId,
-        title: titleForThread(cur),
+        title: titleForThread({ title: cur.title, messages: sessionOf(s).messages.length ? sessionOf(s).messages : cur.messages }),
         cwd: cwd !== undefined ? cwd : cur.cwd,
         mcpServers: mcpServers !== undefined ? mcpServers : cur.mcpServers,
         stale: false,
         updatedAt: Date.now(),
       };
-      const threads = pruneThreads({ ...s.threads, [next.id]: next }, [next.id]);
+      const threads = pruneLive(s, { ...s.threads, [next.id]: next }, [next.id]);
       saveThreads(threads);
       return { sessionId, threads };
     }),
@@ -1016,7 +1062,7 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       const cur = s.threads[s.activeThreadId];
       if (!cur) return {};
       const next = { ...cur, stale: true, updatedAt: Date.now() };
-      const threads = pruneThreads({ ...s.threads, [next.id]: next }, [next.id]);
+      const threads = pruneLive(s, { ...s.threads, [next.id]: next }, [next.id]);
       saveThreads(threads);
       // The id remains on the historical thread record for display, but it is
       // no longer a live session: leaving it in `sessionId` made ensureSession
@@ -1029,33 +1075,36 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       const cur = s.threads[s.activeThreadId];
       if (!cur) return {};
       const next = { ...cur, codeMode: enabled, updatedAt: Date.now() };
-      const threads = pruneThreads({ ...s.threads, [next.id]: next }, [next.id]);
+      const threads = pruneLive(s, { ...s.threads, [next.id]: next }, [next.id]);
       saveThreads(threads);
       return { threads };
     }),
   optimisticOpenSession: (agentId, sessionId, title, cwd) => {
-    const s0 = get();
-    // 1. Snapshot current active thread first
-    s0.snapshotThread();
+    // 1. Persist the session we are leaving (its live state stays in memory).
+    get().snapshotThread();
     const st = get();
 
-    // 2. Lookup existing thread in local cache (0ms instant switch)
+    // 2. Known session: point the view at it. Its own state — a turn still
+    //    running in the background included — is exactly what shows up.
     const existing = findThreadBySessionId(st.threads, agentId, sessionId);
     if (existing) {
-      set({
-        sessionId,
-        availableCommands: cmdsFor(st, agentId, sessionId),
-        activeThreadId: existing.id,
-        messages: mergeAssistantTurns(existing.messages).map((m) => ({ ...m })),
-        activeTurn: existing.activeTurn ?? null,
-        sessionInfo: {
-          ...(st.sessionInfo || {}),
-          title: titleForThread(existing) || title || st.sessionInfo?.title,
-        },
-        sessionError: null,
-        sessionLoading: true, // indicates background sync
-        // 视图状态跟着这个会话走：它在后台跑着，切过来就是"运行中"。
-        isStreaming: !!st.runningSessions[sessionId],
+      set((s) => {
+        const sessions = ensureSessionIn(s, existing.id);
+        const b = sessions[existing.id];
+        return {
+          sessionId,
+          availableCommands: cmdsFor(s, agentId, sessionId),
+          activeThreadId: existing.id,
+          sessions: {
+            ...sessions,
+            [existing.id]: {
+              ...b,
+              sessionInfo: { ...(b.sessionInfo || {}), title: titleForThread(existing) || title || b.sessionInfo?.title },
+              sessionError: null,
+              sessionLoading: true, // indicates background sync
+            },
+          },
+        };
       });
       return existing;
     }
@@ -1073,38 +1122,36 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       messages: [],
       updatedAt: Date.now(),
     };
-    const nextThreads = pruneThreads({ ...st.threads, [newId]: optimisticThread }, [newId]);
+    const nextThreads = pruneLive(st, { ...st.threads, [newId]: optimisticThread }, [newId]);
     saveThreads(nextThreads);
-    set({
-      ...initialThread,
+    set((s) => ({
       sessionId,
-      availableCommands: cmdsFor(st, agentId, sessionId),
+      availableCommands: cmdsFor(s, agentId, sessionId),
       activeThreadId: newId,
       threads: nextThreads,
-      sessionInfo: { ...(st.sessionInfo || {}), title: title || st.sessionInfo?.title },
-      sessionError: null,
-      sessionLoading: true,
-      isStreaming: !!st.runningSessions[sessionId],
-    });
+      sessions: {
+        ...s.sessions,
+        [newId]: { ...emptySession(), sessionInfo: title ? { title } : null, sessionLoading: true },
+      },
+    }));
     return optimisticThread;
   },
   resetStudio: () => {
-    const s = useStudioStore.getState();
+    const s = get();
     set({
-      ...initialThread,
       activeAgentId: "codex",
       connectingId: null,
       authOk: {},
       sessionId: null,
       commandsBySession: {},
       activeThreadId: null,
+      sessions: {},
+      models: null,
+      configOptions: null,
+      availableCommands: [],
+      quota: null,
       // Persisted thread records survive a full reset (tests clear storage).
       threads: s.threads,
-      isStreaming: false,
-      streamingSessionId: null,
-      runningSessions: {} as Record<string, boolean>,
-      messageOwner: {} as Record<string, string>,
-      drafts: {} as Record<string, string>,
       busy: false,
       discovering: false,
       authOpen: false,
@@ -1114,14 +1161,13 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
       respondingId: null,
       pendingPerms: [],
       pendingElic: [],
-      queuedPrompts: [],
       terminalOpen: false,
       terminalPrefill: null,
       terminalCwd: null,
       gitChangesOpen: false,
       gitDiffFile: null,
-    })
-  }
+    });
+  },
 }));
 
 /**
@@ -1131,76 +1177,76 @@ export const useStudioStore = create<StudioState>()((set, get) => ({
  * streaming hot path writes `messages` once per token; subscribing to it at
  * shell level made App re-render (and re-render every layout child) on every
  * chunk. `messages` is consumed by the leaves that actually render it
- * (`AssistantChatView` via `useStudioStore((s) => s.messages)`), while stream callbacks
+ * (`AssistantChatView` via `useStudioMessages`), while stream callbacks
  * write through `getState()` actions, which needs no subscription at all.
+ *
+ * The session fields below are read through the view pointer: they belong to
+ * the session being looked at, not to the store.
  *
  * Per .agents/rules/state_management.md: subscribe with selectors, never the
  * whole store. `transients` (AbortController, StrictMode guards) stay in refs.
  */
-const STUDIO_SHALLOW_SELECTOR = (s: StudioState) => ({
-  // connection
-  activeAgentId: s.activeAgentId,
-  connectingId: s.connectingId,
-  authOk: s.authOk,
-  // session view
-  sessionId: s.sessionId,
-  sessionError: s.sessionError,
-  sessionLoading: s.sessionLoading,
-  modes: s.modes,
-  models: s.models,
-  configOptions: s.configOptions,
-  availableCommands: s.availableCommands,
-  usage: s.usage,
-  quota: s.quota,
-  sessionInfo: s.sessionInfo,
-  // composer / busy
-  drafts: s.drafts,
-  setDraft: s.setDraft,
-  attachments: s.attachments,
-  isStreaming: s.isStreaming,
-  streamingSessionId: s.streamingSessionId,
-  runningSessions: s.runningSessions,
-  setSessionRunning: s.setSessionRunning,
-  busy: s.busy,
-  discovering: s.discovering,
-  // overlays
-  authOpen: s.authOpen,
-  settingsOpen: s.settingsOpen,
-  providersOpen: s.providersOpen,
-  modelsOpen: s.modelsOpen,
-  // pending agent requests
-  pendingPerms: s.pendingPerms,
-  pendingElic: s.pendingElic,
-  respondingId: s.respondingId,
-  queuedPrompts: s.queuedPrompts,
-  // workspace & desktop tools
-  currentWorkspace: s.currentWorkspace,
-  recentWorkspaces: s.recentWorkspaces,
-  terminalOpen: s.terminalOpen,
-  terminalPrefill: s.terminalPrefill,
-  terminalCwd: s.terminalCwd,
-  gitChangesOpen: s.gitChangesOpen,
-  gitDiffFile: s.gitDiffFile,
-  // thread bookkeeping
-  threads: s.threads,
-  activeThreadId: s.activeThreadId,
-  agentPrefs: s.agentPrefs,
-  autoUpdate: s.autoUpdate,
-  // actions used directly from JSX (stable identity — never trigger a shallow
-  // change, so including them costs nothing and avoids `getState()` in render)
-  setWorkspace: s.setWorkspace,
-  setTerminalOpen: s.setTerminalOpen,
-  setTerminalPrefill: s.setTerminalPrefill,
-  setTerminalCwd: s.setTerminalCwd,
-  setGitChangesOpen: s.setGitChangesOpen,
-  setAuthOpen: s.setAuthOpen,
-  setSettingsOpen: s.setSettingsOpen,
-  setProvidersOpen: s.setProvidersOpen,
-  setModelsOpen: s.setModelsOpen,
-  setAttachments: s.setAttachments,
-  setMessages: s.setMessages,
-  setQuota: s.setQuota,
-});
+const STUDIO_SHALLOW_SELECTOR = (s: StudioState) => {
+  const view = sessionOf(s);
+  return {
+    // connection
+    activeAgentId: s.activeAgentId,
+    connectingId: s.connectingId,
+    authOk: s.authOk,
+    // session view (the session the pointer is on)
+    sessionId: s.sessionId,
+    sessionError: view.sessionError,
+    sessionLoading: view.sessionLoading,
+    modes: view.modes,
+    usage: view.usage,
+    sessionInfo: view.sessionInfo,
+    queuedPrompts: view.queuedPrompts,
+    attachments: view.attachments,
+    isStreaming: view.running,
+    models: s.models,
+    configOptions: s.configOptions,
+    availableCommands: s.availableCommands,
+    quota: s.quota,
+    busy: s.busy,
+    discovering: s.discovering,
+    // overlays
+    authOpen: s.authOpen,
+    settingsOpen: s.settingsOpen,
+    providersOpen: s.providersOpen,
+    modelsOpen: s.modelsOpen,
+    // pending agent requests
+    pendingPerms: s.pendingPerms,
+    pendingElic: s.pendingElic,
+    respondingId: s.respondingId,
+    // workspace & desktop tools
+    currentWorkspace: s.currentWorkspace,
+    recentWorkspaces: s.recentWorkspaces,
+    terminalOpen: s.terminalOpen,
+    terminalPrefill: s.terminalPrefill,
+    terminalCwd: s.terminalCwd,
+    gitChangesOpen: s.gitChangesOpen,
+    gitDiffFile: s.gitDiffFile,
+    // thread bookkeeping
+    threads: s.threads,
+    activeThreadId: s.activeThreadId,
+    agentPrefs: s.agentPrefs,
+    autoUpdate: s.autoUpdate,
+    // actions used directly from JSX (stable identity — never trigger a shallow
+    // change, so including them costs nothing and avoids `getState()` in render)
+    setWorkspace: s.setWorkspace,
+    setTerminalOpen: s.setTerminalOpen,
+    setTerminalPrefill: s.setTerminalPrefill,
+    setTerminalCwd: s.setTerminalCwd,
+    setGitChangesOpen: s.setGitChangesOpen,
+    setAuthOpen: s.setAuthOpen,
+    setSettingsOpen: s.setSettingsOpen,
+    setProvidersOpen: s.setProvidersOpen,
+    setModelsOpen: s.setModelsOpen,
+    setAttachments: s.setAttachments,
+    setMessages: s.setMessages,
+    setQuota: s.setQuota,
+  };
+};
 
 export type StudioShallow = ReturnType<typeof STUDIO_SHALLOW_SELECTOR>;
 
@@ -1209,12 +1255,22 @@ export function useStudioShallow(): StudioShallow {
   return useStudioStore(useShallow(STUDIO_SHALLOW_SELECTOR));
 }
 
+/** Read one thing from the session the view is on. */
+export function useActiveSession<T>(select: (b: SessionState) => T): T {
+  return useStudioStore((s) => select(sessionOf(s)));
+}
+
 /**
  * Focused subscription for the single field the stream hot path mutates.
  * Kept separate so only the component that renders the transcript pays for it.
  */
 export function useStudioMessages(): Message[] {
-  return useStudioStore((s) => s.messages);
+  return useStudioStore((s) => sessionOf(s).messages);
+}
+
+/** ACP session ids with a turn running right now (one per session, in parallel). */
+export function useRunningSessionIds(): Record<string, true> {
+  return useStudioStore(useShallow(runningSessionIds));
 }
 
 if (typeof window !== "undefined") {

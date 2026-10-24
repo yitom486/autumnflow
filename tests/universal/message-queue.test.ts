@@ -4,7 +4,8 @@ import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { useAui, createMessageQueue } from "@assistant-ui/react";
 import { AcpAssistantProvider } from "@/components/assistant/AcpAssistantProvider";
-import { useStudioStore } from "@/stores/useStudioStore";
+import { activeKey, useStudioStore } from "@/stores/useStudioStore";
+import { setStudio } from "../helpers/studio";
 
 async function flushRounds(n = 8) {
   for (let i = 0; i < n; i++) {
@@ -24,7 +25,7 @@ function Probe({ onReady }: { onReady: (aui: ReturnType<typeof useAui>) => void 
 
 describe("message queue (排队)", () => {
   it("buffers sends during a run and drains in order after settle", async () => {
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
     const calls: string[] = [];
     let resolveFirst!: () => void;
     const onSend = vi.fn((text?: string) => {
@@ -55,7 +56,7 @@ describe("message queue (排队)", () => {
 
     // 运行中（外部置 busy）：第二条只进队列，不 dispatch
     await act(async () => {
-      useStudioStore.getState().setStreaming(true);
+      useStudioStore.getState().setSessionRunning(activeKey(useStudioStore.getState()), true);
     });
     await act(async () => {
       aui.composer.setText("second");
@@ -69,14 +70,14 @@ describe("message queue (排队)", () => {
     // 第一轮落定：队列排出第二条
     await act(async () => {
       resolveFirst();
-      useStudioStore.getState().setStreaming(false);
+      useStudioStore.getState().setSessionRunning(activeKey(useStudioStore.getState()), false);
     });
     await flushRounds();
     expect(calls).toEqual(["first", "second"]);
 
     root.unmount();
     el.remove();
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
   });
 
   it("clear() drops pending items so edit/reload never drains stale sends", async () => {

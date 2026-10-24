@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import type { QueryClient } from "@tanstack/react-query";
-import { useStudioStore } from "@/stores/useStudioStore";
+import { activeKey, sessionOf, useStudioStore } from "@/stores/useStudioStore";
 import { invalidateAgents, invalidateSessions } from "@/lib/acp-queries";
 import {
   connectAgent,
@@ -25,7 +25,6 @@ export interface UseSessionLifecycleOptions {
   agents: AgentSummary[];
   agentsRef: React.RefObject<AgentSummary[]>;
   applyDefaultConfigOptions: (agentId: string, sessionId: string) => Promise<void>;
-  abortRef?: React.RefObject<AbortController | null>;
   appendActivity?: (a: ActivityEvent) => void;
   now?: () => string;
 }
@@ -58,7 +57,6 @@ export function useSessionLifecycle({
   agents,
   agentsRef,
   applyDefaultConfigOptions,
-  abortRef,
   appendActivity,
   now = defaultNow,
 }: UseSessionLifecycleOptions) {
@@ -89,7 +87,9 @@ export function useSessionLifecycle({
   const createSession = useCallback(
     async (agentId: string, force: boolean): Promise<string | null> => {
       const st = useStudioStore.getState();
-      st.setSessionLoading(true);
+      // The session asking for it; a fresh thread opened below is the view's.
+      const askingKey = activeKey(st);
+      st.setSessionLoading(true, askingKey);
       try {
         const known = agentsRef.current.find((a) => a.id === agentId)?.status?.connected;
         if (!known) await connectAgent(agentId);
@@ -102,12 +102,12 @@ export function useSessionLifecycle({
         // Auto-prune uncommitted empty draft: if leaving behind an empty session with 0 user messages,
         // delete it from the agent so abandoned zero-message sessions don't clutter the sidebar.
         const prevSid = st.sessionId;
-        const prevHasUserMsg = st.messages.some((m) => m.role === "user");
+        const prevHasUserMsg = sessionOf(st).messages.some((m) => m.role === "user");
         // Whether the view had content has to be judged when the session is
         // REQUESTED. Judging it when the response arrives would let a message
         // that the user sent while session/new was in flight switch the thread
         // and disappear from the chat.
-        const prevHadMessages = st.messages.length > 0;
+        const prevHadMessages = sessionOf(st).messages.length > 0;
         if (prevSid && !prevHasUserMsg) {
           void sessionRpc(agentId, "delete", { sessionId: prevSid }).catch(() => {});
         }
@@ -162,6 +162,7 @@ export function useSessionLifecycle({
         }
         return null;
       } finally {
+        useStudioStore.getState().setSessionLoading(false, askingKey);
         useStudioStore.getState().setSessionLoading(false);
       }
     },
@@ -183,7 +184,7 @@ export function useSessionLifecycle({
       const activeThread = st.activeThreadId ? st.threads[st.activeThreadId] : undefined;
       const staleBinding = activeThread?.stale === true;
       if (!force && !staleBinding && st.sessionId && agentId === st.activeAgentId) return st.sessionId;
-      if (!force && (st.isStreaming || st.busy)) return null;
+      if (!force && (sessionOf(st).running || st.busy)) return null;
       // Share one in-flight creation per agent. Boot pre-warm and the first
       // send can both reach this point before either resolves (the agent is
       // still spawning), and two parallel session/new calls would leave the
@@ -227,7 +228,7 @@ export function useSessionLifecycle({
         if (transcript.messages.length === 0) return;
         // 本地已经有这个会话的消息：那是它自己的全量状态（含工具调用、卡片、
         // 流式输出）。回放是重建出来的静态记录，覆盖会把实时视图换成死快照。
-        if (cur.messages.length > 0) return;
+        if (sessionOf(cur).messages.length > 0) return;
         cur.setMessages(
           transcript.messages.map((m, index) => ({
             id: `hist-${Date.now()}-${index}`,
@@ -263,7 +264,7 @@ export function useSessionLifecycle({
     async (agentId: string): Promise<{ resumed: boolean; result?: any }> => {
       const st = useStudioStore.getState();
       const sid = st.sessionId;
-      if (!sid || st.isStreaming) return { resumed: false };
+      if (!sid || sessionOf(st).running) return { resumed: false };
       // Isolation: resume only ids bound to THIS agent's live thread.
       const thread = st.activeThreadId ? st.threads[st.activeThreadId] : undefined;
       if (!thread || thread.agentId !== agentId || thread.sessionId !== sid) {
@@ -305,7 +306,7 @@ export function useSessionLifecycle({
           thread.messages.some(
             (m) => m.role === "system" && m.content.includes(sidPrefix)
           ) ||
-          st.messages.some(
+          sessionOf(st).messages.some(
             (m) => m.role === "system" && m.content.includes(sidPrefix)
           );
         if (thread.messages.some((m) => m.role === "user") && !alreadyNotified) {
@@ -332,7 +333,7 @@ export function useSessionLifecycle({
     async (agentId: string): Promise<string | null> => {
       const cur0 = useStudioStore.getState();
       if (cur0.activeAgentId !== agentId) return null;
-      if (cur0.isStreaming) return cur0.sessionId;
+      if (sessionOf(cur0).running) return cur0.sessionId;
       // 1. resume the bound session (restores modes/models/config for selectors)
       const { resumed, result } = await restoreAgentSession(agentId);
       const cur = useStudioStore.getState();
@@ -424,7 +425,7 @@ export function useSessionLifecycle({
         }
       })();
     },
-    [qc, agentsRef, abortRef, resolveSession]
+    [qc, agentsRef, resolveSession]
   );
 
   const handleConnect = useCallback(
@@ -460,7 +461,7 @@ export function useSessionLifecycle({
 
         // Auto-cleanup discarded empty draft if leaving one behind
         const prevSid = st.sessionId;
-        const prevHasUserMsg = st.messages.some((m) => m.role === "user");
+        const prevHasUserMsg = sessionOf(st).messages.some((m) => m.role === "user");
         if (prevSid && !prevHasUserMsg) {
           void sessionRpc(agentId, "delete", { sessionId: prevSid }).catch(() => {});
         }
@@ -521,7 +522,7 @@ export function useSessionLifecycle({
 
       // Auto-cleanup abandoned empty draft if current session has no user messages
       const prevSid = st.sessionId;
-      const prevHasUserMsg = st.messages.some((m) => m.role === "user");
+      const prevHasUserMsg = sessionOf(st).messages.some((m) => m.role === "user");
       if (prevSid && !prevHasUserMsg) {
         void sessionRpc(agentId, "delete", { sessionId: prevSid }).catch(() => {});
       }
@@ -531,7 +532,7 @@ export function useSessionLifecycle({
       }
       st.snapshotThread();
       st.newThread(agentId, cwd || st.currentWorkspace);
-      // 不清 isStreaming：新建会话不等于那一轮结束。智能体那边继续跑，切回来
+      // 不清运行状态：新建会话不等于那一轮结束。智能体那边继续跑，切回来
       // 还能挂上（/follow 按 seq 续读）。"本会话在不在忙"按会话判断。
       st.setBusy(false);
       st.setSessionError(null);
@@ -566,19 +567,20 @@ export function useSessionLifecycle({
         setActiveAgentId(item.agentId);
         if (!restoreThread(item.agentId)) newThread(item.agentId);
       }
-      // 不清 isStreaming：切走不等于那一轮结束。智能体那边继续跑，前端只是
+      // 不清运行状态：切走不等于那一轮结束。智能体那边继续跑，前端只是
       // 不再盯着它；回到这个会话时会重新挂上（/follow 按 seq 续读）。
       const agentId = item.agentId || prevAgentId;
 
       // Auto-cleanup abandoned empty draft when switching to another session
       const prevSid = st.sessionId;
-      const prevHasUserMsg = st.messages.some((m) => m.role === "user");
+      const prevHasUserMsg = sessionOf(st).messages.some((m) => m.role === "user");
       if (prevSid && prevSid !== item.sessionId && !prevHasUserMsg) {
         void sessionRpc(prevAgentId, "delete", { sessionId: prevSid }).catch(() => {});
       }
 
       // 1. 乐观渲染：0ms 瞬间把会话切换到主视口（本地缓存历史立即可见，无全屏菊花阻塞）
       st.optimisticOpenSession(agentId, item.sessionId, item.title, item.cwd);
+      const openedKey = activeKey(useStudioStore.getState());
 
       // 1b. 这个会话在后台还在跑？把那一轮重新挂上（按 lastSeq 续读）。
       // 切 agent 时前端会断开事件流，但 agent 那边继续跑——没有这一步，
@@ -609,16 +611,16 @@ export function useSessionLifecycle({
             );
             if (t.sessionTitle || t.sessionGoal !== undefined) {
               cur.setSessionInfo({
-                ...(cur.sessionInfo || {}),
-                title: t.sessionTitle || item.title || cur.sessionInfo?.title,
-                goal: t.sessionGoal !== undefined ? t.sessionGoal : cur.sessionInfo?.goal,
+                ...(sessionOf(cur).sessionInfo || {}),
+                title: t.sessionTitle || item.title || sessionOf(cur).sessionInfo?.title,
+                goal: t.sessionGoal !== undefined ? t.sessionGoal : sessionOf(cur).sessionInfo?.goal,
               });
             }
             if (t.messages.length > 0) {
               // 本地已经有这个会话的消息：保留它们（对象/ id 都是原来的，卡片、
               // 展开状态、交互都不会重挂）。回放是重建出来的静态记录——用户消息
               // 带的是注入后的完整提示词、id 也全不一样，覆盖会把实时视图换掉。
-              if (cur.messages.length === 0) {
+              if (sessionOf(cur).messages.length === 0) {
                 cur.setMessages(
                   t.messages.map((m, i) => ({
                     id: `hist-${Date.now()}-${i}`,
@@ -635,7 +637,7 @@ export function useSessionLifecycle({
                   }))
                 );
               }
-            } else if (cur.messages.length === 0) {
+            } else if (sessionOf(cur).messages.length === 0) {
               cur.appendMessage({
                 id: `sys-${Date.now()}-empty`,
                 role: "system",
@@ -644,7 +646,7 @@ export function useSessionLifecycle({
               });
             }
             if (t.plan.length > 0) {
-              const msgs = useStudioStore.getState().messages;
+              const msgs = sessionOf(useStudioStore.getState()).messages;
               const lastAsst = [...msgs].reverse().find((m) => m.role === "assistant");
               if (lastAsst) {
                 useStudioStore.getState().patchMessage(lastAsst.id, { plan: t.plan });
@@ -658,7 +660,7 @@ export function useSessionLifecycle({
               if (cmds) useStudioStore.getState().setAvailableCommands(cmds, item.sessionId);
             }
             if (t.currentModeId) {
-              const modes = useStudioStore.getState().modes;
+              const modes = sessionOf(useStudioStore.getState()).modes;
               if (modes) {
                 useStudioStore.getState().setModes({ ...modes, currentModeId: t.currentModeId! });
               }
@@ -685,7 +687,7 @@ export function useSessionLifecycle({
                 ...(sSnap.models?.currentModelId
                   ? { fallbackModelId: sSnap.models.currentModelId }
                   : {}),
-                ...(sSnap.modes?.currentModeId ? { modeId: sSnap.modes.currentModeId } : {}),
+                ...(sessionOf(sSnap).modes?.currentModeId ? { modeId: sessionOf(sSnap).modes!.currentModeId } : {}),
               });
             } catch {
               // ignore
@@ -712,7 +714,7 @@ export function useSessionLifecycle({
               if (resumeRes?.models) cur.setModels(resumeRes.models);
               if (resumeRes?.configOptions) cur.setConfigOptions(resumeRes.configOptions);
               if (Array.isArray(resumeRes?.availableCommands)) cur.setAvailableCommands(resumeRes.availableCommands, item.sessionId);
-              if (cur.messages.length === 0) {
+              if (sessionOf(cur).messages.length === 0) {
                 cur.setMessages([
                   {
                     id: `sys-${Date.now()}`,
@@ -731,7 +733,7 @@ export function useSessionLifecycle({
             if (isSessionGoneError(loadErr) || isSessionGoneError(resumeErr)) {
               cur.markThreadStale();
               const sidPrefix = item.sessionId.slice(0, 8);
-              const alreadyNotified = cur.messages.some(
+              const alreadyNotified = sessionOf(cur).messages.some(
                 (m) => m.role === "system" && m.content.includes(sidPrefix)
               );
               if (!alreadyNotified) {
@@ -752,7 +754,7 @@ export function useSessionLifecycle({
               effectiveCwd || null,
               cur.threadMcpServers(agentId)
             );
-            if (cur.messages.length === 0) {
+            if (sessionOf(cur).messages.length === 0) {
               cur.setMessages([
                 {
                   id: `sys-${Date.now()}`,
@@ -768,7 +770,7 @@ export function useSessionLifecycle({
       } catch (e: any) {
         alert(`打开会话失败: ${e.message}`);
       } finally {
-        useStudioStore.getState().setSessionLoading(false);
+        useStudioStore.getState().setSessionLoading(false, openedKey);
       }
     },
     [qc, agentsRef, appendActivity, now]
@@ -778,7 +780,7 @@ export function useSessionLifecycle({
     async (sid?: string) => {
       const st = useStudioStore.getState();
       const source = sid || st.sessionId;
-      if (!source || st.isStreaming) return;
+      if (!source || sessionOf(st).running) return;
       const agentId = st.activeAgentId;
       st.setBusy(true);
       try {

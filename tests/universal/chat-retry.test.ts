@@ -3,10 +3,11 @@ import { createElement as h, useEffect, useRef } from "react";
 import { createRoot } from "react-dom/client";
 import { act } from "react-dom/test-utils";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
-import { useStudioStore } from "@/stores/useStudioStore";
+import { activeKey, sessionOf, useStudioStore } from "@/stores/useStudioStore";
 import { useChatSend, isTransientSendError, stripRetryNotes } from "@/hooks/useChatSend";
 import type { AgentSummary } from "@/lib/universal-api";
 import { contextUsage, promptUsage, displayedPromptUsage } from "../fixtures/usage-sample";
+import { setStudio, view } from "../helpers/studio";
 
 const realFetch = globalThis.fetch;
 
@@ -107,7 +108,7 @@ describe("send retry policy", () => {
     ] });
     try {
       await act(async () => { await send("usage"); });
-      const usage = useStudioStore.getState().messages.find(message => message.role === "assistant")?.usage;
+      const usage = view().messages.find(message => message.role === "assistant")?.usage;
       expect(usage).toMatchObject({ ...contextUsage, costScope: "session", ...displayedPromptUsage });
     } finally { root.unmount(); el.remove(); }
   });
@@ -119,7 +120,7 @@ describe("send retry policy", () => {
     try {
       useStudioStore.getState().setUsage(contextUsage);
       await act(async () => { await send("usage only"); });
-      const usage = useStudioStore.getState().messages.find(message => message.role === "assistant")?.usage;
+      const usage = view().messages.find(message => message.role === "assistant")?.usage;
       expect(usage).toMatchObject({ used: 0, size: 0, totalTokens: promptUsage.totalTokens });
       expect(usage?.cost).toBeUndefined();
     } finally { root.unmount(); el.remove(); }
@@ -147,10 +148,9 @@ describe("send retry policy", () => {
     });
     try {
       await act(async () => { await send("别把我弄丢了"); });
-      const state = useStudioStore.getState();
-      const user = state.messages.find((m) => m.role === "user");
+      const user = view().messages.find((m) => m.role === "user");
       expect(user?.content).toBe("别把我弄丢了");
-      const asst = state.messages.find((m) => m.role === "assistant");
+      const asst = view().messages.find((m) => m.role === "assistant");
       expect(asst?.content).toContain("连接异常");
     } finally { root.unmount(); el.remove(); }
   });
@@ -166,22 +166,21 @@ describe("send retry policy", () => {
     });
     try {
       await act(async () => { await send("别把我弄丢了"); });
-      const state = useStudioStore.getState();
       // 草稿按会话存：还给"发起这一轮的那个会话"
-      expect(state.drafts[state.sessionId ?? ""] ?? "").toBe("别把我弄丢了");
-      expect(state.messages.some((m) => m.role === "user")).toBe(false);
+      expect(view().draft).toBe("别把我弄丢了");
+      expect(view().messages.some((m) => m.role === "user")).toBe(false);
     } finally { root.unmount(); el.remove(); }
   });
 
   it("queues a prompt typed while the agent is still working", async () => {
     const { root, el, send } = await renderHarness({ calls: [], chatBehavior: ["ok"] });
     try {
-      useStudioStore.getState().setStreaming(true);
+      useStudioStore.getState().setSessionRunning(activeKey(useStudioStore.getState()), true);
       await act(async () => { await send("排队的这条"); });
-      const queued = useStudioStore.getState().queuedPrompts;
+      const queued = view().queuedPrompts;
       expect(queued.map((q) => q.text)).toEqual(["排队的这条"]);
       // The prompt was not lost: it is neither in the chat nor in the composer.
-      expect(useStudioStore.getState().messages.some((m) => m.role === "user")).toBe(false);
+      expect(view().messages.some((m) => m.role === "user")).toBe(false);
     } finally { root.unmount(); el.remove(); }
   });
 
@@ -190,9 +189,9 @@ describe("send retry policy", () => {
     try {
       const store = useStudioStore.getState();
       const id = store.enqueuePrompt("算了");
-      expect(useStudioStore.getState().queuedPrompts).toHaveLength(1);
+      expect(view().queuedPrompts).toHaveLength(1);
       useStudioStore.getState().removeQueuedPrompt(id);
-      expect(useStudioStore.getState().queuedPrompts).toEqual([]);
+      expect(view().queuedPrompts).toEqual([]);
     } finally { root.unmount(); el.remove(); }
   });
 
@@ -203,8 +202,8 @@ describe("send retry policy", () => {
       await act(async () => { await send("第一条"); });
       await act(async () => { await new Promise((r) => setTimeout(r, 120)); });
       expect((globalThis as any).__chatAttempts).toBe(2);
-      expect(useStudioStore.getState().queuedPrompts).toEqual([]);
-      const prompts = useStudioStore.getState().messages.filter((m) => m.role === "user").map((m) => m.content);
+      expect(view().queuedPrompts).toEqual([]);
+      const prompts = view().messages.filter((m) => m.role === "user").map((m) => m.content);
       expect(prompts).toContain("接着做这个");
     } finally { root.unmount(); el.remove(); }
   });
@@ -214,14 +213,55 @@ describe("send retry policy", () => {
     // request is refused so the agent can continue, and the message is queued.
     const { root, el, send } = await renderHarness({ calls: [], chatBehavior: ["ok"] });
     try {
-      useStudioStore.getState().setStreaming(true);
+      // The request belongs to the session being typed in.
+      setStudio({ sessionId: "s1" });
+      useStudioStore.getState().setSessionRunning(activeKey(useStudioStore.getState()), true);
       useStudioStore.getState().addPermission({
         agentId: "codex", sessionId: "s1", permissionId: "perm-1", toolCall: { title: "写文件" }, options: [],
       } as any);
       await act(async () => { await send("换个方向"); });
       expect(useStudioStore.getState().pendingPerms).toEqual([]);
-      expect(useStudioStore.getState().queuedPrompts.map((q) => q.text)).toEqual(["换个方向"]);
+      expect(view().queuedPrompts.map((q) => q.text)).toEqual(["换个方向"]);
     } finally { root.unmount(); el.remove(); }
+  });
+
+  it("a turn keeps writing into its own session after the user switches away", async () => {
+    const { root, el, send } = await renderHarness({ calls: [] });
+    let release!: () => void;
+    const gate = new Promise<void>((r) => (release = r));
+    const enc = new TextEncoder();
+    const frame = (f: unknown) => enc.encode(`data: ${JSON.stringify(f)}\n\n`);
+    const chunk = (text: string) => frame({ type: "update", update: { sessionUpdate: "agent_message_chunk", content: { type: "text", text } } });
+    const harnessFetch = globalThis.fetch;
+    globalThis.fetch = (async (url: any, init?: any) => !String(url).includes("/api/universal/chat") ? harnessFetch(url, init) : new Response(new ReadableStream<Uint8Array>({
+      async start(c) {
+        c.enqueue(chunk("前半"));
+        await gate;
+        c.enqueue(chunk("后半"));
+        c.enqueue(frame({ type: "done", stopReason: "end_turn" }));
+        c.close();
+      },
+    }), { status: 200 })) as any;
+    try {
+      let sending!: Promise<void>;
+      await act(async () => { sending = send("A 的问题"); });
+      const keyA = activeKey(useStudioStore.getState());
+      await act(async () => {
+        await vi.waitFor(() => expect(view().messages.find((m) => m.role === "assistant")?.content).toBe("前半"));
+      });
+
+      // 用户切到另一个会话，A 那一轮还在后台跑
+      await act(async () => { useStudioStore.getState().newThread("codex"); });
+      await act(async () => { release(); await sending; });
+
+      const a = sessionOf(useStudioStore.getState(), keyA);
+      expect(a.messages.find((m) => m.role === "assistant")?.content).toBe("前半后半");
+      expect(a.running).toBe(false);
+      expect(a.activeTurn?.status).toBe("done");
+      // 正在看的会话一点没被碰到
+      expect(view().messages).toEqual([]);
+      expect(view().activeTurn).toBeNull();
+    } finally { release(); root.unmount(); el.remove(); }
   });
 
   it("control: happy path through handleSend lands text with no retry", async () => {
@@ -233,7 +273,7 @@ describe("send retry policy", () => {
     await send("hi");
     await new Promise((r) => setTimeout(r, 100));
     expect((globalThis as any).__chatAttempts).toBe(1);
-    const asst = useStudioStore.getState().messages.find((m) => m.role === "assistant");
+    const asst = view().messages.find((m) => m.role === "assistant");
     expect(asst?.content).toContain("你好");
     root.unmount();
     el.remove();
@@ -244,8 +284,8 @@ describe("send retry policy", () => {
       const store = useStudioStore.getState();
       // Real session resolution rejects creating a session while streaming.
       // It must still see a clean draft when the first send arrives early.
-      expect(store.isStreaming).toBe(false);
-      expect(store.messages).toHaveLength(0);
+      expect(sessionOf(store).running).toBe(false);
+      expect(sessionOf(store).messages).toHaveLength(0);
       store.newThread(store.activeAgentId);
       store.setSessionId("first-session");
       return "first-session";
@@ -253,7 +293,7 @@ describe("send retry policy", () => {
     const { root, el, send } = await renderHarness({ calls: [], resolveSession });
     try {
       await send("first prompt");
-      const messages = useStudioStore.getState().messages;
+      const messages = view().messages;
       expect(messages.filter((m) => m.role === "user").map((m) => m.content)).toEqual(["first prompt"]);
       expect(messages.find((m) => m.role === "assistant")?.content).toContain("你好");
       expect(resolveSession).toHaveBeenCalledTimes(1);
@@ -286,7 +326,7 @@ describe("send retry policy", () => {
     const { root, el, send } = await renderHarness({ calls: [], resolveSession: async () => { throw new Error("session creation failed"); } });
     try {
       await send("first prompt");
-      expect(useStudioStore.getState().messages.find((m) => m.role === "assistant")?.content).toContain("session creation failed");
+      expect(view().messages.find((m) => m.role === "assistant")?.content).toContain("session creation failed");
       expect((globalThis as any).__chatAttempts).toBe(0);
     } finally { root.unmount(); el.remove(); }
   });
@@ -329,7 +369,7 @@ describe("send retry policy", () => {
     for (let i = 0; i < 10; i++) {
       await new Promise((r) => setTimeout(r, 20));
     }
-    const msgs = useStudioStore.getState().messages;
+    const msgs = view().messages;
     const asst = msgs.find((m) => m.role === "assistant");
     expect(asst?.content).toContain("你好");
     expect(asst?.content).not.toContain("🔁");
@@ -349,7 +389,7 @@ describe("send retry policy", () => {
       await send("hi");
     });
     expect((globalThis as any).__chatAttempts).toBe(2);
-    const msgs = useStudioStore.getState().messages;
+    const msgs = view().messages;
     const asst = msgs.find((m) => m.role === "assistant");
     expect(asst?.content).toContain("❌");
     expect(asst?.content).not.toContain("🔁");

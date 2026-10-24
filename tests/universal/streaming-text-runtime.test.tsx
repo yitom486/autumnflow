@@ -5,6 +5,7 @@ import { MessagePrimitive, ThreadPrimitive, useAui, useAuiState, useMessagePartT
 import { AcpAssistantProvider } from "@/components/assistant/AcpAssistantProvider";
 import { StableTextPart } from "@/components/assistant/StableTextPart";
 import { useStudioStore } from "@/stores/useStudioStore";
+import { setStudio } from "../helpers/studio";
 
 let root: ReturnType<typeof createRoot> | undefined;
 let element: HTMLDivElement | undefined;
@@ -27,7 +28,7 @@ it("keeps the same text runtime and DOM across tool insertions, then appends onl
   const Text = () => <StableTextPart><Probe /></StableTextPart>;
   const components = { Text, Reasoning: () => null, tools: { Fallback: () => null } };
   const Message = () => <MessagePrimitive.Parts components={components} />;
-  useStudioStore.setState({ sessionId: "stable-text", activeThreadId: "stable-text", isStreaming: true,
+  setStudio({ sessionId: "stable-text", activeThreadId: "stable-text", isStreaming: true,
     messages: [{ id: "a1", role: "assistant", content: "阶段输出：已定位问题。", isStreaming: true, timestamp: "12:00" }] } as any);
   element = document.createElement("div");
   document.body.appendChild(element);

@@ -8,7 +8,7 @@
  */
 import { useEffect } from "react";
 import { followUniversalTurn, mergePromptUsage } from "@/lib/universal-api";
-import { useStudioStore } from "@/stores/useStudioStore";
+import { activeKey, sessionOf, useStudioStore, type SessionKey } from "@/stores/useStudioStore";
 import type { ActiveTurn } from "@/lib/threads";
 import { isTurnLive } from "@/lib/live-turns";
 
@@ -30,27 +30,36 @@ function sleep(ms: number, signal: AbortSignal): Promise<void> {
   });
 }
 
-export async function recoverActiveTurn(turn: ActiveTurn, assistantId: string): Promise<void> {
+/**
+ * Follow `turn` of session `key` until it ends. Everything it receives goes
+ * into that session, whichever session the user is looking at meanwhile.
+ */
+export async function recoverActiveTurn(
+  turn: ActiveTurn,
+  assistantId: string,
+  key: SessionKey = activeKey(useStudioStore.getState())
+): Promise<void> {
   const controller = new AbortController();
   let lastSeq = Math.max(0, Math.floor(Number(turn.persistedSeq ?? turn.lastSeq) || 0));
   let terminal = false;
   let terminalError = "";
   let gap = false;
-  const store = useStudioStore.getState();
-  const isCurrent = () => useStudioStore.getState().activeTurn?.turnId === turn.turnId;
+  const store = () => useStudioStore.getState();
+  const isCurrent = () => sessionOf(store(), key).activeTurn?.turnId === turn.turnId;
+  const patchAsst = (patch: Parameters<ReturnType<typeof store>["patchMessage"]>[1]) =>
+    store().patchMessage(assistantId, patch, key);
   if (!isCurrent()) return;
 
-  store.setStreaming(true);
-  store.setBusy(true);
-  store.patchMessage(assistantId, (m) => ({ ...m, isStreaming: true, completedAt: undefined }));
+  store().setSessionRunning(key, true);
+  patchAsst((m) => ({ ...m, isStreaming: true, completedAt: undefined }));
   const persistTimer = setInterval(() => {
-    if (isCurrent()) useStudioStore.getState().snapshotThread();
+    if (isCurrent()) store().snapshotThread(key);
   }, 2000);
 
   const finish = (status: "done" | "error" | "interrupted", note?: string) => {
-    const st = useStudioStore.getState();
+    const st = store();
     if (!isCurrent()) return;
-    st.patchMessage(assistantId, (m) => ({
+    patchAsst((m) => ({
       ...m,
       isStreaming: false,
       statusHint: undefined,
@@ -61,10 +70,9 @@ export async function recoverActiveTurn(turn: ActiveTurn, assistantId: string): 
           ? { ...m.thoughtTiming, completedAt: Date.now() }
           : m.thoughtTiming,
     }));
-    st.patchActiveTurn({ status, lastSeq });
-    st.setStreaming(false);
-    st.setBusy(false);
-    st.snapshotThread();
+    st.patchActiveTurn({ status, lastSeq }, key);
+    st.setSessionRunning(key, false);
+    st.snapshotThread(key);
   };
 
   try {
@@ -75,15 +83,15 @@ export async function recoverActiveTurn(turn: ActiveTurn, assistantId: string): 
           lastSeq,
           {
             onSessionId: (sid) => {
-              if (isCurrent()) useStudioStore.getState().setSessionId(sid);
+              if (isCurrent()) store().setThreadSessionId(key, sid);
             },
             onSequence: (seq) => {
               lastSeq = seq;
-              if (isCurrent()) useStudioStore.getState().patchActiveTurn({ lastSeq: seq });
+              if (isCurrent()) store().patchActiveTurn({ lastSeq: seq }, key);
             },
             onTextChunk: (text) => {
               if (isCurrent()) {
-                useStudioStore.getState().patchMessage(assistantId, (m) => ({
+                patchAsst((m) => ({
                   ...m,
                   content: m.content + text,
                   statusHint: undefined,
@@ -92,7 +100,7 @@ export async function recoverActiveTurn(turn: ActiveTurn, assistantId: string): 
             },
             onThoughtChunk: (text) => {
               if (isCurrent()) {
-                useStudioStore.getState().patchMessage(assistantId, (m) => ({
+                patchAsst((m) => ({
                   ...m,
                   thought: (m.thought || "") + text,
                   statusHint: "正在思考…",
@@ -101,14 +109,14 @@ export async function recoverActiveTurn(turn: ActiveTurn, assistantId: string): 
             },
             onToolCall: (call) => {
               if (!isCurrent()) return;
-              useStudioStore.getState().patchMessage(assistantId, (m) => ({
+              patchAsst((m) => ({
                 ...m,
                 toolCalls: [...(m.toolCalls || []), { ...call, startedAt: Date.now() }],
               }));
             },
             onToolCallUpdate: (call) => {
               if (!isCurrent()) return;
-              useStudioStore.getState().patchMessage(assistantId, (m) => {
+              patchAsst((m) => {
                 const calls = [...(m.toolCalls || [])];
                 const index = calls.findIndex((item) => item.id === call.id);
                 if (index < 0) calls.push({ ...call, startedAt: Date.now() } as any);
@@ -128,45 +136,46 @@ export async function recoverActiveTurn(turn: ActiveTurn, assistantId: string): 
             },
             onPlan: (entries) => {
               if (isCurrent()) {
-                useStudioStore.getState().patchMessage(assistantId, (m) => ({ ...m, plan: entries }));
+                patchAsst((m) => ({ ...m, plan: entries }));
               }
             },
             onUsage: (usage) => {
               if (!isCurrent()) return;
-              useStudioStore.getState().setUsage(usage);
-              useStudioStore.getState().patchMessage(assistantId, { usage });
+              store().setUsage(usage, key);
+              patchAsst({ usage });
             },
             onAvailableCommands: (commands) => {
-              if (isCurrent()) useStudioStore.getState().setAvailableCommands(commands);
+              const sid = store().threads[key]?.sessionId;
+              if (isCurrent()) store().setAvailableCommands(commands, sid);
             },
             onConfigOptions: (options) => {
-              if (isCurrent()) useStudioStore.getState().setConfigOptions(options);
+              if (isCurrent() && activeKey(store()) === key) store().setConfigOptions(options);
             },
             onConfigUpdate: (option) => {
-              if (isCurrent()) useStudioStore.getState().patchConfigOption(option);
+              if (isCurrent() && activeKey(store()) === key) store().patchConfigOption(option);
             },
             onReset: (reset) => {
               gap = true;
               // The server lost the requested prefix; clear the partial view
               // before replaying everything it still retains.
               if (isCurrent() && (reset.reason === "gap" || reset.reason === "ahead")) {
-                useStudioStore.getState().patchMessage(assistantId, (m) => ({
+                patchAsst((m) => ({
                   ...m,
                   content: "",
                   thought: "",
                   toolCalls: [],
                 }));
                 lastSeq = Math.max(0, reset.firstSeq - 1);
-                useStudioStore.getState().patchActiveTurn({ lastSeq });
+                store().patchActiveTurn({ lastSeq }, key);
               }
             },
             onDone: (_reason, response) => {
               if (isCurrent()) {
-                const store = useStudioStore.getState();
-                const usage = mergePromptUsage(store.messages.find(message => message.id === assistantId)?.usage, response);
+                const current = sessionOf(store(), key).messages.find(message => message.id === assistantId);
+                const usage = mergePromptUsage(current?.usage, response);
                 if (usage) {
-                  store.setUsage(usage);
-                  store.patchMessage(assistantId, { usage });
+                  store().setUsage(usage, key);
+                  patchAsst({ usage });
                 }
               }
               terminal = true;
@@ -199,10 +208,7 @@ export async function recoverActiveTurn(turn: ActiveTurn, assistantId: string): 
     finish("interrupted", terminalMessage);
   } finally {
     clearInterval(persistTimer);
-    if (isCurrent() && !terminal) {
-      useStudioStore.getState().setStreaming(false);
-      useStudioStore.getState().setBusy(false);
-    }
+    if (isCurrent() && !terminal) store().setSessionRunning(key, false);
   }
 }
 
@@ -214,19 +220,21 @@ export async function recoverActiveTurn(turn: ActiveTurn, assistantId: string): 
  */
 export function resumeTurnIfNeeded(): void {
   const st = useStudioStore.getState();
-  const current = st.activeTurn;
+  const key = activeKey(st);
+  const session = sessionOf(st, key);
+  const current = session.activeTurn;
   if (!current || current.status !== "running") return;
   if (isTurnLive(current.turnId) || started.has(current.turnId)) return;
   const assistantId =
     current.assistantId ||
-    [...st.messages].reverse().find((message) => message.role === "assistant")?.id;
+    [...session.messages].reverse().find((message) => message.role === "assistant")?.id;
   if (!assistantId) {
-    st.patchActiveTurn({ status: "interrupted" });
-    st.snapshotThread();
+    st.patchActiveTurn({ status: "interrupted" }, key);
+    st.snapshotThread(key);
     return;
   }
   started.add(current.turnId);
-  void recoverActiveTurn(current, assistantId);
+  void recoverActiveTurn(current, assistantId, key);
 }
 
 export function useTurnRecovery(): void {

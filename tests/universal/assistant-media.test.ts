@@ -11,6 +11,7 @@ import { freezeMessage } from "@/lib/threads";
 import { AcpAssistantProvider } from "@/components/assistant/AcpAssistantProvider";
 import { AssistantChatView } from "@/components/assistant/AssistantChatView";
 import { useStudioStore } from "@/stores/useStudioStore";
+import { setStudio } from "../helpers/studio";
 
 const realFetch = globalThis.fetch;
 afterEach(() => {
@@ -95,7 +96,7 @@ describe("chat images and SVG", () => {
   });
 
   it("renders agent images with a lightbox", async () => {
-    useStudioStore.setState({
+    setStudio({
       messages: [
         {
           id: "a5", role: "assistant", content: "看这张图", timestamp: "03:19",
@@ -117,11 +118,11 @@ describe("chat images and SVG", () => {
     expect(document.querySelector('[role="dialog"]')).toBeNull();
     root.unmount();
     el.remove();
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
   });
 
   it("renders markdown images, blocks unsafe schemes and links", async () => {
-    useStudioStore.setState({
+    setStudio({
       messages: [
         {
           id: "a6", role: "assistant", timestamp: "03:20",
@@ -137,6 +138,6 @@ describe("chat images and SVG", () => {
     expect(el.innerHTML).not.toContain("javascript:");
     root.unmount();
     el.remove();
-    useStudioStore.setState({ messages: [], isStreaming: false } as any);
+    setStudio({ messages: [], isStreaming: false } as any);
   });
 });

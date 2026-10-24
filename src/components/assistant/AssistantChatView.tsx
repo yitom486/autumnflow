@@ -79,7 +79,7 @@ import {
 import type { Message } from "@/lib/message-types";
 import { partitionTurnContent } from "@/lib/threads";
 import type { UsageState } from "@/stores/useStudioStore";
-import { useStudioStore } from "@/stores/useStudioStore";
+import { activeKey, sessionOf, useStudioMessages, useStudioStore } from "@/stores/useStudioStore";
 import { useStickToBottom } from "@/hooks/useStickToBottom";
 import { cn } from "@/lib/utils";
 import { MessageScroller } from "@/components/primitives/MessageScroller";
@@ -178,8 +178,24 @@ const ThinkingStateCapsule: React.FC<{ startedAt?: number; statusHint?: string }
  * 上下文用量面板：窗口占用 % + 进度条常显，点击展开本轮运行时明细。
  * 缓存命中率只有 agent 真下发 cachedTokens 时才出现，绝不编造。
  */
+/**
+ * 卡片 / 折叠区的展开状态记在会话里，不记在组件里：切走再切回来还是原样。
+ * `id` 在会话内唯一（消息 id + 区块名）。
+ */
+function useSessionDisclosure(id: string): [boolean, (open: boolean) => void] {
+  const open = useStudioStore((s) => sessionOf(s).ui.open[id] ?? false);
+  const setOpen = React.useCallback(
+    (next: boolean) => {
+      const s = useStudioStore.getState();
+      s.setUiOpen(activeKey(s), id, next);
+    },
+    [id]
+  );
+  return [open, setOpen];
+}
+
 const UsagePanel: React.FC<{ msg: Message }> = ({ msg }) => {
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = useSessionDisclosure(`${msg.id}:usage`);
   const u = msg.usage as UsageState;
   const pct = u.size > 0 ? Math.min(1, u.used / u.size) : 0;
   const remain = Math.max(0, u.size - u.used);
@@ -207,7 +223,7 @@ const UsagePanel: React.FC<{ msg: Message }> = ({ msg }) => {
   const row = "flex items-center justify-between gap-2";
   return (
     <div className="rounded-lg bg-background/70 border border-border px-3 py-2">
-      <button type="button" onClick={() => setOpen((o) => !o)} className="w-full text-left">
+      <button type="button" onClick={() => setOpen(!open)} className="w-full text-left">
         <div className="flex items-center gap-2 font-mono text-[10px] text-muted-foreground">
           <span>
             {u.size > 0 ? `context ${u.used.toLocaleString()}/${u.size.toLocaleString()}` : "上下文占用：agent 未提供"}
@@ -393,7 +409,7 @@ const GenerativeActionContext = React.createContext<
 const AssistantInlineToolPart: React.FC<{ toolCallId: string }> = ({ toolCallId }) => {
   const messageId = useAuiState((s) => s.message.id);
   const tc = useStudioStore((s) =>
-    s.messages.find((m) => m.id === messageId)?.toolCalls?.find((t) => t.id === toolCallId)
+    sessionOf(s).messages.find((m) => m.id === messageId)?.toolCalls?.find((t) => t.id === toolCallId)
   );
   const onGenerativeAction = React.useContext(GenerativeActionContext);
   if (!tc || !isGenerativeTool(tc)) return null;
@@ -442,7 +458,7 @@ const AssistantMessageBody: React.FC = React.memo(() => (
 /** 入场动效播完就记下来：由状态决定播不播，不靠组件挂载。 */
 function markMessageSeen(id: string | undefined) {
   if (!id) return;
-  const message = useStudioStore.getState().messages.find((m) => m.id === id);
+  const message = sessionOf(useStudioStore.getState()).messages.find((m) => m.id === id);
   if (!message || message.seenAt) return;
   useStudioStore.getState().patchMessage(id, { seenAt: Date.now() });
 }
@@ -455,7 +471,7 @@ const handleEnterAnimationEnd = (id: string | undefined) => (event: React.Animat
 const UserMessageView: React.FC = () => {
   const messageId = useAuiState((s) => s.message.id);
   const isEditing = useAuiState((s) => s.message.composer.isEditing);
-  const acp = useStudioStore((s) => s.messages.find((m) => m.id === messageId));
+  const acp = useStudioStore((s) => sessionOf(s).messages.find((m) => m.id === messageId));
   const [copied, setCopied] = React.useState(false);
   const copy = () => {
     const text = acp?.content || "";
@@ -585,9 +601,11 @@ const AssistantMessageView: React.FC<{
   const messageId = useAuiState((s) => s.message.id);
   const running = useAuiState((s) => s.message.status?.type === "running");
   const isCopied = useAuiState((s) => s.message.isCopied);
-  const acp = useStudioStore((s) => s.messages.find((m) => m.id === messageId));
+  const acp = useStudioStore((s) => sessionOf(s).messages.find((m) => m.id === messageId));
   const isSystem = acp?.role === "system";
   const [turnChangesOpen, setTurnChangesOpen] = React.useState(false);
+  const [activityOpen, setActivityOpen] = useSessionDisclosure(`${messageId}:activity`);
+  const [citationsOpen, setCitationsOpen] = useSessionDisclosure(`${messageId}:citations`);
 
   const { progress, conclusion } = React.useMemo(
     () => partitionTurnContent(acp?.content || "", acp?.progressContent, (acp?.toolCalls?.length ?? 0) > 0),
@@ -1012,6 +1030,8 @@ const AssistantMessageView: React.FC<{
           {(activityItems.length > 0 || (running && !!acp?.statusHint)) && (
             <div className="rounded-xl border border-line/70 bg-surface/80 p-2.5 shadow-xs transition-colors">
               <AgentActivity
+                open={activityOpen}
+                onOpenChange={setActivityOpen}
                 items={activityItems}
                 status={running ? "working" : "complete"}
                 duration={
@@ -1074,7 +1094,7 @@ const AssistantMessageView: React.FC<{
             <AcpContentBlocks blocks={acp.contentBlocks} />
             <AcpSessionArtifacts entries={acp.artifacts} />
           </GenerativeActionContext.Provider>
-          {citations.length > 0 && <Citations citations={citations} idPrefix={`msg-${messageId}`} />}
+          {citations.length > 0 && <Citations citations={citations} idPrefix={`msg-${messageId}`} open={citationsOpen} onOpenChange={setCitationsOpen} />}
           {acp?.content && /Reasoning Cache Expired|referenced reasoning item .* expired/i.test(acp.content) && (
             <div className="mt-2.5 p-3 rounded-lg border border-warning/40 bg-warning/10 flex items-center justify-between gap-3 text-xs">
               <span className="text-foreground">上游服务端思考缓存已超时失效，请开启新会话继续。</span>
@@ -1158,9 +1178,9 @@ const AssistantMessageView: React.FC<{
 
 const SystemMessageView: React.FC = () => {
   const messageId = useAuiState((s) => s.message.id);
-  const messages = useStudioStore((s) => s.messages);
+  const messages = useStudioMessages();
   const idx = messages.findIndex((m) => m.id === messageId);
-  const [open, setOpen] = React.useState(false);
+  const [open, setOpen] = useSessionDisclosure(`${messageId}:system`);
 
   // 若未找到，或非连续系统消息首条，直接返回 null（由首条聚合渲染整个集群）
   if (idx < 0) return null;
@@ -1214,7 +1234,7 @@ const SystemMessageView: React.FC = () => {
       <div className="rounded-2xl bg-muted/60 border border-border/70 text-muted-foreground text-xs shadow-xs max-w-xl w-fit overflow-hidden transition-all">
         <button
           type="button"
-          onClick={() => setOpen((o) => !o)}
+          onClick={() => setOpen(!open)}
           className="flex items-center gap-2 px-3.5 py-1.5 hover:bg-muted/80 transition-colors cursor-pointer select-none"
         >
           <Info className="w-3.5 h-3.5 text-muted-foreground/80 shrink-0" />
@@ -1296,8 +1316,17 @@ export const AssistantChatView: React.FC<AssistantChatViewProps> = ({
   cwd,
   onGenerativeAction,
 }) => {
-  const { viewportRef, contentRef } = useStickToBottom<HTMLDivElement>();
+  const { viewportRef, contentRef, restoreTo, position } = useStickToBottom<HTMLDivElement>();
   const [dragOver, setDragOver] = React.useState(false);
+
+  // 滚动位置是会话的：切走时记下，切回来原样放回（新会话的内容晚一两帧才铺上，
+  // 放不到位的会等内容长高再放）；没离开过的会话贴底。
+  const viewKey = useStudioStore(activeKey);
+  React.useLayoutEffect(() => {
+    const saved = sessionOf(useStudioStore.getState(), viewKey).ui.scroll;
+    restoreTo(saved && !saved.pinned ? saved.top : null);
+    return () => useStudioStore.getState().setScroll(viewKey, position());
+  }, [viewKey, restoreTo, position]);
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();

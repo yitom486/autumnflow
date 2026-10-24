@@ -8,6 +8,7 @@ import { AcpAssistantProvider } from "@/components/assistant/AcpAssistantProvide
 import { AcpComposer } from "@/components/assistant/AcpComposer";
 import { useStudioStore } from "@/stores/useStudioStore";
 import type { QueuedPrompt } from "@/stores/useStudioStore";
+import { setStudio } from "../helpers/studio";
 
 const realFetch = globalThis.fetch;
 
@@ -28,7 +29,7 @@ function Harness(props: {
   useEffect(() => {
     // 输入框的文本以 store 草稿为准：预置内容就写这一份。
     if (props.initialText) {
-      useStudioStore.getState().setDraft(useStudioStore.getState().sessionId, props.initialText);
+      useStudioStore.getState().setDraft(props.initialText);
     }
   }, []);
   return h(AcpComposer, {
@@ -166,8 +167,8 @@ describe("composer queue", () => {
     // 发送失败时应用把提示词还回这个会话的草稿，composer 直接显示这一份。
     const { el, root } = await renderComposer();
     try {
-      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
-      await act(async () => { useStudioStore.getState().setDraft("s-1", "别把我弄丢了"); });
+      await act(async () => { setStudio({ sessionId: "s-1" }); });
+      await act(async () => { useStudioStore.getState().setDraft("别把我弄丢了"); });
       expect(textareaValue(el)).toBe("别把我弄丢了");
     } finally {
       root.unmount();
@@ -180,16 +181,16 @@ describe("composer draft", () => {
   it("keeps each session's own text when switching between them", async () => {
     const { el, root } = await renderComposer();
     try {
-      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
+      await act(async () => { setStudio({ activeThreadId: "t-1", sessionId: "s-1" }); });
       await act(async () => type(el, "我刚打的字"));
       expect(textareaValue(el)).toBe("我刚打的字");
 
       // 切到另一个会话：那边是空的
-      await act(async () => { useStudioStore.setState({ sessionId: "s-2" }); });
+      await act(async () => { setStudio({ activeThreadId: "t-2", sessionId: "s-2" }); });
       expect(textareaValue(el)).toBe("");
 
       // 切回来：自己的字还在
-      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
+      await act(async () => { setStudio({ activeThreadId: "t-1", sessionId: "s-1" }); });
       expect(textareaValue(el)).toBe("我刚打的字");
     } finally {
       root.unmount();
@@ -200,11 +201,11 @@ describe("composer draft", () => {
   it("does not bring back what the user cleared themselves", async () => {
     const { el, root } = await renderComposer();
     try {
-      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
+      await act(async () => { setStudio({ activeThreadId: "t-1", sessionId: "s-1" }); });
       await act(async () => type(el, "先写点东西"));
       await act(async () => type(el, ""));
       expect(textareaValue(el)).toBe("");
-      await act(async () => { useStudioStore.setState({ sessionId: "s-2" }); });
+      await act(async () => { setStudio({ activeThreadId: "t-2", sessionId: "s-2" }); });
       expect(textareaValue(el)).toBe("");
     } finally {
       root.unmount();
@@ -215,11 +216,11 @@ describe("composer draft", () => {
   it("does not bring back a prompt that was already sent", async () => {
     const { el, root } = await renderComposer();
     try {
-      await act(async () => { useStudioStore.setState({ sessionId: "s-1" }); });
+      await act(async () => { setStudio({ activeThreadId: "t-1", sessionId: "s-1" }); });
       await act(async () => type(el, "发出去的消息"));
       await act(async () => pressEnter(el));
       expect(textareaValue(el)).toBe("");
-      await act(async () => { useStudioStore.setState({ sessionId: "s-2" }); });
+      await act(async () => { setStudio({ activeThreadId: "t-2", sessionId: "s-2" }); });
       expect(textareaValue(el)).toBe("");
     } finally {
       root.unmount();

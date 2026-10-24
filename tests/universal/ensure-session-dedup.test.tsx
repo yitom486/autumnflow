@@ -3,9 +3,10 @@ import { createRoot } from "react-dom/client";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { QueryClient, QueryClientProvider, useQueryClient } from "@tanstack/react-query";
 import { useRef } from "react";
-import { useStudioStore } from "../../src/stores/useStudioStore";
+import { sessionOf, useStudioStore } from "../../src/stores/useStudioStore";
 import { useSessionLifecycle } from "../../src/hooks/useSessionLifecycle";
 import type { AgentSummary } from "../../src/lib/universal-api";
+import { setStudio } from "../helpers/studio";
 
 const { sessionNew, connectAgent, sessionRpc } = vi.hoisted(() => ({
   sessionNew: vi.fn(),
@@ -52,7 +53,7 @@ async function renderLifecycle() {
 
 beforeEach(() => {
   useStudioStore.getState().resetStudio();
-  useStudioStore.setState({ activeAgentId: "e2e-agent" });
+  setStudio({ activeAgentId: "e2e-agent" });
   sessionNew.mockReset();
   connectAgent.mockReset();
   sessionRpc.mockReset();
@@ -125,7 +126,7 @@ describe("ensureSession in-flight dedup", () => {
     try {
       await api.ensureSession("e2e-agent");
       // The bound session is gone, so the next call must go back to the agent.
-      useStudioStore.setState({ sessionId: null });
+      setStudio({ sessionId: null });
       sessionNew.mockResolvedValue({ sessionId: "sess-2" });
       await expect(api.ensureSession("e2e-agent")).resolves.toBe("sess-2");
       expect(sessionNew).toHaveBeenCalledTimes(2);
@@ -150,7 +151,7 @@ describe("ensureSession in-flight dedup", () => {
       await pending;
 
       const store = useStudioStore.getState();
-      expect(store.messages.map((m) => m.content)).toContain("E2E_DIAGRAM:architecture");
+      expect(sessionOf(store).messages.map((m) => m.content)).toContain("E2E_DIAGRAM:architecture");
       expect(store.sessionId).toBe("sess-1");
     } finally {
       await act(async () => root.unmount());
@@ -161,7 +162,7 @@ describe("ensureSession in-flight dedup", () => {
     // A dead session retires the thread, but a session the agent has not
     // finished loading must not: a retired thread resolves to no session at
     // all, so the next message would be dropped without a trace.
-    useStudioStore.setState({
+    setStudio({
       activeAgentId: "e2e-agent",
       sessionId: "sess-1",
       threads: {
@@ -180,7 +181,7 @@ describe("ensureSession in-flight dedup", () => {
   });
 
   it("retires the thread when the agent says the session is gone", async () => {
-    useStudioStore.setState({
+    setStudio({
       activeAgentId: "e2e-agent",
       sessionId: "sess-1",
       threads: {

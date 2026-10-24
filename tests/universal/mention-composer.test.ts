@@ -42,7 +42,7 @@ function Harness({ onAttachments }: { onAttachments: (a: Attachment[]) => void }
   const [attachments, setAttachments] = useState<Attachment[]>([]);
   useEffect(() => {
     // 输入框的文本以 store 草稿为准：预置内容写这一份。
-    useStudioStore.getState().setDraft(useStudioStore.getState().sessionId, "看看 @a.t");
+    useStudioStore.getState().setDraft("看看 @a.t");
   }, []);
   return h(AcpComposer, {
     onSendAttachmentOnly: () => {},

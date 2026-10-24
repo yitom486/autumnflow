@@ -1,5 +1,5 @@
 import { useCallback, useEffect } from "react";
-import { useStudioStore } from "@/stores/useStudioStore";
+import { sessionOf, useStudioStore } from "@/stores/useStudioStore";
 import { sessionRpc } from "@/lib/universal-api";
 import { parseLocalCommand, resolveMode, mergeCommands } from "@/lib/slash-commands";
 
@@ -47,19 +47,19 @@ export function useSlashCommands() {
     const cmd = parseLocalCommand(text, st.availableCommands);
     if (!cmd) return false;
     if (cmd.name === "clear") {
-      if (st.isStreaming) sys("生成中无法清空，请先停止。");
+      if (sessionOf(st).running) sys("生成中无法清空，请先停止。");
       else st.setMessages([]);
       return true;
     }
     if (cmd.name === "mode") {
-      const modes = st.modes?.availableModes || [];
+      const modes = sessionOf(st).modes?.availableModes || [];
       if (!modes.length) {
         sys("/mode：该会话没有可切换的模式。");
         return true;
       }
       const target = resolveMode(cmd.arg, modes);
       if (!target) {
-        const list = modes.map((m) => `\`${m.id}\`${m.name && m.name !== m.id ? `（${m.name}）` : ""}${m.id === st.modes?.currentModeId ? " ← 当前" : ""}`).join("、");
+        const list = modes.map((m) => `\`${m.id}\`${m.name && m.name !== m.id ? `（${m.name}）` : ""}${m.id === sessionOf(st).modes?.currentModeId ? " ← 当前" : ""}`).join("、");
         sys(`${cmd.arg ? `未找到模式「${cmd.arg}」。` : ""}可用模式：${list}。用法：/mode <模式>`);
         return true;
       }
@@ -71,7 +71,8 @@ export function useSlashCommands() {
       void sessionRpc(st.activeAgentId, "set_mode", { sessionId: sid, modeId: target.id })
         .then(() => {
           const now = useStudioStore.getState();
-          if (now.modes) now.setModes({ ...now.modes, currentModeId: target.id });
+          const modesNow = sessionOf(now).modes;
+          if (modesNow) now.setModes({ ...modesNow, currentModeId: target.id });
           now.saveAgentPref(now.activeAgentId, { modeId: target.id });
           sys(`已切换到模式 ${target.name || target.id}。`);
         })

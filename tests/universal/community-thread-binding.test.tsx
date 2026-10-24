@@ -6,6 +6,7 @@ import { useAui } from "@assistant-ui/react";
 import { AcpAssistantProvider } from "@/components/assistant/AcpAssistantProvider";
 import { AssistantChatView } from "@/components/assistant/AssistantChatView";
 import { useStudioStore } from "@/stores/useStudioStore";
+import { setStudio } from "../helpers/studio";
 
 // Diagnostic probe component using assistant-ui client runtime
 function ThreadRuntimeProbe({ onProbe }: { onProbe: (aui: any) => void }) {
@@ -19,7 +20,7 @@ describe("community component thread & session bindings", () => {
     const onNewSession = vi.fn();
     const onOpenSession = vi.fn();
 
-    useStudioStore.setState({
+    setStudio({
       activeAgentId: "codex",
       sessionId: "session-abc-123",
       threads: {
@@ -91,7 +92,7 @@ describe("community component thread & session bindings", () => {
   it("renders recovery action button when reasoning cache expired error occurs", async () => {
     const onNewSession = vi.fn();
 
-    useStudioStore.setState({
+    setStudio({
       activeAgentId: "opencode",
       sessionId: "ses_ed67",
       messages: [
